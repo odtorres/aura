@@ -5,6 +5,7 @@ use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::semantic_index::SemanticIndexer;
+use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
 use aura_ai::{AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
 use aura_core::conversation::{
     ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
@@ -141,6 +142,8 @@ pub struct App {
     mcp_clients: Vec<McpClientConnection>,
     /// Registry of connected agents for multi-agent collaboration.
     pub agent_registry: AgentRegistry,
+    /// Speculative execution engine for background AI analysis.
+    speculative: Option<SpeculativeEngine>,
 }
 
 impl App {
@@ -196,6 +199,10 @@ impl App {
                 None
             }
         };
+
+        // Initialize speculative engine (reuses AI config).
+        let speculative =
+            AiConfig::from_env().and_then(|config| SpeculativeEngine::new(config).ok());
 
         // Load MCP client connections from aura.toml.
         let mcp_clients = buffer
@@ -263,6 +270,7 @@ impl App {
             mcp_server,
             mcp_clients,
             agent_registry: AgentRegistry::default(),
+            speculative,
         };
         app.refresh_highlights();
         app.refresh_semantic_index();
@@ -286,6 +294,10 @@ impl App {
             // Poll for MCP server requests and external MCP client events.
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
+
+            // Poll speculative engine and trigger analysis if idle.
+            self.poll_speculative();
+            self.maybe_trigger_analysis();
 
             // Send debounced didChange and re-index if needed (300ms delay).
             if self.lsp_last_change.elapsed() > Duration::from_millis(300) {
@@ -542,6 +554,9 @@ impl App {
         self.semantic_dirty = true;
         self.lsp_change_pending = true;
         self.lsp_last_change = Instant::now();
+        if let Some(engine) = &mut self.speculative {
+            engine.buffer_edited(self.cursor.row);
+        }
     }
 
     /// Regenerate syntax highlights from the current buffer content.
@@ -1231,6 +1246,217 @@ impl App {
     /// Get count of connected external MCP servers.
     pub fn mcp_client_count(&self) -> usize {
         self.mcp_clients.len()
+    }
+
+    /// Poll the speculative engine for completed analyses.
+    fn poll_speculative(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.poll_events();
+        }
+    }
+
+    /// Trigger background analysis if the cursor has been idle long enough.
+    fn maybe_trigger_analysis(&mut self) {
+        let should = self
+            .speculative
+            .as_ref()
+            .map(|e| e.should_analyze())
+            .unwrap_or(false);
+
+        if !should {
+            return;
+        }
+
+        // Gather diagnostic messages for context.
+        let diag_msgs: Vec<String> = self
+            .diagnostics
+            .iter()
+            .map(|d| format!("line {}: {}", d.range.start.line + 1, d.message))
+            .collect();
+
+        let semantic = self.semantic_context_for_ai();
+        let cursor = self.cursor;
+
+        if let Some(engine) = &mut self.speculative {
+            engine.analyze(&self.buffer, &cursor, semantic, &diag_msgs);
+        }
+    }
+
+    /// Notify the speculative engine that the cursor moved.
+    pub fn notify_cursor_moved(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.cursor_moved(&self.cursor);
+        }
+    }
+
+    /// Get the current ghost suggestion for rendering.
+    pub fn current_ghost_suggestion(&self) -> Option<&GhostSuggestion> {
+        self.speculative.as_ref()?.current_suggestion()
+    }
+
+    /// Cycle to the next ghost suggestion.
+    pub fn next_ghost_suggestion(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.next_suggestion();
+        }
+    }
+
+    /// Cycle to the previous ghost suggestion.
+    pub fn prev_ghost_suggestion(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.prev_suggestion();
+        }
+    }
+
+    /// Accept the current ghost suggestion and apply it to the buffer.
+    pub fn accept_ghost_suggestion(&mut self) {
+        let suggestion = self
+            .speculative
+            .as_mut()
+            .and_then(|e| e.accept_suggestion());
+
+        if let Some(suggestion) = suggestion {
+            let author = AuthorId::ai("speculative");
+
+            // Replace the region with the suggested text.
+            let start_cursor = Cursor::new(suggestion.start_line, 0);
+            let start_idx = self.buffer.cursor_to_char_idx(&start_cursor);
+
+            let end_cursor = Cursor::new(suggestion.end_line, 0);
+            let end_idx = self
+                .buffer
+                .cursor_to_char_idx(&end_cursor)
+                .min(self.buffer.len_chars());
+
+            if start_idx < end_idx {
+                self.buffer.delete(start_idx, end_idx, author.clone());
+            }
+            self.buffer.insert(start_idx, &suggestion.text, author);
+            self.mark_highlights_dirty();
+
+            self.set_status(format!(
+                "Applied {} suggestion: {}",
+                suggestion.category.label(),
+                suggestion.explanation
+            ));
+
+            // Check for cross-file changes.
+            self.trigger_cross_file_check();
+        }
+    }
+
+    /// Dismiss current ghost suggestions.
+    pub fn dismiss_ghost_suggestions(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.dismiss_suggestions();
+        }
+    }
+
+    /// Get ghost suggestion status text for the status bar.
+    pub fn ghost_suggestion_status(&self) -> Option<String> {
+        let engine = self.speculative.as_ref()?;
+        if engine.is_analyzing() {
+            return Some("analyzing...".to_string());
+        }
+        let suggestion = engine.current_suggestion()?;
+        let total = engine.active_suggestions.len();
+        let idx = engine.suggestion_index + 1;
+        Some(format!(
+            "[{}/{}] {}: {} — Tab: accept, Alt+]: next, Esc: dismiss",
+            idx,
+            total,
+            suggestion.category.label(),
+            suggestion.explanation
+        ))
+    }
+
+    /// Toggle speculative aggressiveness.
+    pub fn cycle_aggressiveness(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.aggressiveness = engine.aggressiveness.next();
+            let label = engine.aggressiveness.label().to_string();
+            self.set_status(format!("AI suggestion level: {label}"));
+        } else {
+            self.set_status("Speculative AI not available (no API key)");
+        }
+    }
+
+    /// Get current aggressiveness level.
+    pub fn aggressiveness(&self) -> Option<Aggressiveness> {
+        self.speculative.as_ref().map(|e| e.aggressiveness)
+    }
+
+    /// Trigger cross-file change check after accepting an edit.
+    fn trigger_cross_file_check(&mut self) {
+        // Find related files via semantic graph.
+        let related = self
+            .semantic_indexer
+            .as_ref()
+            .and_then(|indexer| {
+                let path = self.buffer.file_path()?.to_path_buf();
+                let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
+                let impact = indexer.graph().impact_of(id);
+                // Collect unique file paths from callers and tests.
+                let mut files: Vec<String> = Vec::new();
+                for caller_id in &impact.direct_callers {
+                    if let Some(sym) = indexer.graph().symbol(*caller_id) {
+                        let fp = sym.file_path.display().to_string();
+                        let current = self.buffer.file_path()?.display().to_string();
+                        if fp != current && !files.contains(&fp) {
+                            files.push(fp);
+                        }
+                    }
+                }
+                for test_id in &impact.affected_tests {
+                    if let Some(sym) = indexer.graph().symbol(*test_id) {
+                        let fp = sym.file_path.display().to_string();
+                        let current = self.buffer.file_path()?.display().to_string();
+                        if fp != current && !files.contains(&fp) {
+                            files.push(fp);
+                        }
+                    }
+                }
+                if files.is_empty() {
+                    None
+                } else {
+                    Some(files)
+                }
+            })
+            .unwrap_or_default();
+
+        if !related.is_empty() {
+            let semantic = self.semantic_context_for_ai();
+            let cursor = self.cursor;
+            if let Some(engine) = &mut self.speculative {
+                engine.propose_cross_file_changes(&self.buffer, &cursor, semantic, related);
+            }
+        }
+    }
+
+    /// Check if a cross-file changeset is pending.
+    pub fn has_pending_changeset(&self) -> bool {
+        self.speculative
+            .as_ref()
+            .and_then(|e| e.pending_changeset.as_ref())
+            .is_some()
+    }
+
+    /// Get pending changeset summary.
+    pub fn changeset_summary(&self) -> Option<String> {
+        let cs = self.speculative.as_ref()?.pending_changeset.as_ref()?;
+        let files: Vec<&str> = cs.changes.iter().map(|c| c.file_path.as_str()).collect();
+        Some(format!(
+            "Cross-file changes: {} file(s) — {}",
+            cs.changes.len(),
+            files.join(", ")
+        ))
+    }
+
+    /// Dismiss the pending changeset.
+    pub fn dismiss_changeset(&mut self) {
+        if let Some(engine) = &mut self.speculative {
+            engine.pending_changeset = None;
+        }
     }
 
     /// Returns the (start, end) character indices of the visual selection, if active.

@@ -101,25 +101,37 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.visual_anchor = Some(app.cursor);
         }
 
-        // Navigation (clears hover popup on move)
+        // Ghost suggestion controls
+        KeyCode::Tab if app.current_ghost_suggestion().is_some() => {
+            app.accept_ghost_suggestion();
+        }
+        KeyCode::Esc if app.current_ghost_suggestion().is_some() => {
+            app.dismiss_ghost_suggestions();
+        }
+
+        // Navigation (clears hover popup and notifies speculative engine)
         KeyCode::Char('h') | KeyCode::Left => {
             app.cursor.col = app.cursor.col.saturating_sub(1);
             app.hover_info = None;
+            app.notify_cursor_moved();
         }
         KeyCode::Char('l') | KeyCode::Right => {
             app.cursor.col += 1;
             app.clamp_cursor();
             app.hover_info = None;
+            app.notify_cursor_moved();
         }
         KeyCode::Char('k') | KeyCode::Up => {
             app.cursor.row = app.cursor.row.saturating_sub(1);
             app.clamp_cursor();
             app.hover_info = None;
+            app.notify_cursor_moved();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.cursor.row += 1;
             app.clamp_cursor();
             app.hover_info = None;
+            app.notify_cursor_moved();
         }
         KeyCode::Char('0') => {
             app.cursor.col = 0;
@@ -219,6 +231,14 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         // K — hover info
         KeyCode::Char('K') => {
             app.lsp_hover();
+        }
+
+        // Alt+] — next ghost suggestion, Alt+[ — previous ghost suggestion
+        KeyCode::Char(']') if modifiers.contains(KeyModifiers::ALT) => {
+            app.next_ghost_suggestion();
+        }
+        KeyCode::Char('[') if modifiers.contains(KeyModifiers::ALT) => {
+            app.prev_ghost_suggestion();
         }
 
         // ]d — next diagnostic, [d — previous diagnostic
@@ -463,6 +483,10 @@ fn handle_leader(app: &mut App, code: KeyCode) {
         // <leader>d — show recent decision summary
         KeyCode::Char('d') => {
             app.show_recent_decisions();
+        }
+        // <leader>g — cycle AI suggestion aggressiveness
+        KeyCode::Char('g') => {
+            app.cycle_aggressiveness();
         }
         // <leader>s — show semantic info for symbol at cursor
         KeyCode::Char('s') => {

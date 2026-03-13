@@ -231,22 +231,22 @@ AURA becomes a platform, not just an editor.
 The AI thinks ahead. The human reviews when ready.
 
 ### 6.1 Background analysis
-- [ ] On file open / cursor move, queue background AI analysis
-- [ ] Debounce: don't spam the API, batch nearby changes
-- [ ] Priority queue: analyze code near cursor first
-- [ ] Cache results: don't re-analyze unchanged code
+- [x] On file open / cursor move, queue background AI analysis
+- [x] Debounce: don't spam the API (3s idle threshold)
+- [x] Priority queue: analyze code near cursor first (±15 lines)
+- [x] Cache results: don't re-analyze unchanged code (FNV-1a content hash)
 
 ### 6.2 Ghost suggestions
-- [ ] Render AI improvement suggestions as ghost text overlay
-- [ ] Multiple suggestions per location (cycle with `<Alt+]>` / `<Alt+[>`)
-- [ ] Categories: refactor, simplify, add error handling, performance
-- [ ] Configurable aggressiveness: minimal / moderate / proactive
+- [x] Render AI improvement suggestions as ghost text overlay
+- [x] Multiple suggestions per location (cycle with `<Alt+]>` / `<Alt+[>`)
+- [x] Categories: fix, simplify, error handling, performance, refactor
+- [x] Configurable aggressiveness: minimal / moderate / proactive (`<leader>g`)
 
 ### 6.3 Multi-file awareness
-- [ ] When a change is accepted, AI proactively checks related files
-- [ ] "This change might require updating `tests/foo_test.rs` — want me to?"
-- [ ] Proposed cross-file changes shown as a changeset (like a PR)
-- [ ] Accept/reject at changeset level or per-file
+- [x] When a change is accepted, AI proactively checks related files
+- [x] Cross-file changes proposed via semantic graph impact analysis
+- [x] Proposed cross-file changes shown as a changeset
+- [x] Accept/reject at changeset level or per-file
 
 ### Phase 6 Definition of Done
 > AI proactively suggests improvements as ghost text.

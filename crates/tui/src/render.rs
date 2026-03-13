@@ -1,6 +1,7 @@
 //! Rendering the editor UI with ratatui.
 
 use crate::app::{App, ConversationPanel, Mode};
+use crate::speculative::GhostSuggestion;
 use aura_core::conversation::MessageRole;
 use aura_core::AuthorId;
 use ratatui::prelude::*;
@@ -51,6 +52,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_status_bar(frame, app, status_area);
     draw_command_bar(frame, app, command_area);
+
+    // Render ghost suggestion if present.
+    if let Some(suggestion) = app.current_ghost_suggestion() {
+        draw_ghost_text(frame, app, editor_area, suggestion);
+    }
 
     // Render hover popup if present.
     if let Some(hover_text) = &app.hover_info {
@@ -362,13 +368,24 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 String::new()
             }
         }
-        _ => app.status_message.clone().unwrap_or_default(),
+        _ => {
+            // Show ghost suggestion status if available, otherwise status message.
+            app.ghost_suggestion_status()
+                .or_else(|| app.status_message.clone())
+                .unwrap_or_default()
+        }
     };
 
     let style = match app.mode {
         Mode::Intent => Style::default().fg(Color::Cyan),
         Mode::Review => Style::default().fg(Color::LightRed),
-        _ => Style::default().fg(Color::White),
+        _ => {
+            if app.current_ghost_suggestion().is_some() {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::White)
+            }
+        }
     };
 
     let paragraph = Paragraph::new(content).style(style);
@@ -487,4 +504,55 @@ fn draw_conversation_panel(frame: &mut Frame, editor_area: Rect, panel: &Convers
 
     let paragraph = Paragraph::new(visible);
     frame.render_widget(paragraph, inner);
+}
+
+/// Draw ghost text overlay for a speculative suggestion.
+fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: &GhostSuggestion) {
+    let ghost_style = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::ITALIC);
+
+    // Show ghost text inline after the cursor position.
+    let cursor_screen_y = app.cursor.row.saturating_sub(app.scroll_row) as u16 + editor_area.y;
+    let cursor_screen_x = app.cursor.col.saturating_sub(app.scroll_col) as u16 + editor_area.x + 6; // gutter width
+
+    // Only render if cursor is visible.
+    if cursor_screen_y >= editor_area.bottom() || cursor_screen_x >= editor_area.right() {
+        return;
+    }
+
+    // Show the first line of the suggestion as inline ghost text.
+    let first_line = suggestion.text.lines().next().unwrap_or("");
+    let available_width = editor_area.right().saturating_sub(cursor_screen_x) as usize;
+    let display_text: String = first_line.chars().take(available_width).collect();
+
+    if !display_text.is_empty() {
+        let ghost_area = Rect::new(
+            cursor_screen_x,
+            cursor_screen_y,
+            display_text.len() as u16,
+            1,
+        );
+        let ghost_line = Paragraph::new(Span::styled(display_text, ghost_style));
+        frame.render_widget(ghost_line, ghost_area);
+    }
+
+    // If suggestion has multiple lines, show a hint below.
+    let line_count = suggestion.text.lines().count();
+    if line_count > 1 && cursor_screen_y + 1 < editor_area.bottom() {
+        let hint = format!(
+            "  ... +{} more lines ({})",
+            line_count - 1,
+            suggestion.category.label()
+        );
+        let hint_width = hint
+            .len()
+            .min((editor_area.right() - editor_area.x - 6) as usize);
+        let hint_area = Rect::new(editor_area.x + 6, cursor_screen_y + 1, hint_width as u16, 1);
+        let hint_line = Paragraph::new(Span::styled(
+            &hint[..hint_width],
+            Style::default().fg(Color::DarkGray),
+        ));
+        frame.render_widget(hint_line, hint_area);
+    }
 }
