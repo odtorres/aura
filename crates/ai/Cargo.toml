@@ -1,0 +1,15 @@
+[package]
+name = "aura-ai"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aura-core = { path = "../core" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio-stream = "0.1"

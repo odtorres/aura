@@ -1,0 +1,18 @@
+[package]
+name = "aura"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "aura"
+path = "src/main.rs"
+
+[dependencies]
+aura-core = { path = "../core" }
+aura-tui = { path = "../tui" }
+aura-ai = { path = "../ai" }
+crossterm.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ratatui.workspace = true
