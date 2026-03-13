@@ -6,6 +6,29 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 /// Handle keys in Normal mode.
 pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // Close conversation panel if open.
+    if app.conversation_panel.is_some() {
+        if code == KeyCode::Esc || code == KeyCode::Char('q') {
+            app.conversation_panel = None;
+            return;
+        }
+        // Scroll conversation panel.
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(panel) = &mut app.conversation_panel {
+                    panel.scroll = panel.scroll.saturating_add(1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(panel) = &mut app.conversation_panel {
+                    panel.scroll = panel.scroll.saturating_sub(1);
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Leader key sequences: <Space> followed by another key.
     if app.leader_pending {
         app.leader_pending = false;
@@ -433,6 +456,14 @@ fn handle_leader(app: &mut App, code: KeyCode) {
                 app.set_status("No API key. Set ANTHROPIC_API_KEY");
             }
         }
+        // <leader>c — show conversation history for current line
+        KeyCode::Char('c') => {
+            app.show_conversation_at_cursor();
+        }
+        // <leader>d — show recent decision summary
+        KeyCode::Char('d') => {
+            app.show_recent_decisions();
+        }
         // <leader>s — show semantic info for symbol at cursor
         KeyCode::Char('s') => {
             app.update_semantic_context();
@@ -522,6 +553,15 @@ fn execute_command(app: &mut App, cmd: &str) {
             } else {
                 app.set_status("No API key. Set ANTHROPIC_API_KEY");
             }
+        }
+        _ if cmd.trim().starts_with("search ") => {
+            let query = cmd.trim().strip_prefix("search ").unwrap_or("").trim();
+            if !query.is_empty() {
+                app.search_conversations(query);
+            }
+        }
+        "decisions" | "dec" => {
+            app.show_recent_decisions();
         }
         other => {
             app.set_status(format!("Unknown command: {}", other));

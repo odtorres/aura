@@ -1,6 +1,7 @@
 //! Rendering the editor UI with ratatui.
 
-use crate::app::{App, Mode};
+use crate::app::{App, ConversationPanel, Mode};
+use aura_core::conversation::MessageRole;
 use aura_core::AuthorId;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
@@ -56,6 +57,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_hover_popup(frame, app, editor_area, hover_text);
     }
 
+    // Render conversation panel if present.
+    if let Some(panel) = &app.conversation_panel {
+        draw_conversation_panel(frame, editor_area, panel);
+    }
+
     // Position the terminal cursor (6 = gutter width).
     if app.mode != Mode::Review {
         let cursor_x = (app.cursor.col - app.scroll_col) as u16 + editor_area.x + 6;
@@ -98,7 +104,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
                 .filter(|c| *c != '\n' && *c != '\r')
                 .collect();
 
-            // Gutter marker: diagnostic severity takes priority over authorship.
+            // Gutter marker: diagnostic > conversation > authorship.
             let marker_span = if let Some(diag) = app.line_diagnostics(line_idx) {
                 if diag.is_error() {
                     Span::styled(
@@ -115,6 +121,8 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     Span::styled("I", Style::default().fg(Color::Cyan))
                 }
+            } else if app.show_conversations && app.line_has_conversation(line_idx) {
+                Span::styled("C", Style::default().fg(Color::Magenta))
             } else if show_authorship {
                 if let Some(author) = app.buffer.line_author(line_idx) {
                     Span::styled("▎", Style::default().fg(author_color(author)))
@@ -278,14 +286,26 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let lsp_indicator = if app.has_lsp() { " │ LSP" } else { "" };
 
+    let mcp_indicator = if let Some(port) = app.mcp_port() {
+        let agent_count = app.agent_registry.count();
+        if agent_count > 0 {
+            format!(" │ MCP:{port} ({agent_count} agents)")
+        } else {
+            format!(" │ MCP:{port}")
+        }
+    } else {
+        String::new()
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
         last_change,
         diag_str,
-        lsp_indicator
+        lsp_indicator,
+        mcp_indicator
     );
     let right = format!(" {}:{} ", app.cursor.row + 1, app.cursor.col + 1);
 
@@ -396,4 +416,75 @@ fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str)
         .block(block)
         .style(Style::default().fg(Color::White).bg(Color::Black));
     frame.render_widget(paragraph, popup_area);
+}
+
+/// Draw the conversation history panel as a right-side split.
+fn draw_conversation_panel(frame: &mut Frame, editor_area: Rect, panel: &ConversationPanel) {
+    use ratatui::widgets::{Block, Borders, Clear};
+
+    // Take right 40% of the editor area.
+    let width = editor_area.width * 2 / 5;
+    let panel_area = Rect::new(
+        editor_area.right().saturating_sub(width),
+        editor_area.y,
+        width,
+        editor_area.height,
+    );
+
+    frame.render_widget(Clear, panel_area);
+
+    let title = format!(" Conversation — {} ", panel.file_info);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let inner = block.inner(panel_area);
+    frame.render_widget(block, panel_area);
+
+    // Render messages.
+    let mut lines: Vec<Line> = Vec::new();
+    for msg in &panel.messages {
+        let (role_style, role_str) = match msg.role {
+            MessageRole::HumanIntent => (Style::default().fg(Color::Green), "You"),
+            MessageRole::AiResponse => (Style::default().fg(Color::Blue), "AI"),
+            MessageRole::System => (Style::default().fg(Color::DarkGray), "Sys"),
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("[{role_str}] "), role_style),
+            Span::styled(
+                &msg.created_at[..16.min(msg.created_at.len())],
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+
+        // Wrap message content to fit panel width.
+        let content_width = inner.width.saturating_sub(2) as usize;
+        for line in msg.content.lines() {
+            for chunk in line.as_bytes().chunks(content_width.max(1)) {
+                if let Ok(s) = std::str::from_utf8(chunk) {
+                    lines.push(Line::from(format!("  {s}")));
+                }
+            }
+        }
+        lines.push(Line::from("")); // Spacer between messages.
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No messages",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    // Apply scroll offset.
+    let visible: Vec<Line> = lines
+        .into_iter()
+        .skip(panel.scroll)
+        .take(inner.height as usize)
+        .collect();
+
+    let paragraph = Paragraph::new(visible);
+    frame.render_widget(paragraph, inner);
 }

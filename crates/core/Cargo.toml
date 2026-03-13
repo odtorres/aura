@@ -10,6 +10,8 @@ serde.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

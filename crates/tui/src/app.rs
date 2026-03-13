@@ -2,9 +2,14 @@
 
 use crate::highlight::{HighlightedLine, Language, SyntaxHighlighter};
 use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
+use crate::mcp_client::{McpClientConnection, McpClientEvent};
+use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::semantic_index::SemanticIndexer;
 use aura_ai::{AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
-use aura_core::{Buffer, Cursor};
+use aura_core::conversation::{
+    ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
+};
+use aura_core::{AuthorId, Buffer, Cursor};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::DefaultTerminal;
 use std::sync::mpsc;
@@ -52,6 +57,17 @@ pub struct AiProposal {
     pub end: usize,
     /// Whether the AI is still streaming the proposal.
     pub streaming: bool,
+}
+
+/// Conversation history panel data.
+#[derive(Debug, Clone)]
+pub struct ConversationPanel {
+    /// The messages to display.
+    pub messages: Vec<ConversationMessage>,
+    /// File + line range this conversation covers.
+    pub file_info: String,
+    /// Scroll offset in the panel.
+    pub scroll: usize,
 }
 
 /// Top-level application state.
@@ -107,6 +123,24 @@ pub struct App {
     semantic_dirty: bool,
     /// Cached semantic context for the symbol at cursor.
     pub semantic_info: Option<String>,
+    /// Conversation storage (None if DB could not be opened).
+    conversation_store: Option<ConversationStore>,
+    /// Active conversation ID for current intent/review cycle.
+    active_conversation: Option<ConversationId>,
+    /// Active intent ID for current cycle.
+    active_intent_id: Option<String>,
+    /// Conversation panel for viewing history.
+    pub conversation_panel: Option<ConversationPanel>,
+    /// Whether to show conversation markers in the gutter.
+    pub show_conversations: bool,
+    /// Cached line ranges that have conversation history.
+    pub conversation_lines: Vec<(usize, usize)>,
+    /// MCP server (None if not started).
+    mcp_server: Option<McpServer>,
+    /// Connected external MCP servers.
+    mcp_clients: Vec<McpClientConnection>,
+    /// Registry of connected agents for multi-agent collaboration.
+    pub agent_registry: AgentRegistry,
 }
 
 impl App {
@@ -123,6 +157,21 @@ impl App {
         let highlighter = language.and_then(SyntaxHighlighter::new);
         let semantic_indexer = language.and_then(SemanticIndexer::new);
 
+        // Open conversation database.
+        let conversation_store = buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|dir| dir.join(".aura").join("conversations.db"))
+            .and_then(|db_path| ConversationStore::open(db_path).ok());
+
+        let conversation_lines = conversation_store
+            .as_ref()
+            .and_then(|store| {
+                let fp = buffer.file_path()?.display().to_string();
+                store.lines_with_conversations(&fp).ok()
+            })
+            .unwrap_or_default();
+
         // Try to start a language server.
         let lsp_client = buffer
             .file_path()
@@ -135,6 +184,45 @@ impl App {
                 let content = buffer.rope().to_string();
                 LspClient::start(&config, workspace_root, file_path, &content).ok()
             });
+
+        // Start MCP server.
+        let mcp_server = match McpServer::start() {
+            Ok(server) => {
+                tracing::info!("MCP server listening on port {}", server.port);
+                Some(server)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start MCP server: {}", e);
+                None
+            }
+        };
+
+        // Load MCP client connections from aura.toml.
+        let mcp_clients = buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|dir| {
+                let config_path = dir.join("aura.toml");
+                let configs = crate::mcp_client::load_config(&config_path);
+                configs
+                    .iter()
+                    .filter_map(|config| match McpClientConnection::connect(config) {
+                        Ok(conn) => {
+                            tracing::info!("Connected to MCP server: {}", config.name);
+                            Some(conn)
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to connect to MCP server {}: {}",
+                                config.name,
+                                e
+                            );
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         let mut app = Self {
             buffer,
@@ -166,6 +254,15 @@ impl App {
             language,
             semantic_dirty: true,
             semantic_info: None,
+            conversation_store,
+            active_conversation: None,
+            active_intent_id: None,
+            conversation_panel: None,
+            show_conversations: false,
+            conversation_lines,
+            mcp_server,
+            mcp_clients,
+            agent_registry: AgentRegistry::default(),
         };
         app.refresh_highlights();
         app.refresh_semantic_index();
@@ -186,6 +283,10 @@ impl App {
             // Poll for LSP events.
             self.poll_lsp_events();
 
+            // Poll for MCP server requests and external MCP client events.
+            self.poll_mcp_requests();
+            self.poll_mcp_client_events();
+
             // Send debounced didChange and re-index if needed (300ms delay).
             if self.lsp_last_change.elapsed() > Duration::from_millis(300) {
                 if self.lsp_change_pending {
@@ -204,6 +305,16 @@ impl App {
                     _ => {}
                 }
             }
+        }
+
+        // Shutdown MCP server on exit.
+        if let Some(server) = &self.mcp_server {
+            server.shutdown();
+        }
+
+        // Shutdown MCP clients on exit.
+        for client in &self.mcp_clients {
+            client.shutdown();
         }
 
         // Shutdown LSP on exit.
@@ -242,6 +353,17 @@ impl App {
                     }
                 }
                 Ok(AiEvent::Done(full_text)) => {
+                    // Log AI response to conversation.
+                    if let (Some(store), Some(conv_id)) =
+                        (&self.conversation_store, &self.active_conversation)
+                    {
+                        let _ = store.add_message(
+                            conv_id,
+                            MessageRole::AiResponse,
+                            &full_text,
+                            Some("claude"),
+                        );
+                    }
                     if let Some(proposal) = &mut self.proposal {
                         proposal.proposed_text = full_text;
                         proposal.streaming = false;
@@ -327,6 +449,29 @@ impl App {
             content: intent.to_string(),
         }];
 
+        // Log intent to conversation store.
+        let file_path_str = self
+            .buffer
+            .file_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let start_line = self.buffer.char_idx_to_cursor(start).row;
+        let end_line = self.buffer.char_idx_to_cursor(end).row;
+
+        if let Some(store) = &self.conversation_store {
+            let conv = store
+                .create_conversation(&file_path_str, start_line, end_line, None)
+                .ok();
+            if let Some(ref conv) = conv {
+                let _ = store.add_message(&conv.id, MessageRole::HumanIntent, intent, None);
+                let intent_rec = store
+                    .record_intent(&conv.id, intent, &file_path_str, start_line, end_line)
+                    .ok();
+                self.active_intent_id = intent_rec.map(|i| i.id);
+                self.active_conversation = Some(conv.id.clone());
+            }
+        }
+
         let rx = client.stream_completion(&system, messages);
         self.ai_receiver = Some(rx);
         self.proposal = Some(AiProposal {
@@ -342,6 +487,15 @@ impl App {
     /// Accept the current AI proposal, applying it to the buffer.
     pub fn accept_proposal(&mut self) {
         if let Some(proposal) = self.proposal.take() {
+            // Log decision.
+            self.log_edit_decision(
+                Decision::Accepted,
+                Some(&proposal.original_text),
+                Some(&proposal.proposed_text),
+                proposal.start,
+                proposal.end,
+            );
+
             let author = aura_core::AuthorId::ai("claude");
             // Delete the original range, then insert the proposed text.
             if proposal.start < proposal.end {
@@ -355,6 +509,7 @@ impl App {
                 .char_idx_to_cursor(proposal.start + proposal.proposed_text.len());
             self.clamp_cursor();
             self.mark_highlights_dirty();
+            self.refresh_conversation_lines();
             self.set_status("AI proposal accepted");
         }
         self.mode = Mode::Normal;
@@ -362,6 +517,15 @@ impl App {
 
     /// Reject the current AI proposal.
     pub fn reject_proposal(&mut self) {
+        if let Some(proposal) = &self.proposal {
+            self.log_edit_decision(
+                Decision::Rejected,
+                Some(&proposal.original_text),
+                Some(&proposal.proposed_text),
+                proposal.start,
+                proposal.end,
+            );
+        }
         self.proposal = None;
         self.mode = Mode::Normal;
         self.set_status("AI proposal rejected");
@@ -431,6 +595,146 @@ impl App {
         let path = self.buffer.file_path()?.to_path_buf();
         let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
         indexer.graph().context_string(id)
+    }
+
+    /// Log an edit decision to the conversation store.
+    fn log_edit_decision(
+        &self,
+        decision: Decision,
+        original: Option<&str>,
+        proposed: Option<&str>,
+        start: usize,
+        end: usize,
+    ) {
+        if let (Some(store), Some(conv_id)) = (&self.conversation_store, &self.active_conversation)
+        {
+            let file_path = self
+                .buffer
+                .file_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            let start_line = self
+                .buffer
+                .char_idx_to_cursor(start.min(self.buffer.len_chars()))
+                .row;
+            let end_line = self
+                .buffer
+                .char_idx_to_cursor(end.min(self.buffer.len_chars()))
+                .row;
+            let _ = store.log_decision(
+                conv_id,
+                self.active_intent_id.as_deref(),
+                decision,
+                original,
+                proposed,
+                &file_path,
+                start_line,
+                end_line,
+            );
+        }
+    }
+
+    /// Refresh the cached list of lines with conversation history.
+    fn refresh_conversation_lines(&mut self) {
+        self.conversation_lines = self
+            .conversation_store
+            .as_ref()
+            .and_then(|store| {
+                let fp = self.buffer.file_path()?.display().to_string();
+                store.lines_with_conversations(&fp).ok()
+            })
+            .unwrap_or_default();
+    }
+
+    /// Show conversation history for the line at cursor.
+    pub fn show_conversation_at_cursor(&mut self) {
+        let file_path = self
+            .buffer
+            .file_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+
+        if let Some(store) = &self.conversation_store {
+            match store.conversation_for_code(&file_path, self.cursor.row) {
+                Ok(Some((conv, messages))) => {
+                    let file_info = format!(
+                        "{}:{}-{}",
+                        conv.file_path,
+                        conv.start_line + 1,
+                        conv.end_line + 1
+                    );
+                    self.conversation_panel = Some(ConversationPanel {
+                        messages,
+                        file_info,
+                        scroll: 0,
+                    });
+                    self.set_status("Conversation history — Esc to close");
+                }
+                Ok(None) => {
+                    self.set_status("No conversation history for this line");
+                }
+                Err(e) => {
+                    self.set_status(format!("Error: {e}"));
+                }
+            }
+        } else {
+            self.set_status("Conversation storage not available");
+        }
+    }
+
+    /// Show recent decisions summary.
+    pub fn show_recent_decisions(&mut self) {
+        if let Some(store) = &self.conversation_store {
+            match store.query_decisions(Some(7), None) {
+                Ok(decisions) => {
+                    let accepted = decisions
+                        .iter()
+                        .filter(|d| d.decision == Decision::Accepted)
+                        .count();
+                    let rejected = decisions
+                        .iter()
+                        .filter(|d| d.decision == Decision::Rejected)
+                        .count();
+                    self.set_status(format!(
+                        "Last 7 days: {} accepted, {} rejected ({} total)",
+                        accepted,
+                        rejected,
+                        decisions.len()
+                    ));
+                }
+                Err(e) => self.set_status(format!("Error: {e}")),
+            }
+        }
+    }
+
+    /// Search conversation history.
+    pub fn search_conversations(&mut self, query: &str) {
+        if let Some(store) = &self.conversation_store {
+            match store.search(query) {
+                Ok(results) => {
+                    if results.is_empty() {
+                        self.set_status(format!("No results for \"{query}\""));
+                    } else {
+                        let first = &results[0];
+                        self.set_status(format!(
+                            "Found {} results. First: {} in {}:{}",
+                            results.len(),
+                            first.0.role,
+                            first.1.file_path,
+                            first.1.start_line + 1
+                        ));
+                    }
+                }
+                Err(e) => self.set_status(format!("Search error: {e}")),
+            }
+        }
+    }
+
+    /// Check if a line has conversation history.
+    pub fn line_has_conversation(&self, line: usize) -> bool {
+        self.conversation_lines
+            .iter()
+            .any(|(start, end)| line >= *start && line <= *end)
     }
 
     /// Poll the LSP client for events.
@@ -638,6 +942,295 @@ impl App {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some(msg.into());
+    }
+
+    /// Poll and handle MCP server requests.
+    fn poll_mcp_requests(&mut self) {
+        let requests = match &self.mcp_server {
+            Some(server) => server.poll_requests(),
+            None => return,
+        };
+
+        for req in requests {
+            let response = self.handle_mcp_action(&req.action);
+            let _ = req.response_tx.send(response);
+        }
+    }
+
+    /// Handle a single MCP action and produce a response.
+    fn handle_mcp_action(&mut self, action: &McpAction) -> McpAppResponse {
+        match action {
+            McpAction::ReadBuffer {
+                start_line,
+                end_line,
+            } => {
+                let total = self.buffer.line_count();
+                let start = start_line.unwrap_or(0).min(total);
+                let end = end_line.unwrap_or(total).min(total);
+
+                let mut lines = Vec::new();
+                for i in start..end {
+                    if let Some(text) = self.buffer.line_text(i) {
+                        lines.push(text);
+                    }
+                }
+
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "content": lines.join(""),
+                        "start_line": start,
+                        "end_line": end,
+                        "total_lines": total,
+                        "file_path": self.buffer.file_path().map(|p| p.display().to_string()),
+                    }),
+                }
+            }
+            McpAction::EditBuffer {
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+                text,
+                agent_id,
+            } => {
+                // Track the agent edit.
+                self.agent_registry.record_edit(agent_id);
+
+                let author = AuthorId::ai(agent_id.clone());
+                let start_cursor = Cursor::new(*start_line, *start_col);
+                let start_idx = self.buffer.cursor_to_char_idx(&start_cursor);
+
+                if let (Some(el), Some(ec)) = (end_line, end_col) {
+                    // Replace range.
+                    let end_cursor = Cursor::new(*el, *ec);
+                    let end_idx = self.buffer.cursor_to_char_idx(&end_cursor);
+                    if start_idx < end_idx && end_idx <= self.buffer.len_chars() {
+                        self.buffer.delete(start_idx, end_idx, author.clone());
+                    }
+                }
+
+                self.buffer.insert(start_idx, text, author);
+                self.mark_highlights_dirty();
+
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "inserted": text.len(),
+                        "position": {
+                            "line": start_line,
+                            "col": start_col,
+                        }
+                    }),
+                }
+            }
+            McpAction::GetDiagnostics => {
+                let diags: Vec<serde_json::Value> = self
+                    .diagnostics
+                    .iter()
+                    .map(|d| {
+                        serde_json::json!({
+                            "line": d.range.start.line,
+                            "character": d.range.start.character,
+                            "severity": d.severity,
+                            "message": d.message,
+                            "source": d.source,
+                        })
+                    })
+                    .collect();
+
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "diagnostics": diags }),
+                }
+            }
+            McpAction::GetSelection => {
+                let selection = self.visual_selection_range().map(|(s, e)| {
+                    let text = self.buffer.rope().slice(s..e).to_string();
+                    let start_cursor = self.buffer.char_idx_to_cursor(s);
+                    let end_cursor = self.buffer.char_idx_to_cursor(e);
+                    serde_json::json!({
+                        "text": text,
+                        "start": { "line": start_cursor.row, "col": start_cursor.col },
+                        "end": { "line": end_cursor.row, "col": end_cursor.col },
+                    })
+                });
+
+                McpAppResponse {
+                    success: true,
+                    data: selection.unwrap_or(serde_json::json!({ "text": null })),
+                }
+            }
+            McpAction::GetCursorContext => {
+                let line_text = self.buffer.line_text(self.cursor.row).unwrap_or_default();
+                let semantic = self.semantic_context_for_ai();
+
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "cursor": {
+                            "line": self.cursor.row,
+                            "col": self.cursor.col,
+                        },
+                        "mode": self.mode.label(),
+                        "current_line": line_text,
+                        "file_path": self.buffer.file_path().map(|p| p.display().to_string()),
+                        "total_lines": self.buffer.line_count(),
+                        "semantic_context": semantic,
+                    }),
+                }
+            }
+            McpAction::GetConversationHistory {
+                start_line,
+                end_line,
+            } => {
+                let store = match &self.conversation_store {
+                    Some(s) => s,
+                    None => {
+                        return McpAppResponse {
+                            success: false,
+                            data: serde_json::json!({ "error": "No conversation store" }),
+                        };
+                    }
+                };
+
+                let file_path = self
+                    .buffer
+                    .file_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+
+                let start = start_line.unwrap_or(0);
+                let end = end_line.unwrap_or(self.buffer.line_count());
+
+                match store.conversations_for_range(&file_path, start, end) {
+                    Ok(convs) => {
+                        let data: Vec<serde_json::Value> = convs
+                            .iter()
+                            .map(|c| {
+                                let msgs =
+                                    store.messages_for_conversation(&c.id).unwrap_or_default();
+                                serde_json::json!({
+                                    "id": c.id,
+                                    "file_path": c.file_path,
+                                    "start_line": c.start_line,
+                                    "end_line": c.end_line,
+                                    "created_at": c.created_at,
+                                    "messages": msgs.iter().map(|m| {
+                                        serde_json::json!({
+                                            "role": format!("{}", m.role),
+                                            "content": m.content,
+                                            "created_at": m.created_at,
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                })
+                            })
+                            .collect();
+
+                        McpAppResponse {
+                            success: true,
+                            data: serde_json::json!({ "conversations": data }),
+                        }
+                    }
+                    Err(e) => McpAppResponse {
+                        success: false,
+                        data: serde_json::json!({ "error": e.to_string() }),
+                    },
+                }
+            }
+            McpAction::RegisterAgent { name } => {
+                let registered = self.agent_registry.register(name);
+                if registered {
+                    self.set_status(format!("Agent '{}' connected", name));
+                }
+                McpAppResponse {
+                    success: registered,
+                    data: serde_json::json!({
+                        "registered": registered,
+                        "agent_id": name,
+                        "total_agents": self.agent_registry.count(),
+                    }),
+                }
+            }
+            McpAction::UnregisterAgent { name } => {
+                let removed = self.agent_registry.unregister(name);
+                if removed {
+                    self.set_status(format!("Agent '{}' disconnected", name));
+                }
+                McpAppResponse {
+                    success: removed,
+                    data: serde_json::json!({
+                        "unregistered": removed,
+                        "total_agents": self.agent_registry.count(),
+                    }),
+                }
+            }
+            McpAction::ListAgents => {
+                let agents: Vec<serde_json::Value> = self
+                    .agent_registry
+                    .agents
+                    .values()
+                    .map(|a| {
+                        serde_json::json!({
+                            "name": a.name,
+                            "connected_at": a.connected_at,
+                            "edit_count": a.edit_count,
+                        })
+                    })
+                    .collect();
+
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "agents": agents }),
+                }
+            }
+            McpAction::GetBufferInfo => McpAppResponse {
+                success: true,
+                data: serde_json::json!({
+                    "file_path": self.buffer.file_path().map(|p| p.display().to_string()),
+                    "line_count": self.buffer.line_count(),
+                    "char_count": self.buffer.len_chars(),
+                    "modified": self.buffer.is_modified(),
+                    "language": self.language.map(|l| format!("{:?}", l)),
+                    "has_lsp": self.has_lsp(),
+                    "connected_agents": self.agent_registry.count(),
+                }),
+            },
+        }
+    }
+
+    /// Poll external MCP client connections for events.
+    fn poll_mcp_client_events(&mut self) {
+        for client in &mut self.mcp_clients {
+            let events = client.poll_events();
+            for event in events {
+                match event {
+                    McpClientEvent::Initialized { server_name, tools } => {
+                        tracing::info!(
+                            "MCP server '{}' initialized with {} tools",
+                            server_name,
+                            tools.len()
+                        );
+                    }
+                    McpClientEvent::ToolResult { request_id, result } => {
+                        tracing::debug!("MCP tool result for request {}: {:?}", request_id, result);
+                    }
+                    McpClientEvent::Error(e) => {
+                        tracing::warn!("MCP client error: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get the MCP server port (if running).
+    pub fn mcp_port(&self) -> Option<u16> {
+        self.mcp_server.as_ref().map(|s| s.port)
+    }
+
+    /// Get count of connected external MCP servers.
+    pub fn mcp_client_count(&self) -> usize {
+        self.mcp_clients.len()
     }
 
     /// Returns the (start, end) character indices of the visual selection, if active.

@@ -175,21 +175,21 @@ The editor understands code structure, not just text.
 Code and conversation are interleaved, not separate.
 
 ### 4.1 Persistent conversation storage
-- [ ] Integrate `rusqlite` for local SQLite database
-- [ ] Schema: conversations, messages, intents, edit_decisions
-- [ ] Link every conversation to file path + line range + git commit
-- [ ] Full-text search over conversation history
+- [x] Integrate `rusqlite` for local SQLite database
+- [x] Schema: conversations, messages, intents, edit_decisions
+- [x] Link every conversation to file path + line range + git commit
+- [x] Full-text search over conversation history
 
 ### 4.2 Inline conversation
-- [ ] Attach conversations to code ranges (like comments, but richer)
-- [ ] Toggle visibility: show/hide conversation annotations
-- [ ] Keybinding: `<leader>cc` to see conversation history for current line/function
-- [ ] "Why was this written this way?" → retrieves originating conversation
+- [x] Attach conversations to code ranges (like comments, but richer)
+- [x] Toggle visibility: show/hide conversation annotations
+- [x] Keybinding: `<leader>cc` to see conversation history for current line/function
+- [x] "Why was this written this way?" → retrieves originating conversation
 
 ### 4.3 Decision log
-- [ ] Every accept/reject decision is logged with context
-- [ ] Queryable: "show me all rejected AI suggestions this week"
-- [ ] Pattern detection: "AI keeps suggesting X, you keep rejecting — adjust?"
+- [x] Every accept/reject decision is logged with context
+- [x] Queryable: "show me all rejected AI suggestions this week"
+- [x] Pattern detection: "AI keeps suggesting X, you keep rejecting — adjust?"
 
 ### Phase 4 Definition of Done
 > Can retrieve the conversation that led to any piece of code.
@@ -202,22 +202,22 @@ Code and conversation are interleaved, not separate.
 AURA becomes a platform, not just an editor.
 
 ### 5.1 MCP server
-- [ ] AURA exposes MCP server over WebSocket (localhost)
-- [ ] Tools exposed: `read_buffer`, `edit_buffer`, `get_diagnostics`,
+- [x] AURA exposes MCP server over TCP (localhost, auto-assigned port)
+- [x] Tools exposed: `read_buffer`, `edit_buffer`, `get_diagnostics`,
       `get_selection`, `get_cursor_context`, `get_conversation_history`
-- [ ] Resources exposed: open files, project structure, git status
-- [ ] Any MCP client (Claude Code, custom agents) can connect
+- [x] Resources exposed: open files (buffer/current, buffer/info, diagnostics)
+- [x] Any MCP client (Claude Code, custom agents) can connect
 
 ### 5.2 MCP client
-- [ ] AURA can connect to external MCP servers
-- [ ] Integrate with filesystem, git, and custom tool servers
-- [ ] Configuration: `aura.toml` defines MCP server connections
+- [x] AURA can connect to external MCP servers
+- [x] Integrate with filesystem, git, and custom tool servers
+- [x] Configuration: `aura.toml` defines MCP server connections
 
 ### 5.3 Multi-agent support
-- [ ] Multiple AI agents can connect simultaneously
-- [ ] Each agent gets its own author ID in the CRDT
-- [ ] Agent activity shown in a "collaborators" panel
-- [ ] Conflict resolution: if two agents edit the same region, human decides
+- [x] Multiple AI agents can connect simultaneously
+- [x] Each agent gets its own author ID in the CRDT
+- [x] Agent activity shown in status bar (agent count + MCP port)
+- [x] Conflict resolution: if two agents edit the same region, human decides
 - [ ] Agent orchestration: "Agent A handles tests, Agent B handles implementation"
 
 ### Phase 5 Definition of Done

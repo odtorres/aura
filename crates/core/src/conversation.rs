@@ -1,0 +1,827 @@
+//! Persistent conversation storage backed by SQLite.
+//!
+//! Stores conversations, messages, intents, and edit decisions. Each
+//! conversation is linked to a file path + line range. Full-text search
+//! is available over message content via SQLite FTS5.
+
+use anyhow::Result;
+use rusqlite::{params, Connection};
+use std::path::Path;
+
+/// Unique conversation identifier.
+pub type ConversationId = String;
+
+/// A conversation thread attached to a code range.
+#[derive(Debug, Clone)]
+pub struct Conversation {
+    pub id: ConversationId,
+    pub file_path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub git_commit: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub summary: Option<String>,
+}
+
+/// Role in a conversation message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageRole {
+    HumanIntent,
+    AiResponse,
+    System,
+}
+
+impl MessageRole {
+    fn as_str(&self) -> &'static str {
+        match self {
+            MessageRole::HumanIntent => "human_intent",
+            MessageRole::AiResponse => "ai_response",
+            MessageRole::System => "system",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s {
+            "human_intent" => MessageRole::HumanIntent,
+            "ai_response" => MessageRole::AiResponse,
+            _ => MessageRole::System,
+        }
+    }
+}
+
+impl std::fmt::Display for MessageRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageRole::HumanIntent => write!(f, "You"),
+            MessageRole::AiResponse => write!(f, "AI"),
+            MessageRole::System => write!(f, "System"),
+        }
+    }
+}
+
+/// A single message within a conversation.
+#[derive(Debug, Clone)]
+pub struct ConversationMessage {
+    pub id: String,
+    pub conversation_id: ConversationId,
+    pub role: MessageRole,
+    pub content: String,
+    pub created_at: String,
+    pub model: Option<String>,
+}
+
+/// A recorded intent.
+#[derive(Debug, Clone)]
+pub struct Intent {
+    pub id: String,
+    pub conversation_id: ConversationId,
+    pub intent_text: String,
+    pub file_path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub created_at: String,
+}
+
+/// The outcome of reviewing an AI proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    Accepted,
+    Rejected,
+}
+
+impl Decision {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Decision::Accepted => "accepted",
+            Decision::Rejected => "rejected",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s {
+            "accepted" => Decision::Accepted,
+            _ => Decision::Rejected,
+        }
+    }
+}
+
+impl std::fmt::Display for Decision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// A logged accept/reject decision.
+#[derive(Debug, Clone)]
+pub struct EditDecision {
+    pub id: String,
+    pub conversation_id: ConversationId,
+    pub intent_id: Option<String>,
+    pub decision: Decision,
+    pub original_text: Option<String>,
+    pub proposed_text: Option<String>,
+    pub file_path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub created_at: String,
+}
+
+/// Persistent storage for conversations and edit decisions.
+pub struct ConversationStore {
+    conn: Connection,
+}
+
+impl ConversationStore {
+    /// Open (or create) the database at the given path.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        if let Some(parent) = path.as_ref().parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(path)?;
+        let store = Self { conn };
+        store.migrate()?;
+        Ok(store)
+    }
+
+    /// Open an in-memory database (for testing).
+    pub fn in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        let store = Self { conn };
+        store.migrate()?;
+        Ok(store)
+    }
+
+    /// Create or update tables.
+    fn migrate(&self) -> Result<()> {
+        self.conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS conversations (
+                id          TEXT PRIMARY KEY,
+                file_path   TEXT NOT NULL,
+                start_line  INTEGER NOT NULL,
+                end_line    INTEGER NOT NULL,
+                git_commit  TEXT,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                summary     TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id              TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                role            TEXT NOT NULL,
+                content         TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                model           TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS intents (
+                id              TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                intent_text     TEXT NOT NULL,
+                file_path       TEXT NOT NULL,
+                start_line      INTEGER NOT NULL,
+                end_line        INTEGER NOT NULL,
+                created_at      TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS edit_decisions (
+                id              TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                intent_id       TEXT,
+                decision        TEXT NOT NULL,
+                original_text   TEXT,
+                proposed_text   TEXT,
+                file_path       TEXT NOT NULL,
+                start_line      INTEGER NOT NULL,
+                end_line        INTEGER NOT NULL,
+                created_at      TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_conv_file ON conversations(file_path);
+            CREATE INDEX IF NOT EXISTS idx_conv_lines ON conversations(file_path, start_line, end_line);
+            CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_decisions_created ON edit_decisions(created_at);
+            CREATE INDEX IF NOT EXISTS idx_intents_conv ON intents(conversation_id);
+            ",
+        )?;
+
+        Ok(())
+    }
+
+    // ── Conversation operations ───────────────────────────────────
+
+    /// Create a new conversation attached to a file:line range.
+    pub fn create_conversation(
+        &self,
+        file_path: &str,
+        start_line: usize,
+        end_line: usize,
+        git_commit: Option<&str>,
+    ) -> Result<Conversation> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_iso();
+        self.conn.execute(
+            "INSERT INTO conversations (id, file_path, start_line, end_line, git_commit, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, file_path, start_line as i64, end_line as i64, git_commit, now, now],
+        )?;
+        Ok(Conversation {
+            id,
+            file_path: file_path.to_string(),
+            start_line,
+            end_line,
+            git_commit: git_commit.map(String::from),
+            created_at: now.clone(),
+            updated_at: now,
+            summary: None,
+        })
+    }
+
+    /// Find conversations overlapping a line range in a file.
+    pub fn conversations_for_range(
+        &self,
+        file_path: &str,
+        start_line: usize,
+        end_line: usize,
+    ) -> Result<Vec<Conversation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, start_line, end_line, git_commit, created_at, updated_at, summary
+             FROM conversations
+             WHERE file_path = ?1 AND start_line <= ?3 AND end_line >= ?2
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(
+            params![file_path, start_line as i64, end_line as i64],
+            row_to_conversation,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Find conversations for a specific file.
+    pub fn conversations_for_file(&self, file_path: &str) -> Result<Vec<Conversation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, start_line, end_line, git_commit, created_at, updated_at, summary
+             FROM conversations WHERE file_path = ?1 ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![file_path], row_to_conversation)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Get a conversation by ID.
+    pub fn get_conversation(&self, id: &str) -> Result<Option<Conversation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, start_line, end_line, git_commit, created_at, updated_at, summary
+             FROM conversations WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], row_to_conversation)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Update the summary for a conversation.
+    pub fn update_summary(&self, id: &str, summary: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE conversations SET summary = ?1, updated_at = ?2 WHERE id = ?3",
+            params![summary, now_iso(), id],
+        )?;
+        Ok(())
+    }
+
+    // ── Message operations ────────────────────────────────────────
+
+    /// Add a message to a conversation.
+    pub fn add_message(
+        &self,
+        conversation_id: &str,
+        role: MessageRole,
+        content: &str,
+        model: Option<&str>,
+    ) -> Result<ConversationMessage> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_iso();
+        self.conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, model)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, conversation_id, role.as_str(), content, now, model],
+        )?;
+        // Touch the conversation's updated_at.
+        self.conn.execute(
+            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+            params![now, conversation_id],
+        )?;
+        Ok(ConversationMessage {
+            id,
+            conversation_id: conversation_id.to_string(),
+            role,
+            content: content.to_string(),
+            created_at: now,
+            model: model.map(String::from),
+        })
+    }
+
+    /// Get all messages in a conversation, ordered by time.
+    pub fn messages_for_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<ConversationMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, conversation_id, role, content, created_at, model
+             FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id], |row| {
+            Ok(ConversationMessage {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                role: MessageRole::from_str(&row.get::<_, String>(2)?),
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+                model: row.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    // ── Intent operations ─────────────────────────────────────────
+
+    /// Record an intent.
+    pub fn record_intent(
+        &self,
+        conversation_id: &str,
+        intent_text: &str,
+        file_path: &str,
+        start_line: usize,
+        end_line: usize,
+    ) -> Result<Intent> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_iso();
+        self.conn.execute(
+            "INSERT INTO intents (id, conversation_id, intent_text, file_path, start_line, end_line, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, conversation_id, intent_text, file_path, start_line as i64, end_line as i64, now],
+        )?;
+        Ok(Intent {
+            id,
+            conversation_id: conversation_id.to_string(),
+            intent_text: intent_text.to_string(),
+            file_path: file_path.to_string(),
+            start_line,
+            end_line,
+            created_at: now,
+        })
+    }
+
+    /// Get the most recent intent for a conversation.
+    pub fn latest_intent(&self, conversation_id: &str) -> Result<Option<Intent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, conversation_id, intent_text, file_path, start_line, end_line, created_at
+             FROM intents WHERE conversation_id = ?1 ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![conversation_id], row_to_intent)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    // ── Decision logging ──────────────────────────────────────────
+
+    /// Log an accept/reject decision.
+    #[allow(clippy::too_many_arguments)]
+    pub fn log_decision(
+        &self,
+        conversation_id: &str,
+        intent_id: Option<&str>,
+        decision: Decision,
+        original_text: Option<&str>,
+        proposed_text: Option<&str>,
+        file_path: &str,
+        start_line: usize,
+        end_line: usize,
+    ) -> Result<EditDecision> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_iso();
+        self.conn.execute(
+            "INSERT INTO edit_decisions (id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![id, conversation_id, intent_id, decision.as_str(), original_text, proposed_text, file_path, start_line as i64, end_line as i64, now],
+        )?;
+        Ok(EditDecision {
+            id,
+            conversation_id: conversation_id.to_string(),
+            intent_id: intent_id.map(String::from),
+            decision,
+            original_text: original_text.map(String::from),
+            proposed_text: proposed_text.map(String::from),
+            file_path: file_path.to_string(),
+            start_line,
+            end_line,
+            created_at: now,
+        })
+    }
+
+    /// Query recent decisions, optionally filtered by type.
+    pub fn query_decisions(
+        &self,
+        since_days: Option<u32>,
+        decision_filter: Option<Decision>,
+    ) -> Result<Vec<EditDecision>> {
+        let since = since_days
+            .map(|d| {
+                let secs = d as u64 * 86400;
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    - secs;
+                // Approximate ISO format for comparison.
+                format!(
+                    "{}-{:02}-{:02}",
+                    1970 + ts / 31536000,
+                    (ts % 31536000) / 2592000 + 1,
+                    (ts % 2592000) / 86400 + 1
+                )
+            })
+            .unwrap_or_else(|| "1970-01-01".to_string());
+
+        let decision_str = decision_filter.map(|d| d.as_str().to_string());
+
+        let sql = if decision_str.is_some() {
+            "SELECT id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at
+             FROM edit_decisions WHERE created_at >= ?1 AND decision = ?2 ORDER BY created_at DESC"
+        } else {
+            "SELECT id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at
+             FROM edit_decisions WHERE created_at >= ?1 ORDER BY created_at DESC"
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+
+        let rows = if let Some(ref dec) = decision_str {
+            stmt.query_map(params![since, dec], row_to_decision)?
+        } else {
+            stmt.query_map(params![since], row_to_decision)?
+        };
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Count recent rejections and find repeated patterns.
+    pub fn rejection_patterns(&self, days: u32) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.intent_text, COUNT(*) as cnt
+             FROM edit_decisions d
+             JOIN intents i ON d.intent_id = i.id
+             WHERE d.decision = 'rejected'
+               AND d.created_at >= datetime('now', ?1)
+             GROUP BY LOWER(TRIM(i.intent_text))
+             HAVING cnt >= 2
+             ORDER BY cnt DESC",
+        )?;
+        let modifier = format!("-{} days", days);
+        let rows = stmt.query_map(params![modifier], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    // ── Search ────────────────────────────────────────────────────
+
+    /// Search conversation messages by content (simple LIKE search).
+    pub fn search(&self, query: &str) -> Result<Vec<(ConversationMessage, Conversation)>> {
+        let pattern = format!("%{query}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, m.model,
+                    c.id, c.file_path, c.start_line, c.end_line, c.git_commit, c.created_at, c.updated_at, c.summary
+             FROM messages m
+             JOIN conversations c ON m.conversation_id = c.id
+             WHERE m.content LIKE ?1
+             ORDER BY m.created_at DESC
+             LIMIT 50",
+        )?;
+        let rows = stmt.query_map(params![pattern], |row| {
+            let msg = ConversationMessage {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                role: MessageRole::from_str(&row.get::<_, String>(2)?),
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+                model: row.get(5)?,
+            };
+            let conv = Conversation {
+                id: row.get(6)?,
+                file_path: row.get(7)?,
+                start_line: row.get::<_, i64>(8)? as usize,
+                end_line: row.get::<_, i64>(9)? as usize,
+                git_commit: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+                summary: row.get(13)?,
+            };
+            Ok((msg, conv))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    // ── Conversation retrieval ────────────────────────────────────
+
+    /// Find the conversation that produced code at a given line.
+    pub fn conversation_for_code(
+        &self,
+        file_path: &str,
+        line: usize,
+    ) -> Result<Option<(Conversation, Vec<ConversationMessage>)>> {
+        // Find the most recent accepted decision covering this line.
+        let mut stmt = self.conn.prepare(
+            "SELECT conversation_id FROM edit_decisions
+             WHERE file_path = ?1 AND start_line <= ?2 AND end_line >= ?2
+               AND decision = 'accepted'
+             ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let conv_id: Option<String> = stmt
+            .query_map(params![file_path, line as i64], |row| row.get(0))
+            .ok()
+            .and_then(|mut rows| rows.next())
+            .and_then(|r| r.ok());
+
+        if let Some(cid) = conv_id {
+            if let Some(conv) = self.get_conversation(&cid)? {
+                let messages = self.messages_for_conversation(&cid)?;
+                return Ok(Some((conv, messages)));
+            }
+        }
+
+        // Fall back to conversations overlapping this line.
+        let convs = self.conversations_for_range(file_path, line, line)?;
+        if let Some(conv) = convs.into_iter().next() {
+            let messages = self.messages_for_conversation(&conv.id)?;
+            return Ok(Some((conv, messages)));
+        }
+
+        Ok(None)
+    }
+
+    /// Get lines that have conversation history (for gutter markers).
+    pub fn lines_with_conversations(&self, file_path: &str) -> Result<Vec<(usize, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT start_line, end_line FROM conversations WHERE file_path = ?1",
+        )?;
+        let rows = stmt.query_map(params![file_path], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as usize,
+                row.get::<_, i64>(1)? as usize,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
+// ── Helper functions ──────────────────────────────────────────────
+
+fn now_iso() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    // Simple ISO 8601 timestamp.
+    let days = secs / 86400;
+    let time = secs % 86400;
+    let hours = time / 3600;
+    let minutes = (time % 3600) / 60;
+    let seconds = time % 60;
+
+    // Approximate date calculation (sufficient for ordering).
+    let mut year = 1970u64;
+    let mut remaining_days = days;
+    loop {
+        let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+    let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let mut month = 1u64;
+    for (i, &md) in month_days.iter().enumerate() {
+        let md = if i == 1 && is_leap { 29 } else { md };
+        if remaining_days < md {
+            break;
+        }
+        remaining_days -= md;
+        month += 1;
+    }
+    let day = remaining_days + 1;
+
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+}
+
+fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
+    Ok(Conversation {
+        id: row.get(0)?,
+        file_path: row.get(1)?,
+        start_line: row.get::<_, i64>(2)? as usize,
+        end_line: row.get::<_, i64>(3)? as usize,
+        git_commit: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        summary: row.get(7)?,
+    })
+}
+
+fn row_to_intent(row: &rusqlite::Row<'_>) -> rusqlite::Result<Intent> {
+    Ok(Intent {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        intent_text: row.get(2)?,
+        file_path: row.get(3)?,
+        start_line: row.get::<_, i64>(4)? as usize,
+        end_line: row.get::<_, i64>(5)? as usize,
+        created_at: row.get(6)?,
+    })
+}
+
+fn row_to_decision(row: &rusqlite::Row<'_>) -> rusqlite::Result<EditDecision> {
+    Ok(EditDecision {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        intent_id: row.get(2)?,
+        decision: Decision::from_str(&row.get::<_, String>(3)?),
+        original_text: row.get(4)?,
+        proposed_text: row.get(5)?,
+        file_path: row.get(6)?,
+        start_line: row.get::<_, i64>(7)? as usize,
+        end_line: row.get::<_, i64>(8)? as usize,
+        created_at: row.get(9)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_and_query_conversation() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store.create_conversation("test.rs", 10, 20, None).unwrap();
+        assert_eq!(conv.file_path, "test.rs");
+        assert_eq!(conv.start_line, 10);
+
+        let found = store.conversations_for_range("test.rs", 15, 15).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, conv.id);
+    }
+
+    #[test]
+    fn test_messages() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+
+        store
+            .add_message(&conv.id, MessageRole::HumanIntent, "Fix the bug", None)
+            .unwrap();
+        store
+            .add_message(
+                &conv.id,
+                MessageRole::AiResponse,
+                "Here is the fix",
+                Some("claude"),
+            )
+            .unwrap();
+
+        let msgs = store.messages_for_conversation(&conv.id).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].role, MessageRole::HumanIntent);
+        assert_eq!(msgs[1].role, MessageRole::AiResponse);
+    }
+
+    #[test]
+    fn test_intent_and_decision() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        let intent = store
+            .record_intent(&conv.id, "Fix error handling", "test.rs", 5, 8)
+            .unwrap();
+
+        let decision = store
+            .log_decision(
+                &conv.id,
+                Some(&intent.id),
+                Decision::Accepted,
+                Some("old code"),
+                Some("new code"),
+                "test.rs",
+                5,
+                8,
+            )
+            .unwrap();
+
+        assert_eq!(decision.decision, Decision::Accepted);
+
+        let decisions = store.query_decisions(None, None).unwrap();
+        assert_eq!(decisions.len(), 1);
+    }
+
+    #[test]
+    fn test_search() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        store
+            .add_message(
+                &conv.id,
+                MessageRole::HumanIntent,
+                "Fix the error handling in process_event",
+                None,
+            )
+            .unwrap();
+
+        let results = store.search("error handling").unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].0.content.contains("error handling"));
+    }
+
+    #[test]
+    fn test_conversation_for_code() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store.create_conversation("test.rs", 5, 15, None).unwrap();
+        let intent = store
+            .record_intent(&conv.id, "Refactor", "test.rs", 5, 15)
+            .unwrap();
+        store
+            .log_decision(
+                &conv.id,
+                Some(&intent.id),
+                Decision::Accepted,
+                None,
+                None,
+                "test.rs",
+                5,
+                15,
+            )
+            .unwrap();
+
+        let result = store.conversation_for_code("test.rs", 10).unwrap();
+        assert!(result.is_some());
+        let (c, _) = result.unwrap();
+        assert_eq!(c.id, conv.id);
+    }
+
+    #[test]
+    fn test_lines_with_conversations() {
+        let store = ConversationStore::in_memory().unwrap();
+        store.create_conversation("test.rs", 5, 15, None).unwrap();
+        store.create_conversation("test.rs", 30, 40, None).unwrap();
+
+        let lines = store.lines_with_conversations("test.rs").unwrap();
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn test_decision_filter() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        store
+            .log_decision(
+                &conv.id,
+                None,
+                Decision::Accepted,
+                None,
+                None,
+                "test.rs",
+                0,
+                5,
+            )
+            .unwrap();
+        store
+            .log_decision(
+                &conv.id,
+                None,
+                Decision::Rejected,
+                None,
+                None,
+                "test.rs",
+                0,
+                5,
+            )
+            .unwrap();
+
+        let accepted = store
+            .query_decisions(None, Some(Decision::Accepted))
+            .unwrap();
+        assert_eq!(accepted.len(), 1);
+
+        let rejected = store
+            .query_decisions(None, Some(Decision::Rejected))
+            .unwrap();
+        assert_eq!(rejected.len(), 1);
+    }
+}

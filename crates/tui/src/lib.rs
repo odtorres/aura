@@ -7,5 +7,7 @@ pub mod app;
 pub mod highlight;
 pub mod input;
 pub mod lsp;
+pub mod mcp_client;
+pub mod mcp_server;
 pub mod render;
 pub mod semantic_index;
