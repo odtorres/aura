@@ -488,6 +488,10 @@ fn handle_leader(app: &mut App, code: KeyCode) {
         KeyCode::Char('g') => {
             app.cycle_aggressiveness();
         }
+        // <leader>b — toggle inline blame
+        KeyCode::Char('b') => {
+            app.toggle_blame();
+        }
         // <leader>s — show semantic info for symbol at cursor
         KeyCode::Char('s') => {
             app.update_semantic_context();
@@ -507,22 +511,72 @@ fn handle_leader(app: &mut App, code: KeyCode) {
 pub fn handle_intent(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc => {
-            app.mode = Mode::Normal;
-            app.intent_input.clear();
-            app.set_status("");
+            // If we were editing or revising a proposal, go back to Review.
+            if app.editing_proposal || app.revising_proposal {
+                app.editing_proposal = false;
+                app.revising_proposal = false;
+                app.intent_input.clear();
+                app.mode = Mode::Review;
+                app.set_status("Edit/revision cancelled — back in Review mode");
+            } else {
+                app.mode = Mode::Normal;
+                app.intent_input.clear();
+                app.set_status("");
+            }
         }
         KeyCode::Enter => {
-            let intent = app.intent_input.clone();
+            let input = app.intent_input.clone();
             app.intent_input.clear();
-            if intent.is_empty() {
+
+            if app.editing_proposal {
+                // Apply the (now-edited) text back to the proposal in-place.
+                app.editing_proposal = false;
+                if input.is_empty() {
+                    // Empty edit → return to Review without changes.
+                    app.mode = Mode::Review;
+                    app.set_status("Edit cancelled (empty input) — back in Review mode");
+                } else if let Some(proposal) = app.proposal.as_mut() {
+                    proposal.proposed_text = input;
+                    app.mode = Mode::Review;
+                    app.set_status("Proposal updated — press 'a' to accept or 'r' to reject");
+                } else {
+                    app.mode = Mode::Normal;
+                }
+            } else if app.revising_proposal {
+                // Build a revision prompt: current proposal + user instructions.
+                app.revising_proposal = false;
+                if input.is_empty() {
+                    app.mode = Mode::Review;
+                    app.set_status("Revision cancelled (empty input) — back in Review mode");
+                } else {
+                    // Grab the current proposed text to include in the revision
+                    // request, then clear the proposal so send_intent creates a
+                    // fresh one with the same buffer range.
+                    let (revision_intent, start, end) =
+                        if let Some(proposal) = app.proposal.take() {
+                            let revision_intent = format!(
+                                "Revise the following code:\n\n{}\n\nRevision request: {}",
+                                proposal.proposed_text, input
+                            );
+                            (revision_intent, proposal.start, proposal.end)
+                        } else {
+                            (input.clone(), 0, 0)
+                        };
+                    // send_intent determines start/end from the visual
+                    // selection or current line, which matches proposal.start/end.
+                    // We just need the intent string; the range is re-derived.
+                    let _ = (start, end); // suppress unused-variable warning
+                    app.send_intent(&revision_intent);
+                }
+            } else if input.is_empty() {
                 app.mode = Mode::Normal;
             } else {
-                app.send_intent(&intent);
+                app.send_intent(&input);
             }
         }
         KeyCode::Backspace => {
             app.intent_input.pop();
-            if app.intent_input.is_empty() {
+            if app.intent_input.is_empty() && !app.editing_proposal && !app.revising_proposal {
                 app.mode = Mode::Normal;
             }
         }
@@ -543,6 +597,40 @@ pub fn handle_review(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
         // Reject the proposal.
         KeyCode::Char('r') | KeyCode::Esc => {
             app.reject_proposal();
+        }
+        // Edit-in-place: copy proposed text into intent_input and switch to
+        // Intent mode. When Enter is pressed the edited text will be written
+        // back as the proposal without sending a new AI request.
+        KeyCode::Char('e') => {
+            if let Some(proposal) = &app.proposal {
+                // Only allow editing once streaming is complete.
+                if proposal.streaming {
+                    app.set_status("Wait for AI to finish streaming before editing");
+                    return;
+                }
+                let text = proposal.proposed_text.clone();
+                app.intent_input = text;
+                app.editing_proposal = true;
+                app.revising_proposal = false;
+                app.mode = Mode::Intent;
+                app.set_status("Edit proposal text, then press Enter to confirm (Esc to cancel)");
+            }
+        }
+        // Revision request: pre-fill a prompt and switch to Intent mode. When
+        // Enter is pressed a new AI call is made that includes the current
+        // proposed text and the revision instructions typed by the user.
+        KeyCode::Char('R') => {
+            if let Some(proposal) = &app.proposal {
+                if proposal.streaming {
+                    app.set_status("Wait for AI to finish streaming before requesting a revision");
+                    return;
+                }
+                app.intent_input.clear();
+                app.revising_proposal = true;
+                app.editing_proposal = false;
+                app.mode = Mode::Intent;
+                app.set_status("Describe your revision, then press Enter (Esc to cancel)");
+            }
         }
         _ => {}
     }
@@ -586,6 +674,53 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "decisions" | "dec" => {
             app.show_recent_decisions();
+        }
+        "undo-tree" | "ut" => {
+            app.show_undo_tree();
+        }
+        // Git commands
+        "commit" | "gc" => {
+            app.generate_commit_message();
+        }
+        _ if cmd.trim().starts_with("commit ") => {
+            let msg = cmd.trim().strip_prefix("commit ").unwrap_or("").trim();
+            if !msg.is_empty() {
+                app.git_commit(msg);
+                app.set_status(format!("Committed: {msg}"));
+            }
+        }
+        "branches" | "br" => {
+            let branches = app.git_list_branches();
+            if branches.is_empty() {
+                app.set_status("No git branches found");
+            } else {
+                let list: Vec<String> = branches
+                    .iter()
+                    .map(|b| {
+                        if b.is_current {
+                            format!("*{}", b.name)
+                        } else {
+                            b.name.clone()
+                        }
+                    })
+                    .collect();
+                app.set_status(format!("Branches: {}", list.join(" │ ")));
+            }
+        }
+        _ if cmd.trim().starts_with("checkout ") => {
+            let branch = cmd.trim().strip_prefix("checkout ").unwrap_or("").trim();
+            if !branch.is_empty() {
+                app.git_checkout(branch);
+            }
+        }
+        _ if cmd.trim().starts_with("branch ") => {
+            let name = cmd.trim().strip_prefix("branch ").unwrap_or("").trim();
+            if !name.is_empty() {
+                app.git_create_branch(name);
+            }
+        }
+        "blame" => {
+            app.toggle_blame();
         }
         other => {
             app.set_status(format!("Unknown command: {}", other));

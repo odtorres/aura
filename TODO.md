@@ -257,19 +257,19 @@ The AI thinks ahead. The human reviews when ready.
 ## Phase 7: Git Integration (Weeks 27–30)
 
 ### 7.1 Git awareness
-- [ ] Integrate `gitoxide` for native Rust git operations
-- [ ] Gutter: show git diff status (added/modified/deleted lines)
-- [ ] Inline blame with authorship (including AI authorship from CRDT)
-- [ ] Commit from within editor with AI-generated commit messages
+- [x] Integrate `gitoxide` (`gix`) for native Rust git operations
+- [x] Gutter: show git diff status (added/modified/deleted lines)
+- [x] Inline blame with authorship (`<leader>b` or `:blame`)
+- [x] Commit from within editor with AI-generated commit messages (`:commit`)
 
 ### 7.2 Conversation-linked commits
-- [ ] Attach conversation summaries to git commits as trailers
+- [x] Attach conversation summaries to git commits as `Aura-Conversation` trailers
 - [ ] `git log --aura` (custom formatter) shows intent history
-- [ ] Link between git blame and conversation history
+- [x] Link between git blame and conversation history
 
 ### 7.3 Branch management
-- [ ] Visual branch switcher
-- [ ] AI can propose changes on a feature branch without touching main
+- [x] Visual branch switcher (`:branches`, `:checkout <name>`)
+- [x] AI can propose changes on a feature branch (`:branch <name>`)
 - [ ] "Experimental" mode: AI works on a branch, human reviews the PR
 
 ---
@@ -277,16 +277,16 @@ The AI thinks ahead. The human reviews when ready.
 ## Phase 8: Polish and Ecosystem (Weeks 31+)
 
 ### 8.1 Configuration
-- [ ] `aura.toml` for all settings: theme, keybindings, AI model, aggressiveness
-- [ ] Theme engine: color schemes in TOML (ship with at least 3 themes)
-- [ ] Keybinding customization layer
+- [x] `aura.toml` for all settings: theme, keybindings, AI model, aggressiveness
+- [x] Theme engine: color schemes in TOML (ship with at least 3 themes)
+- [x] Keybinding customization layer
 
 ### 8.2 Performance
-- [ ] Profile with `flamegraph` crate
-- [ ] Target: <1ms keystroke-to-render latency
-- [ ] Target: <16ms frame time for streaming AI output
-- [ ] Target: handles 100K+ line files without lag
-- [ ] Memory profiling: ensure CRDT history doesn't grow unbounded (compact on save)
+- [x] Profile with `flamegraph` crate
+- [x] Target: <1ms keystroke-to-render latency
+- [x] Target: <16ms frame time for streaming AI output
+- [x] Target: handles 100K+ line files without lag
+- [x] Memory profiling: ensure CRDT history doesn't grow unbounded (compact on save)
 
 ### 8.3 Plugin system (future)
 - [ ] Lua or WASM plugin API (evaluate tradeoffs)
@@ -294,11 +294,11 @@ The AI thinks ahead. The human reviews when ready.
 - [ ] Ship with core plugins: file picker (fuzzy finder), file tree, terminal
 
 ### 8.4 Distribution
-- [ ] `cargo install aura-editor`
-- [ ] Homebrew formula
+- [x] `cargo install aura-editor`
+- [x] Homebrew formula
 - [ ] AUR package
 - [ ] AppImage for Linux
-- [ ] Release automation with `cargo-dist`
+- [x] Release automation with `cargo-dist`
 
 ---
 

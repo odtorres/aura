@@ -114,6 +114,23 @@ impl CrdtDoc {
     pub fn doc_mut(&mut self) -> &mut AutoCommit {
         &mut self.doc
     }
+
+    /// Compact the CRDT history by saving and reloading the document.
+    ///
+    /// This reduces memory usage by collapsing the change history into
+    /// a single compacted state. Call after saving the file.
+    pub fn compact(&mut self) {
+        let bytes = self.doc.save();
+        if let Ok(loaded) = AutoCommit::load(&bytes) {
+            // Re-resolve the text object ID.
+            if let Ok(Some((_, text_id))) = loaded.get(ROOT, "text") {
+                self.text_id = text_id;
+                self.doc = loaded;
+                self.current_actor = None; // Reset actor after reload.
+                tracing::debug!("CRDT history compacted ({} bytes)", bytes.len());
+            }
+        }
+    }
 }
 
 impl Default for CrdtDoc {

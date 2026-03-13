@@ -104,6 +104,8 @@ impl Buffer {
         let file = std::io::BufWriter::new(std::fs::File::create(path)?);
         self.rope.write_to(file)?;
         self.modified = false;
+        // Compact CRDT history to free memory.
+        self.crdt.compact();
         Ok(())
     }
 
@@ -531,6 +533,58 @@ impl Buffer {
     /// Get the edit history (visible portion up to history_pos).
     pub fn history(&self) -> &[Edit] {
         &self.history[..self.history_pos]
+    }
+
+    /// Return a text representation of the undo history tree.
+    ///
+    /// Each entry shows: its index, the author, the edit type and size, and
+    /// whether it is the current position (marked with `→`) or a future redo
+    /// entry (marked with `(redo)`).  An empty history returns a placeholder
+    /// message.
+    ///
+    /// Example output:
+    /// ```text
+    ///   0 [human] insert 5 chars
+    ///   1 [human] delete 3 chars
+    /// → 2 [ai:claude] insert 20 chars
+    ///   3 [human] insert 1 char     (redo)
+    /// ```
+    pub fn undo_tree_text(&self) -> String {
+        if self.history.is_empty() {
+            return "  (no edits yet)".to_string();
+        }
+
+        let mut lines = Vec::with_capacity(self.history.len());
+        for (i, edit) in self.history.iter().enumerate() {
+            let author_label = match &edit.author {
+                crate::author::AuthorId::Human => "human".to_string(),
+                crate::author::AuthorId::Ai(name) => format!("ai:{name}"),
+            };
+            let action_label = match &edit.kind {
+                EditKind::Insert { text, .. } => {
+                    let n = text.chars().count();
+                    format!("insert {} char{}", n, if n == 1 { "" } else { "s" })
+                }
+                EditKind::Delete { deleted, .. } => {
+                    let n = deleted.chars().count();
+                    format!("delete {} char{}", n, if n == 1 { "" } else { "s" })
+                }
+            };
+
+            // The current position points to the *next* edit to be undone, so
+            // the entry at index `history_pos - 1` is the most recent active
+            // edit.  Entries at index >= `history_pos` are redo entries.
+            let is_current = self.history_pos > 0 && i == self.history_pos - 1;
+            let is_redo = i >= self.history_pos;
+
+            let prefix = if is_current { "→" } else { " " };
+            let suffix = if is_redo { "     (redo)" } else { "" };
+
+            lines.push(format!(
+                "{prefix} {i:>3} [{author_label}] {action_label}{suffix}"
+            ));
+        }
+        lines.join("\n")
     }
 }
 

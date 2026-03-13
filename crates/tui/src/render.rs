@@ -1,6 +1,8 @@
 //! Rendering the editor UI with ratatui.
 
 use crate::app::{App, ConversationPanel, Mode};
+use crate::config::Theme;
+use crate::git::LineStatus;
 use crate::speculative::GhostSuggestion;
 use aura_core::conversation::MessageRole;
 use aura_core::AuthorId;
@@ -44,7 +46,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Adjust scroll so cursor is visible.
     app.scroll_to_cursor(editor_area.height as usize, editor_area.width as usize - 6);
 
-    draw_editor(frame, app, editor_area);
+    // Pre-compute git line status for visible lines.
+    let git_status: std::collections::HashMap<usize, LineStatus> = {
+        let visible_lines = editor_area.height as usize;
+        let mut status = std::collections::HashMap::new();
+        for i in 0..visible_lines {
+            let line_idx = app.scroll_row + i;
+            if let Some(s) = app.git_line_status(line_idx) {
+                status.insert(line_idx, s);
+            }
+        }
+        status
+    };
+
+    draw_editor(frame, app, editor_area, &git_status);
 
     if has_proposal {
         draw_proposal(frame, app, proposal_area);
@@ -78,16 +93,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-/// Map an AuthorId to a terminal color.
-fn author_color(author: &AuthorId) -> Color {
+/// Map an AuthorId to a terminal color using the theme.
+fn author_color(author: &AuthorId, theme: &Theme) -> Color {
     match author {
-        AuthorId::Human => Color::Green,
-        AuthorId::Ai(_) => Color::Blue,
+        AuthorId::Human => theme.author_human,
+        AuthorId::Ai(_) => theme.author_ai,
     }
 }
 
 /// Draw the main editor area with line numbers and authorship gutter.
-fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_editor(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    git_status: &std::collections::HashMap<usize, LineStatus>,
+) {
     // Gutter: 1 (author marker) + 4 (line number) + 1 (space) = 6
     let gutter_width = 6u16;
     let text_width = area.width.saturating_sub(gutter_width);
@@ -96,7 +116,10 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::with_capacity(visible_lines);
 
     let selection = app.visual_selection_range();
-    let sel_style = Style::default().bg(Color::DarkGray).fg(Color::White);
+    let theme = &app.theme;
+    let sel_style = Style::default()
+        .bg(theme.selection_bg)
+        .fg(theme.selection_fg);
     let show_authorship = app.show_authorship;
 
     for i in 0..visible_lines {
@@ -110,28 +133,40 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
                 .filter(|c| *c != '\n' && *c != '\r')
                 .collect();
 
-            // Gutter marker: diagnostic > conversation > authorship.
+            // Gutter marker: diagnostic > conversation > git > authorship.
             let marker_span = if let Some(diag) = app.line_diagnostics(line_idx) {
                 if diag.is_error() {
                     Span::styled(
                         "E",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.error)
+                            .add_modifier(Modifier::BOLD),
                     )
                 } else if diag.is_warning() {
                     Span::styled(
                         "W",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(theme.warning)
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
-                    Span::styled("I", Style::default().fg(Color::Cyan))
+                    Span::styled("I", Style::default().fg(theme.info))
                 }
             } else if app.show_conversations && app.line_has_conversation(line_idx) {
                 Span::styled("C", Style::default().fg(Color::Magenta))
+            } else if let Some(gs) = git_status.get(&line_idx) {
+                match gs {
+                    LineStatus::Added => Span::styled("▎", Style::default().fg(theme.git_added)),
+                    LineStatus::Modified => {
+                        Span::styled("▎", Style::default().fg(theme.git_modified))
+                    }
+                    LineStatus::Deleted => {
+                        Span::styled("▁", Style::default().fg(theme.git_deleted))
+                    }
+                }
             } else if show_authorship {
                 if let Some(author) = app.buffer.line_author(line_idx) {
-                    Span::styled("▎", Style::default().fg(author_color(author)))
+                    Span::styled("▎", Style::default().fg(author_color(author, theme)))
                 } else {
                     Span::raw(" ")
                 }
@@ -141,7 +176,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut spans = vec![
                 marker_span,
-                Span::styled(line_num, Style::default().fg(Color::DarkGray)),
+                Span::styled(line_num, Style::default().fg(theme.gutter_fg)),
             ];
 
             // Build per-character styles combining syntax highlighting and selection.
@@ -200,7 +235,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             lines.push(Line::from(vec![Span::styled(
                 "    ~ ",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.gutter_fg),
             )]));
         }
     }
@@ -247,13 +282,14 @@ fn draw_proposal(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the status bar showing mode, file info, and cursor position.
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let mode_style = match app.mode {
-        Mode::Normal => Style::default().fg(Color::Black).bg(Color::Blue),
-        Mode::Insert => Style::default().fg(Color::Black).bg(Color::Green),
-        Mode::Command => Style::default().fg(Color::Black).bg(Color::Yellow),
-        Mode::Visual | Mode::VisualLine => Style::default().fg(Color::Black).bg(Color::Magenta),
-        Mode::Intent => Style::default().fg(Color::Black).bg(Color::Cyan),
-        Mode::Review => Style::default().fg(Color::Black).bg(Color::LightRed),
+        Mode::Normal => Style::default().fg(Color::Black).bg(theme.mode_normal),
+        Mode::Insert => Style::default().fg(Color::Black).bg(theme.mode_insert),
+        Mode::Command => Style::default().fg(Color::Black).bg(theme.mode_command),
+        Mode::Visual | Mode::VisualLine => Style::default().fg(Color::Black).bg(theme.mode_visual),
+        Mode::Intent => Style::default().fg(Color::Black).bg(theme.mode_intent),
+        Mode::Review => Style::default().fg(Color::Black).bg(theme.mode_review),
     };
 
     let file_name = app
@@ -292,6 +328,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let lsp_indicator = if app.has_lsp() { " │ LSP" } else { "" };
 
+    let git_indicator = app
+        .git_branch()
+        .map(|b| format!(" │ {b}"))
+        .unwrap_or_default();
+
     let mcp_indicator = if let Some(port) = app.mcp_port() {
         let agent_count = app.agent_registry.count();
         if agent_count > 0 {
@@ -304,10 +345,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let left = format!(
-        " {} │ {}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
+        git_indicator,
         last_change,
         diag_str,
         lsp_indicator,
@@ -323,11 +365,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(&left, mode_style),
         Span::styled(
             " ".repeat(padding as usize),
-            Style::default().bg(Color::DarkGray),
+            Style::default().bg(theme.status_bg),
         ),
         Span::styled(
             &right,
-            Style::default().fg(Color::White).bg(Color::DarkGray),
+            Style::default().fg(theme.status_fg).bg(theme.status_bg),
         ),
     ]);
 
@@ -377,13 +419,13 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let style = match app.mode {
-        Mode::Intent => Style::default().fg(Color::Cyan),
-        Mode::Review => Style::default().fg(Color::LightRed),
+        Mode::Intent => Style::default().fg(app.theme.mode_intent),
+        Mode::Review => Style::default().fg(app.theme.mode_review),
         _ => {
             if app.current_ghost_suggestion().is_some() {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(app.theme.ghost)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(app.theme.fg)
             }
         }
     };
@@ -509,7 +551,7 @@ fn draw_conversation_panel(frame: &mut Frame, editor_area: Rect, panel: &Convers
 /// Draw ghost text overlay for a speculative suggestion.
 fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: &GhostSuggestion) {
     let ghost_style = Style::default()
-        .fg(Color::DarkGray)
+        .fg(app.theme.ghost)
         .add_modifier(Modifier::ITALIC);
 
     // Show ghost text inline after the cursor position.
@@ -551,7 +593,7 @@ fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: 
         let hint_area = Rect::new(editor_area.x + 6, cursor_screen_y + 1, hint_width as u16, 1);
         let hint_line = Paragraph::new(Span::styled(
             &hint[..hint_width],
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(app.theme.ghost),
         ));
         frame.render_widget(hint_line, hint_area);
     }

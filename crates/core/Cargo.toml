@@ -20,3 +20,7 @@ criterion.workspace = true
 [[bench]]
 name = "crdt_bench"
 harness = false
+
+[[bench]]
+name = "large_file_bench"
+harness = false

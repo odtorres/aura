@@ -2,6 +2,12 @@
 name = "aura"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "AI-native terminal text editor for human + AI co-authoring"
+repository = "https://github.com/aura-editor/aura"
+keywords = ["editor", "terminal", "ai", "tui", "vim"]
+categories = ["command-line-utilities", "text-editors"]
 
 [[bin]]
 name = "aura"

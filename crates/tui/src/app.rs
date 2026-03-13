@@ -1,5 +1,7 @@
 //! Application state and main event loop.
 
+use crate::config::{AuraConfig, Theme};
+use crate::git::{GitRepo, LineStatus};
 use crate::highlight::{HighlightedLine, Language, SyntaxHighlighter};
 use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
@@ -144,11 +146,38 @@ pub struct App {
     pub agent_registry: AgentRegistry,
     /// Speculative execution engine for background AI analysis.
     speculative: Option<SpeculativeEngine>,
+    /// Git repository handle (None if not in a git repo).
+    git_repo: Option<GitRepo>,
+    /// Whether to show inline blame annotations.
+    pub show_blame: bool,
+    /// Loaded configuration from aura.toml.
+    pub config: AuraConfig,
+    /// Resolved color theme.
+    pub theme: Theme,
+    /// When true, the intent_input is editing an existing proposal rather than
+    /// sending a new request to the AI. Pressing Enter in Intent mode will
+    /// update the proposal text and return to Review mode.
+    pub editing_proposal: bool,
+    /// When true, the intent_input is a revision request for the current
+    /// proposal. Pressing Enter will send a new AI request that includes the
+    /// current proposed text plus the user's revision instructions.
+    pub revising_proposal: bool,
 }
 
 impl App {
     /// Create a new app. Attempts to initialise the AI client from env.
     pub fn new(buffer: Buffer) -> Self {
+        // Load configuration from aura.toml.
+        let config_path = buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|dir| dir.join("aura.toml"))
+            .unwrap_or_else(|| std::path::PathBuf::from("aura.toml"));
+        let config = crate::config::load_config(&config_path);
+        let config_table = crate::config::load_config_table(&config_path);
+        let theme = crate::config::resolve_theme(&config.theme, config_table.as_ref());
+        tracing::info!("Loaded config, theme: {}", theme.name);
+
         let ai_client = AiConfig::from_env().and_then(|config| AnthropicClient::new(config).ok());
 
         // Detect language from file extension and set up highlighter.
@@ -199,6 +228,17 @@ impl App {
                 None
             }
         };
+
+        // Open git repository.
+        let git_repo = buffer.file_path().and_then(|p| GitRepo::discover(p).ok());
+
+        if let Some(ref repo) = git_repo {
+            tracing::info!(
+                "Git repo at {:?}, branch: {}",
+                repo.workdir(),
+                repo.current_branch().unwrap_or_else(|| "detached".into())
+            );
+        }
 
         // Initialize speculative engine (reuses AI config).
         let speculative =
@@ -271,7 +311,15 @@ impl App {
             mcp_clients,
             agent_registry: AgentRegistry::default(),
             speculative,
+            git_repo,
+            show_blame: false,
+            config: config.clone(),
+            theme,
+            editing_proposal: false,
+            revising_proposal: false,
         };
+        // Apply config settings.
+        app.show_authorship = config.editor.show_authorship;
         app.refresh_highlights();
         app.refresh_semantic_index();
         app
@@ -557,6 +605,9 @@ impl App {
         if let Some(engine) = &mut self.speculative {
             engine.buffer_edited(self.cursor.row);
         }
+        if let Some(repo) = &mut self.git_repo {
+            repo.invalidate_status();
+        }
     }
 
     /// Regenerate syntax highlights from the current buffer content.
@@ -695,6 +746,40 @@ impl App {
         } else {
             self.set_status("Conversation storage not available");
         }
+    }
+
+    /// Show the undo history tree in the conversation panel.
+    ///
+    /// Builds a text representation of the full edit history (including redo
+    /// entries) and displays it using the existing [`ConversationPanel`]
+    /// mechanism so the user can scroll through it.  The panel is closed with
+    /// `q` or `Esc` just like the conversation history panel.
+    pub fn show_undo_tree(&mut self) {
+        use aura_core::conversation::{ConversationMessage, MessageRole};
+        let tree_text = self.buffer.undo_tree_text();
+        let history_len = self.buffer.history().len();
+        let total = tree_text.lines().count();
+        // Wrap the tree text as a single System message so the renderer can
+        // display it verbatim inside the ConversationPanel.
+        let message = ConversationMessage {
+            id: "undo-tree".to_string(),
+            conversation_id: "undo-tree".to_string(),
+            role: MessageRole::System,
+            content: tree_text,
+            created_at: String::new(),
+            model: None,
+        };
+        self.conversation_panel = Some(ConversationPanel {
+            messages: vec![message],
+            file_info: format!(
+                "Undo tree — {} active edit{}, {} total",
+                history_len,
+                if history_len == 1 { "" } else { "s" },
+                total,
+            ),
+            scroll: 0,
+        });
+        self.set_status("Undo tree — Esc/q to close, j/k to scroll");
     }
 
     /// Show recent decisions summary.
@@ -1457,6 +1542,186 @@ impl App {
         if let Some(engine) = &mut self.speculative {
             engine.pending_changeset = None;
         }
+    }
+
+    // --- Git integration ---
+
+    /// Get line-level git diff status for the current file.
+    pub fn git_line_status(&mut self, line: usize) -> Option<LineStatus> {
+        let file_path = self.buffer.file_path()?.to_path_buf();
+        let repo = self.git_repo.as_mut()?;
+        let status = repo.line_status(&file_path);
+        status.get(&line).copied()
+    }
+
+    /// Get blame info for a specific line.
+    pub fn git_blame_for_line(&mut self, line: usize) -> Option<crate::git::BlameEntry> {
+        let file_path = self.buffer.file_path()?.to_path_buf();
+        let repo = self.git_repo.as_mut()?;
+        let blame = repo.blame(&file_path);
+        blame.get(line).and_then(|e| e.clone())
+    }
+
+    /// Check if git is available.
+    pub fn has_git(&self) -> bool {
+        self.git_repo.is_some()
+    }
+
+    /// Get the current branch name.
+    pub fn git_branch(&self) -> Option<String> {
+        self.git_repo.as_ref()?.current_branch()
+    }
+
+    /// Commit the current file with a message.
+    pub fn git_commit(&self, message: &str) {
+        let file_path = match self.buffer.file_path() {
+            Some(p) => p.to_path_buf(),
+            None => {
+                return;
+            }
+        };
+
+        let repo = match &self.git_repo {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Get conversation summary if available.
+        let conv_summary = self.active_conversation.as_ref().and_then(|conv_id| {
+            let store = self.conversation_store.as_ref()?;
+            let msgs = store.messages_for_conversation(conv_id).ok()?;
+            msgs.first()
+                .map(|m| m.content.chars().take(100).collect::<String>())
+        });
+
+        match repo.commit_with_conversation(&file_path, message, conv_summary.as_deref()) {
+            Ok(hash) => {
+                tracing::info!("Committed: {hash}");
+            }
+            Err(e) => {
+                tracing::warn!("Commit failed: {e}");
+            }
+        }
+    }
+
+    /// Generate an AI commit message for the current changes.
+    pub fn generate_commit_message(&mut self) {
+        let client = match &self.ai_client {
+            Some(c) => c,
+            None => {
+                self.set_status("No API key for commit message generation");
+                return;
+            }
+        };
+
+        let diff_summary = self
+            .git_repo
+            .as_ref()
+            .and_then(|repo| {
+                let fp = self.buffer.file_path()?;
+                repo.diff_summary(fp).ok()
+            })
+            .unwrap_or_default();
+
+        if diff_summary.trim().is_empty() {
+            self.set_status("No staged changes to describe");
+            return;
+        }
+
+        let system = "You are generating a git commit message. \
+                      Write a concise, conventional commit message (type: description). \
+                      Output ONLY the commit message, no explanations."
+            .to_string();
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: format!(
+                "Generate a commit message for these changes:\n\n{}\n\nFile: {}",
+                diff_summary,
+                self.buffer
+                    .file_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            ),
+        }];
+
+        let rx = client.stream_completion(&system, messages);
+        // Collect synchronously in a background thread, then apply.
+        let (result_tx, result_rx) = mpsc::channel::<String>();
+        std::thread::Builder::new()
+            .name("commit-msg".to_string())
+            .spawn(move || {
+                let mut msg = String::new();
+                loop {
+                    match rx.recv() {
+                        Ok(AiEvent::Token(t)) => msg.push_str(&t),
+                        Ok(AiEvent::Done(t)) => {
+                            msg = t;
+                            break;
+                        }
+                        Ok(AiEvent::Error(_)) | Err(_) => break,
+                    }
+                }
+                let _ = result_tx.send(msg);
+            })
+            .ok();
+
+        // Store the receiver; we'll poll it. For now, use blocking with timeout.
+        match result_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(msg) if !msg.is_empty() => {
+                let trimmed = msg.trim().to_string();
+                self.set_status(format!("Commit msg: {trimmed}"));
+                // Auto-commit with the generated message.
+                self.git_commit(&trimmed);
+                self.set_status(format!("Committed: {trimmed}"));
+            }
+            _ => {
+                self.set_status("Failed to generate commit message");
+            }
+        }
+    }
+
+    /// List git branches.
+    pub fn git_list_branches(&self) -> Vec<crate::git::BranchInfo> {
+        self.git_repo
+            .as_ref()
+            .and_then(|r| r.list_branches().ok())
+            .unwrap_or_default()
+    }
+
+    /// Switch to a git branch.
+    pub fn git_checkout(&mut self, branch: &str) {
+        if let Some(repo) = &mut self.git_repo {
+            match repo.checkout_branch(branch) {
+                Ok(()) => {
+                    self.set_status(format!("Switched to branch '{branch}'"));
+                    self.mark_highlights_dirty();
+                }
+                Err(e) => {
+                    self.set_status(format!("Checkout failed: {e}"));
+                }
+            }
+        }
+    }
+
+    /// Create a new git branch.
+    pub fn git_create_branch(&mut self, branch: &str) {
+        if let Some(repo) = &mut self.git_repo {
+            match repo.create_branch(branch) {
+                Ok(()) => {
+                    self.set_status(format!("Created and switched to branch '{branch}'"));
+                }
+                Err(e) => {
+                    self.set_status(format!("Branch creation failed: {e}"));
+                }
+            }
+        }
+    }
+
+    /// Toggle blame display.
+    pub fn toggle_blame(&mut self) {
+        self.show_blame = !self.show_blame;
+        let state = if self.show_blame { "on" } else { "off" };
+        self.set_status(format!("Inline blame: {state}"));
     }
 
     /// Returns the (start, end) character indices of the visual selection, if active.
