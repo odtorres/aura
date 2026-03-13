@@ -2,6 +2,7 @@
 
 use crate::highlight::{HighlightedLine, Language, SyntaxHighlighter};
 use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
+use crate::semantic_index::SemanticIndexer;
 use aura_ai::{AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
 use aura_core::{Buffer, Cursor};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -98,6 +99,14 @@ pub struct App {
     lsp_change_pending: bool,
     /// When the last buffer edit occurred (for debouncing didChange).
     lsp_last_change: Instant,
+    /// Semantic indexer for code structure analysis.
+    semantic_indexer: Option<SemanticIndexer>,
+    /// Detected language for the current file.
+    language: Option<Language>,
+    /// Whether the semantic index needs refreshing.
+    semantic_dirty: bool,
+    /// Cached semantic context for the symbol at cursor.
+    pub semantic_info: Option<String>,
 }
 
 impl App {
@@ -112,6 +121,7 @@ impl App {
             .and_then(|ext| ext.to_str())
             .and_then(Language::from_extension);
         let highlighter = language.and_then(SyntaxHighlighter::new);
+        let semantic_indexer = language.and_then(SemanticIndexer::new);
 
         // Try to start a language server.
         let lsp_client = buffer
@@ -152,8 +162,13 @@ impl App {
             g_pending: false,
             lsp_change_pending: false,
             lsp_last_change: Instant::now(),
+            semantic_indexer,
+            language,
+            semantic_dirty: true,
+            semantic_info: None,
         };
         app.refresh_highlights();
+        app.refresh_semantic_index();
         app
     }
 
@@ -171,11 +186,14 @@ impl App {
             // Poll for LSP events.
             self.poll_lsp_events();
 
-            // Send debounced didChange if needed (300ms delay).
-            if self.lsp_change_pending
-                && self.lsp_last_change.elapsed() > Duration::from_millis(300)
-            {
-                self.send_lsp_did_change();
+            // Send debounced didChange and re-index if needed (300ms delay).
+            if self.lsp_last_change.elapsed() > Duration::from_millis(300) {
+                if self.lsp_change_pending {
+                    self.send_lsp_did_change();
+                }
+                if self.semantic_dirty {
+                    self.refresh_semantic_index();
+                }
             }
 
             // Poll for terminal events with a small timeout.
@@ -271,9 +289,15 @@ impl App {
             }
         };
 
-        // Build context.
+        // Build context with semantic info.
         let selection = self.visual_selection_range();
-        let ctx = EditorContext::from_buffer(&self.buffer, &self.cursor, selection);
+        let semantic = self.semantic_context_for_ai();
+        let ctx = EditorContext::from_buffer_with_semantic(
+            &self.buffer,
+            &self.cursor,
+            selection,
+            semantic,
+        );
 
         // Determine the range to replace.
         let (start, end) = if let Some((s, e)) = selection {
@@ -348,9 +372,10 @@ impl App {
         self.ai_client.is_some()
     }
 
-    /// Mark syntax highlights as stale (call after any buffer edit).
+    /// Mark syntax highlights and semantic index as stale (call after any buffer edit).
     pub fn mark_highlights_dirty(&mut self) {
         self.highlights_dirty = true;
+        self.semantic_dirty = true;
         self.lsp_change_pending = true;
         self.lsp_last_change = Instant::now();
     }
@@ -362,6 +387,50 @@ impl App {
             self.highlight_lines = hl.highlight(&source);
         }
         self.highlights_dirty = false;
+    }
+
+    /// Rebuild the semantic index from the current buffer.
+    pub fn refresh_semantic_index(&mut self) {
+        if let (Some(indexer), Some(lang)) = (&mut self.semantic_indexer, self.language) {
+            let source = self.buffer.rope().to_string();
+            let path = self
+                .buffer
+                .file_path()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+            indexer.index_file(&path, &source, lang);
+        }
+        self.semantic_dirty = false;
+    }
+
+    /// Update cached semantic info for the symbol at the current cursor.
+    pub fn update_semantic_context(&mut self) {
+        self.semantic_info = None;
+        if let Some(indexer) = &self.semantic_indexer {
+            let path = self
+                .buffer
+                .file_path()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+            if let Some((id, _)) = indexer.graph().symbol_at(&path, self.cursor.row) {
+                self.semantic_info = indexer.graph().context_string(id);
+            }
+        }
+    }
+
+    /// Get impact summary for a range of lines (used during AI proposal review).
+    pub fn impact_summary(&self, start_line: usize, end_line: usize) -> Option<String> {
+        let indexer = self.semantic_indexer.as_ref()?;
+        let path = self.buffer.file_path()?.to_path_buf();
+        indexer.graph().impact_summary(&path, start_line, end_line)
+    }
+
+    /// Get semantic context string for the AI.
+    pub fn semantic_context_for_ai(&self) -> Option<String> {
+        let indexer = self.semantic_indexer.as_ref()?;
+        let path = self.buffer.file_path()?.to_path_buf();
+        let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
+        indexer.graph().context_string(id)
     }
 
     /// Poll the LSP client for events.

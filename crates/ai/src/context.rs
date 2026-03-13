@@ -33,6 +33,8 @@ pub struct EditorContext {
     pub recent_edits: Vec<String>,
     /// Total line count.
     pub total_lines: usize,
+    /// Semantic context for the symbol at cursor (call graph, tests).
+    pub semantic_context: Option<String>,
 }
 
 impl EditorContext {
@@ -41,6 +43,16 @@ impl EditorContext {
         buffer: &Buffer,
         cursor: &Cursor,
         selection: Option<(usize, usize)>,
+    ) -> Self {
+        Self::from_buffer_with_semantic(buffer, cursor, selection, None)
+    }
+
+    /// Build context with optional semantic graph information.
+    pub fn from_buffer_with_semantic(
+        buffer: &Buffer,
+        cursor: &Cursor,
+        selection: Option<(usize, usize)>,
+        semantic_context: Option<String>,
     ) -> Self {
         let file_path = buffer.file_path().map(|p| p.display().to_string());
         let language = buffer
@@ -96,6 +108,7 @@ impl EditorContext {
             selection: selection_text,
             recent_edits,
             total_lines,
+            semantic_context,
         }
     }
 
@@ -136,6 +149,12 @@ impl EditorContext {
             prompt.push_str("\n--- SELECTED TEXT ---\n");
             prompt.push_str(sel);
             prompt.push_str("\n--- END SELECTION ---\n");
+        }
+
+        if let Some(semantic) = &self.semantic_context {
+            prompt.push_str("\n--- SEMANTIC CONTEXT ---\n");
+            prompt.push_str(semantic);
+            prompt.push_str("\n--- END SEMANTIC ---\n");
         }
 
         prompt

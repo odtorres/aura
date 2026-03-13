@@ -159,10 +159,10 @@ The editor understands code structure, not just text.
 - [ ] Feed LSP diagnostics into AI context automatically
 
 ### 3.3 Semantic graph
-- [ ] Build a lightweight dependency graph from Tree-sitter + LSP data
-- [ ] Track: which functions call which, which tests cover which functions
-- [ ] When AI proposes a change, show "affected by this change: X, Y, Z"
-- [ ] Feed graph info to AI: "this function is called by 3 other functions"
+- [x] Build a lightweight dependency graph from Tree-sitter + LSP data
+- [x] Track: which functions call which, which tests cover which functions
+- [x] When AI proposes a change, show "affected by this change: X, Y, Z"
+- [x] Feed graph info to AI: "this function is called by 3 other functions"
 
 ### Phase 3 Definition of Done
 > Syntax highlighting via Tree-sitter. LSP diagnostics and navigation working.

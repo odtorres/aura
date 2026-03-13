@@ -7,8 +7,10 @@ pub mod author;
 pub mod buffer;
 pub mod crdt;
 pub mod cursor;
+pub mod semantic;
 
 pub use author::{Author, AuthorColor, AuthorId};
 pub use buffer::Buffer;
 pub use crdt::CrdtDoc;
 pub use cursor::Cursor;
+pub use semantic::SemanticGraph;

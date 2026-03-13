@@ -322,7 +322,21 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                         proposal.proposed_text.len()
                     )
                 } else {
-                    "a: accept | r: reject | Esc: cancel".to_string()
+                    // Show impact analysis alongside review controls.
+                    let start_line = app
+                        .buffer
+                        .char_idx_to_cursor(proposal.start.min(app.buffer.len_chars()))
+                        .row;
+                    let end_line = app
+                        .buffer
+                        .char_idx_to_cursor(proposal.end.min(app.buffer.len_chars()))
+                        .row;
+                    let impact = app.impact_summary(start_line, end_line).unwrap_or_default();
+                    if impact.is_empty() {
+                        "a: accept | r: reject | Esc: cancel".to_string()
+                    } else {
+                        format!("a: accept | r: reject │ {impact}")
+                    }
                 }
             } else {
                 String::new()

@@ -433,6 +433,15 @@ fn handle_leader(app: &mut App, code: KeyCode) {
                 app.set_status("No API key. Set ANTHROPIC_API_KEY");
             }
         }
+        // <leader>s — show semantic info for symbol at cursor
+        KeyCode::Char('s') => {
+            app.update_semantic_context();
+            if let Some(info) = &app.semantic_info {
+                app.set_status(info.replace('\n', " │ "));
+            } else {
+                app.set_status("No semantic info at cursor");
+            }
+        }
         _ => {
             app.set_status("Unknown leader command");
         }
