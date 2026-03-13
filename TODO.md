@@ -152,9 +152,9 @@ The editor understands code structure, not just text.
 - [ ] Highlight groups configurable via theme file (TOML)
 
 ### 3.2 LSP client
-- [ ] Implement LSP client (consider `tower-lsp` or custom over JSON-RPC)
-- [ ] Diagnostics: show errors/warnings in gutter + floating window
-- [ ] Go to definition, references, hover info
+- [x] Implement LSP client (consider `tower-lsp` or custom over JSON-RPC)
+- [x] Diagnostics: show errors/warnings in gutter + floating window
+- [x] Go to definition, references, hover info
 - [ ] Code actions: integrate with AI (AI can trigger code actions or vice versa)
 - [ ] Feed LSP diagnostics into AI context automatically
 
