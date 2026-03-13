@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=AURA Editor
+Comment=AI-native terminal text editor with CRDT-based co-authoring
+Exec=aura %F
+Icon=aura-editor
+Terminal=true
+Type=Application
+Categories=TextEditor;Development;
+Keywords=text;editor;vim;terminal;ai;
+MimeType=text/plain;text/x-c;text/x-c++;text/x-python;text/x-rust;text/x-go;
+StartupNotify=true

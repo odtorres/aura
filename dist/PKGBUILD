@@ -1,0 +1,48 @@
+# Maintainer: AURA Editor Team <maintainers@aura-editor.com>
+# Contributor: AURA Editor Team <maintainers@aura-editor.com>
+
+pkgname=aura-editor
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="AI-native terminal text editor with CRDT-based co-authoring"
+arch=('x86_64' 'aarch64')
+url="https://github.com/aura-editor/aura"
+license=('MIT')
+depends=()
+makedepends=('rust' 'cargo')
+provides=('aura')
+conflicts=('aura')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/aura-editor/aura/archive/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "aura-${pkgver}"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "aura-${pkgver}"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release --package aura
+}
+
+check() {
+    cd "aura-${pkgver}"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo test --frozen --workspace
+}
+
+package() {
+    cd "aura-${pkgver}"
+
+    # Install the binary
+    install -Dm755 "target/release/aura" "${pkgdir}/usr/bin/aura"
+
+    # Install license
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+    # Install documentation
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

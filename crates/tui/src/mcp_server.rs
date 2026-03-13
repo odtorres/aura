@@ -71,6 +71,10 @@ pub enum McpAction {
     ListAgents,
     /// Register a new agent.
     RegisterAgent { name: String },
+    /// Register a new agent with an optional role.
+    RegisterAgentWithRole { name: String, role: Option<String> },
+    /// Assign a role to an already-registered agent.
+    AssignRole { name: String, role: String },
     /// Unregister an agent.
     UnregisterAgent { name: String },
     /// Get buffer metadata (file path, language, line count, modified state).
@@ -122,6 +126,8 @@ pub struct AgentInfo {
     pub connected_at: String,
     /// Number of edits made by this agent.
     pub edit_count: usize,
+    /// Role assigned to this agent (e.g., "tests", "implementation", "review").
+    pub role: Option<String>,
 }
 
 /// Tracks connected MCP agents.
@@ -142,9 +148,42 @@ impl AgentRegistry {
                 name: name.to_string(),
                 connected_at: now_iso(),
                 edit_count: 0,
+                role: None,
             },
         );
         true
+    }
+
+    /// Register a new agent with an optional role. Returns false if already registered.
+    pub fn register_with_role(&mut self, name: &str, role: Option<String>) -> bool {
+        if self.agents.contains_key(name) {
+            return false;
+        }
+        self.agents.insert(
+            name.to_string(),
+            AgentInfo {
+                name: name.to_string(),
+                connected_at: now_iso(),
+                edit_count: 0,
+                role,
+            },
+        );
+        true
+    }
+
+    /// Assign a role to an existing agent. Returns false if the agent is not registered.
+    pub fn assign_role(&mut self, name: &str, role: String) -> bool {
+        if let Some(agent) = self.agents.get_mut(name) {
+            agent.role = Some(role);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the role of an agent, if any.
+    pub fn agent_role(&self, name: &str) -> Option<&str> {
+        self.agents.get(name)?.role.as_deref()
     }
 
     /// Unregister an agent.
@@ -434,8 +473,32 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
             }),
         },
         ToolDefinition {
+            name: "register_agent_with_role".to_string(),
+            description: "Register as a collaborating agent with an assigned role (e.g. 'tests', 'implementation', 'review').".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Unique agent name/identifier" },
+                    "role": { "type": "string", "description": "Role for this agent (e.g. 'tests', 'implementation', 'review')" }
+                },
+                "required": ["name"]
+            }),
+        },
+        ToolDefinition {
+            name: "assign_role".to_string(),
+            description: "Assign a role to an already-registered agent. Used by the orchestrator to direct agents.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Agent name to assign role to" },
+                    "role": { "type": "string", "description": "Role to assign (e.g. 'tests', 'implementation', 'review')" }
+                },
+                "required": ["name", "role"]
+            }),
+        },
+        ToolDefinition {
             name: "list_agents".to_string(),
-            description: "List all currently connected agents.".to_string(),
+            description: "List all currently connected agents, including their roles and edit counts.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -530,6 +593,31 @@ fn handle_tools_call(
                 .unwrap_or("agent")
                 .to_string();
             McpAction::RegisterAgent { name }
+        }
+        "register_agent_with_role" => {
+            let name = arguments
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("agent")
+                .to_string();
+            let role = arguments
+                .get("role")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            McpAction::RegisterAgentWithRole { name, role }
+        }
+        "assign_role" => {
+            let name = arguments
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let role = arguments
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            McpAction::AssignRole { name, role }
         }
         "unregister_agent" => {
             let name = arguments
@@ -862,7 +950,7 @@ mod tests {
 
         let tools = response.result.unwrap();
         let tool_list = tools.get("tools").unwrap().as_array().unwrap();
-        assert_eq!(tool_list.len(), 9);
+        assert_eq!(tool_list.len(), 11);
     }
 
     #[test]

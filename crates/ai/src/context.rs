@@ -13,6 +13,25 @@ const MAX_CONTEXT_CHARS: usize = 30_000;
 /// Number of recent edits to include in context.
 const MAX_RECENT_EDITS: usize = 10;
 
+/// Estimate the number of tokens in a string using a simple heuristic.
+///
+/// Uses the commonly accepted approximation of 1 token per 4 characters,
+/// which is a reasonable estimate for Claude models on English/code text.
+pub fn estimate_tokens(text: &str) -> usize {
+    (text.len() / 4).max(1)
+}
+
+/// A single LSP diagnostic summary carried in [`EditorContext`].
+#[derive(Debug, Clone)]
+pub struct DiagnosticSummary {
+    /// 1-indexed line number.
+    pub line: usize,
+    /// Severity label ("error", "warning", "info", or "hint").
+    pub severity: String,
+    /// The diagnostic message text.
+    pub message: String,
+}
+
 /// Assembled editor context ready to be sent to the AI.
 #[derive(Debug, Clone)]
 pub struct EditorContext {
@@ -35,6 +54,10 @@ pub struct EditorContext {
     pub total_lines: usize,
     /// Semantic context for the symbol at cursor (call graph, tests).
     pub semantic_context: Option<String>,
+    /// Active LSP diagnostics for the file (errors, warnings).
+    pub diagnostics: Vec<DiagnosticSummary>,
+    /// Maximum tokens allowed in the context window (default: 100_000 for claude-sonnet).
+    pub max_tokens: usize,
 }
 
 impl EditorContext {
@@ -109,10 +132,16 @@ impl EditorContext {
             recent_edits,
             total_lines,
             semantic_context,
+            diagnostics: Vec::new(),
+            max_tokens: 100_000,
         }
     }
 
     /// Format the context as a system prompt for the AI.
+    ///
+    /// If the assembled prompt would exceed 80% of `max_tokens`, the buffer
+    /// content section is truncated to keep the total within the budget and
+    /// leave room for the model's response.
     pub fn to_system_prompt(&self) -> String {
         let mut prompt = String::from(
             "You are an AI code editor assistant integrated into the AURA editor. \
@@ -141,8 +170,19 @@ impl EditorContext {
             }
         }
 
+        // Reserve 80% of max_tokens for context (leaving 20% for the response).
+        let context_token_budget = (self.max_tokens as f64 * 0.8) as usize;
+
+        // Estimate tokens for everything except the buffer content.
+        let overhead_tokens =
+            estimate_tokens(&prompt) + estimate_tokens("\n--- FILE CONTENT ---\n\n--- END ---\n");
+        let content_token_budget = context_token_budget.saturating_sub(overhead_tokens);
+
+        // Truncate buffer content if it would exceed the budget.
+        let content = truncate_to_token_budget(&self.content, content_token_budget);
+
         prompt.push_str("\n--- FILE CONTENT ---\n");
-        prompt.push_str(&self.content);
+        prompt.push_str(&content);
         prompt.push_str("\n--- END ---\n");
 
         if let Some(sel) = &self.selection {
@@ -157,8 +197,44 @@ impl EditorContext {
             prompt.push_str("\n--- END SEMANTIC ---\n");
         }
 
+        if !self.diagnostics.is_empty() {
+            prompt.push_str("\n--- LSP DIAGNOSTICS ---\n");
+            for diag in &self.diagnostics {
+                prompt.push_str(&format!(
+                    "  line {}: [{}] {}\n",
+                    diag.line, diag.severity, diag.message
+                ));
+            }
+            prompt.push_str("--- END DIAGNOSTICS ---\n");
+        }
+
         prompt
     }
+
+    /// Return how many tokens remain available for the AI response.
+    ///
+    /// Computes the estimated token count of the current system prompt and
+    /// subtracts it from `max_tokens`, returning 0 if already over budget.
+    pub fn token_budget_remaining(&self) -> usize {
+        let used = estimate_tokens(&self.to_system_prompt());
+        self.max_tokens.saturating_sub(used)
+    }
+}
+
+/// Truncate text so its estimated token count does not exceed `budget`.
+///
+/// Truncation happens at a character boundary with a notice appended so the
+/// model knows the content was cut. Returns the original string unchanged
+/// when it already fits within the budget.
+fn truncate_to_token_budget(text: &str, budget: usize) -> String {
+    // Each token is approximately 4 characters.
+    let max_chars = budget.saturating_mul(4);
+    if text.len() <= max_chars {
+        return text.to_string();
+    }
+    // Truncate at a clean char boundary within the budget.
+    let truncated: String = text.chars().take(max_chars).collect();
+    format!("{truncated}\n... (truncated to fit context window) ...\n")
 }
 
 /// Build buffer content with truncation, prioritising text near the cursor.

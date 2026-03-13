@@ -6,9 +6,10 @@ use crate::highlight::{HighlightedLine, Language, SyntaxHighlighter};
 use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
+use crate::plugin::PluginManager;
 use crate::semantic_index::SemanticIndexer;
 use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
-use aura_ai::{AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
+use aura_ai::{estimate_tokens, AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
 use aura_core::conversation::{
     ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
 };
@@ -162,6 +163,11 @@ pub struct App {
     /// proposal. Pressing Enter will send a new AI request that includes the
     /// current proposed text plus the user's revision instructions.
     pub revising_proposal: bool,
+    /// Whether experimental mode is active. In this mode AI suggestions are
+    /// auto-accepted without requiring user review.
+    pub experimental_mode: bool,
+    /// Plugin system — holds all registered plugins and routes events to them.
+    pub plugin_manager: PluginManager,
 }
 
 impl App {
@@ -317,6 +323,8 @@ impl App {
             theme,
             editing_proposal: false,
             revising_proposal: false,
+            experimental_mode: false,
+            plugin_manager: PluginManager::new(),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -429,8 +437,15 @@ impl App {
                         proposal.streaming = false;
                     }
                     self.ai_receiver = None;
-                    self.mode = Mode::Review;
-                    self.set_status("AI proposal ready — a: accept, r: reject, Esc: cancel");
+                    // In experimental mode, auto-accept without user review.
+                    if self.experimental_mode {
+                        self.mode = Mode::Review;
+                        self.accept_proposal();
+                        self.set_status("[EXPERIMENT] AI proposal auto-accepted");
+                    } else {
+                        self.mode = Mode::Review;
+                        self.set_status("AI proposal ready — a: accept, r: reject, Esc: cancel");
+                    }
                     return;
                 }
                 Ok(AiEvent::Error(err)) => {
@@ -471,15 +486,33 @@ impl App {
             }
         };
 
-        // Build context with semantic info.
+        // Build context with semantic info and LSP diagnostics.
         let selection = self.visual_selection_range();
         let semantic = self.semantic_context_for_ai();
-        let ctx = EditorContext::from_buffer_with_semantic(
+        let mut ctx = EditorContext::from_buffer_with_semantic(
             &self.buffer,
             &self.cursor,
             selection,
             semantic,
         );
+        // Propagate the context window limit from the client config.
+        ctx.max_tokens = client.max_context_tokens();
+
+        // Attach current diagnostics so the AI is aware of errors/warnings.
+        ctx.diagnostics = self
+            .diagnostics
+            .iter()
+            .map(|d| aura_ai::DiagnosticSummary {
+                line: d.range.start.line as usize + 1,
+                severity: match d.severity {
+                    Some(1) => "error".to_string(),
+                    Some(2) => "warning".to_string(),
+                    Some(3) => "info".to_string(),
+                    _ => "hint".to_string(),
+                },
+                message: d.message.clone(),
+            })
+            .collect();
 
         // Determine the range to replace.
         let (start, end) = if let Some((s, e)) = selection {
@@ -532,6 +565,14 @@ impl App {
             }
         }
 
+        // Compute token estimate for the status bar display.
+        let token_count = estimate_tokens(&system);
+        let token_display = if token_count >= 1_000 {
+            format!("{:.1}K", token_count as f64 / 1_000.0)
+        } else {
+            token_count.to_string()
+        };
+
         let rx = client.stream_completion(&system, messages);
         self.ai_receiver = Some(rx);
         self.proposal = Some(AiProposal {
@@ -541,7 +582,7 @@ impl App {
             end,
             streaming: true,
         });
-        self.set_status("AI thinking...");
+        self.set_status(format!("AI thinking... (~{token_display} tokens)"));
     }
 
     /// Accept the current AI proposal, applying it to the buffer.
@@ -612,9 +653,9 @@ impl App {
 
     /// Regenerate syntax highlights from the current buffer content.
     pub fn refresh_highlights(&mut self) {
-        if let Some(hl) = &self.highlighter {
+        if let Some(hl) = &mut self.highlighter {
             let source = self.buffer.rope().to_string();
-            self.highlight_lines = hl.highlight(&source);
+            self.highlight_lines = hl.highlight(&source, Some(&self.theme));
         }
         self.highlights_dirty = false;
     }
@@ -655,12 +696,37 @@ impl App {
         indexer.graph().impact_summary(&path, start_line, end_line)
     }
 
-    /// Get semantic context string for the AI.
+    /// Get semantic context string for the AI, optionally including the
+    /// Tree-sitter node kind at the cursor position.
     pub fn semantic_context_for_ai(&self) -> Option<String> {
-        let indexer = self.semantic_indexer.as_ref()?;
-        let path = self.buffer.file_path()?.to_path_buf();
-        let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
-        indexer.graph().context_string(id)
+        // Collect symbol-level context from the semantic graph.
+        let symbol_ctx = self.semantic_indexer.as_ref().and_then(|indexer| {
+            let path = self.buffer.file_path()?.to_path_buf();
+            let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
+            indexer.graph().context_string(id)
+        });
+
+        // Include the Tree-sitter node kind at cursor if a highlighter is available.
+        let node_type_ctx = self.highlighter.as_ref().and_then(|hl| {
+            // Compute byte offset for current cursor position.
+            let source = self.buffer.rope().to_string();
+            let char_idx = self.buffer.cursor_to_char_idx(&self.cursor);
+            // Convert char index to byte offset.
+            let byte_off = source
+                .char_indices()
+                .nth(char_idx)
+                .map(|(b, _)| b)
+                .unwrap_or(source.len());
+            let kind = hl.node_type_at_byte(byte_off)?;
+            Some(format!("Syntax node at cursor: {kind}"))
+        });
+
+        match (symbol_ctx, node_type_ctx) {
+            (Some(sym), Some(node)) => Some(format!("{sym}\n{node}")),
+            (Some(sym), None) => Some(sym),
+            (None, Some(node)) => Some(node),
+            (None, None) => None,
+        }
     }
 
     /// Log an edit decision to the conversation store.
@@ -900,6 +966,34 @@ impl App {
                         self.set_status("No hover info");
                     }
                 }
+                LspEvent::CodeActions(actions) => {
+                    if actions.is_empty() {
+                        self.set_status("No code actions available");
+                    } else {
+                        // Display up to three actions in the status bar and,
+                        // if the AI is available, feed them as context for a
+                        // quick-fix intent.
+                        let titles: Vec<&str> =
+                            actions.iter().take(3).map(|a| a.title.as_str()).collect();
+                        let summary = titles.join(" | ");
+                        self.set_status(format!("Code actions: {summary}"));
+
+                        if self.has_ai() {
+                            let action_list = actions
+                                .iter()
+                                .map(|a| format!("- {}", a.title))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let prompt = format!(
+                                "The following code actions are available at the cursor:\n\
+                                 {action_list}\n\n\
+                                 Apply the most appropriate action to fix or improve the code. \
+                                 Output only the corrected code."
+                            );
+                            self.send_intent(&prompt);
+                        }
+                    }
+                }
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);
                     self.lsp_client = None;
@@ -932,6 +1026,40 @@ impl App {
     pub fn lsp_hover(&mut self) {
         if let Some(client) = &mut self.lsp_client {
             client.hover(self.cursor.row as u32, self.cursor.col as u32);
+        } else {
+            self.set_status("No LSP server");
+        }
+    }
+
+    /// Request code actions from the LSP server at the cursor position.
+    ///
+    /// Diagnostics on the current line are forwarded as context so the server
+    /// can offer targeted quick-fixes. The result is handled asynchronously
+    /// in [`poll_lsp_events`] via [`lsp::LspEvent::CodeActions`].
+    pub fn lsp_request_code_actions(&mut self) {
+        let row = self.cursor.row as u32;
+        let col = self.cursor.col as u32;
+
+        // Serialise diagnostics on this line into the LSP JSON format.
+        let diag_json: Vec<serde_json::Value> = self
+            .diagnostics
+            .iter()
+            .filter(|d| d.range.start.line == row)
+            .map(|d| {
+                serde_json::json!({
+                    "range": {
+                        "start": { "line": d.range.start.line, "character": d.range.start.character },
+                        "end":   { "line": d.range.end.line,   "character": d.range.end.character }
+                    },
+                    "severity": d.severity,
+                    "message": d.message
+                })
+            })
+            .collect();
+
+        if let Some(client) = &mut self.lsp_client {
+            client.request_code_actions(row, col, &diag_json);
+            self.set_status("Requesting code actions…");
         } else {
             self.set_status("No LSP server");
         }
@@ -1094,8 +1222,12 @@ impl App {
                 text,
                 agent_id,
             } => {
-                // Track the agent edit.
+                // Track the agent edit and include role in the status message.
                 self.agent_registry.record_edit(agent_id);
+                let agent_role = self
+                    .agent_registry
+                    .agent_role(agent_id)
+                    .map(|r| r.to_string());
 
                 let author = AuthorId::ai(agent_id.clone());
                 let start_cursor = Cursor::new(*start_line, *start_col);
@@ -1112,6 +1244,14 @@ impl App {
 
                 self.buffer.insert(start_idx, text, author);
                 self.mark_highlights_dirty();
+
+                // Show agent edit in status bar, including role if available.
+                let status_msg = if let Some(role) = &agent_role {
+                    format!("Agent '{}' [{}] edited buffer", agent_id, role)
+                } else {
+                    format!("Agent '{}' edited buffer", agent_id)
+                };
+                self.set_status(status_msg);
 
                 McpAppResponse {
                     success: true,
@@ -1252,6 +1392,36 @@ impl App {
                     }),
                 }
             }
+            McpAction::RegisterAgentWithRole { name, role } => {
+                let registered = self.agent_registry.register_with_role(name, role.clone());
+                if registered {
+                    let role_str = role.as_deref().unwrap_or("unassigned");
+                    self.set_status(format!("Agent '{}' connected (role: {})", name, role_str));
+                }
+                McpAppResponse {
+                    success: registered,
+                    data: serde_json::json!({
+                        "registered": registered,
+                        "agent_id": name,
+                        "role": role,
+                        "total_agents": self.agent_registry.count(),
+                    }),
+                }
+            }
+            McpAction::AssignRole { name, role } => {
+                let assigned = self.agent_registry.assign_role(name, role.clone());
+                if assigned {
+                    self.set_status(format!("Agent '{}' assigned role: {}", name, role));
+                }
+                McpAppResponse {
+                    success: assigned,
+                    data: serde_json::json!({
+                        "assigned": assigned,
+                        "agent_id": name,
+                        "role": role,
+                    }),
+                }
+            }
             McpAction::UnregisterAgent { name } => {
                 let removed = self.agent_registry.unregister(name);
                 if removed {
@@ -1275,13 +1445,17 @@ impl App {
                             "name": a.name,
                             "connected_at": a.connected_at,
                             "edit_count": a.edit_count,
+                            "role": a.role,
                         })
                     })
                     .collect();
 
                 McpAppResponse {
                     success: true,
-                    data: serde_json::json!({ "agents": agents }),
+                    data: serde_json::json!({
+                        "agents": agents,
+                        "total": agents.len(),
+                    }),
                 }
             }
             McpAction::GetBufferInfo => McpAppResponse {
@@ -1722,6 +1896,100 @@ impl App {
         self.show_blame = !self.show_blame;
         let state = if self.show_blame { "on" } else { "off" };
         self.set_status(format!("Inline blame: {state}"));
+    }
+
+    /// Read the git aura log and display it in the conversation panel.
+    ///
+    /// Shows up to `limit` commits with their `Aura-Conversation` trailers.
+    pub fn show_aura_log(&mut self, limit: usize) {
+        use aura_core::conversation::{ConversationMessage, MessageRole};
+
+        let entries = match &self.git_repo {
+            Some(repo) => repo.aura_log(limit),
+            None => {
+                self.set_status("Not in a git repository");
+                return;
+            }
+        };
+
+        if entries.is_empty() {
+            self.set_status("No commits found");
+            return;
+        }
+
+        let mut lines = Vec::new();
+        for entry in &entries {
+            let conv_tag = entry
+                .conversation_id
+                .as_deref()
+                .map(|id| format!(" [conv: {}]", id))
+                .unwrap_or_default();
+            lines.push(format!(
+                "{} {} — {}{}",
+                entry.commit_short, entry.author, entry.summary, conv_tag
+            ));
+        }
+
+        let content = lines.join("\n");
+        let message = ConversationMessage {
+            id: "aura-log".to_string(),
+            conversation_id: "aura-log".to_string(),
+            role: MessageRole::System,
+            content,
+            created_at: String::new(),
+            model: None,
+        };
+
+        let aura_count = entries
+            .iter()
+            .filter(|e| e.conversation_id.is_some())
+            .count();
+
+        self.conversation_panel = Some(ConversationPanel {
+            messages: vec![message],
+            file_info: format!(
+                "git log --aura: {} commits, {} with Aura conversations",
+                entries.len(),
+                aura_count
+            ),
+            scroll: 0,
+        });
+        self.set_status("Aura log — Esc/q to close, j/k to scroll");
+    }
+
+    /// Enter experimental mode by creating a new branch `aura-experiment/<name>`.
+    ///
+    /// While experimental mode is active, AI suggestions are automatically accepted
+    /// without requiring user review.
+    pub fn enter_experiment_mode(&mut self, name: &str) {
+        if name.is_empty() {
+            self.set_status("Usage: experiment <name>");
+            return;
+        }
+
+        let branch_name = format!("aura-experiment/{}", name);
+
+        if let Some(repo) = &mut self.git_repo {
+            match repo.create_branch(&branch_name) {
+                Ok(()) => {
+                    self.experimental_mode = true;
+                    self.set_status(format!(
+                        "[EXPERIMENT] Branch '{}' created — AI suggestions will be auto-accepted",
+                        branch_name
+                    ));
+                }
+                Err(e) => {
+                    self.set_status(format!("Failed to create experiment branch: {e}"));
+                }
+            }
+        } else {
+            // No git repo — still enable experimental mode without creating a branch.
+            self.experimental_mode = true;
+            self.set_status(format!(
+                "[EXPERIMENT] '{}' started (no git repo — branch not created) — AI suggestions will be auto-accepted",
+                name
+            ));
+        }
     }
 
     /// Returns the (start, end) character indices of the visual selection, if active.

@@ -41,6 +41,19 @@ pub struct BranchInfo {
     pub tip_short: String,
 }
 
+/// A single entry from `git log --aura` — includes the Aura-Conversation trailer if present.
+#[derive(Debug, Clone)]
+pub struct AuraLogEntry {
+    /// Short (7-char) commit hash.
+    pub commit_short: String,
+    /// Author name.
+    pub author: String,
+    /// First line of the commit message.
+    pub summary: String,
+    /// Value of the `Aura-Conversation` git trailer, if present in the commit message.
+    pub conversation_id: Option<String>,
+}
+
 /// Git integration handle. Wraps a `gix::Repository`.
 pub struct GitRepo {
     /// The opened repository.
@@ -360,6 +373,70 @@ impl GitRepo {
         self.invalidate_status();
         self.invalidate_blame();
         Ok(())
+    }
+
+    /// Read git log and extract `Aura-Conversation` trailers.
+    ///
+    /// Returns up to `limit` entries. Each entry contains the short commit hash,
+    /// author name, commit summary, and the conversation ID extracted from the
+    /// `Aura-Conversation` git trailer (if present).
+    pub fn aura_log(&self, limit: usize) -> Vec<AuraLogEntry> {
+        let count_arg = format!("-{}", limit.max(1));
+
+        // Use a NUL-delimited format: hash, author, full body separated by \x1f (unit separator).
+        // Format: <hash>\x1f<author>\x1f<subject>\x1f<body>\0
+        let output = std::process::Command::new("git")
+            .args(["log", &count_arg, "--format=%h\x1f%an\x1f%s\x1f%b\x00"])
+            .current_dir(&self.workdir)
+            .output();
+
+        let output = match output {
+            Ok(o) if o.status.success() => o,
+            Ok(o) => {
+                tracing::debug!("git log failed: {}", String::from_utf8_lossy(&o.stderr));
+                return Vec::new();
+            }
+            Err(e) => {
+                tracing::debug!("git log error: {}", e);
+                return Vec::new();
+            }
+        };
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let mut entries = Vec::new();
+
+        // Records are separated by NUL bytes.
+        for record in raw.split('\x00') {
+            let record = record.trim();
+            if record.is_empty() {
+                continue;
+            }
+            // Fields are separated by \x1f (unit separator).
+            let parts: Vec<&str> = record.splitn(4, '\x1f').collect();
+            let commit_short = parts.first().copied().unwrap_or("").to_string();
+            let author = parts.get(1).copied().unwrap_or("").to_string();
+            let summary = parts.get(2).copied().unwrap_or("").to_string();
+            let body = parts.get(3).copied().unwrap_or("");
+
+            if commit_short.is_empty() {
+                continue;
+            }
+
+            // Extract `Aura-Conversation: <value>` trailer from the body.
+            let conversation_id = body.lines().find_map(|line| {
+                line.strip_prefix("Aura-Conversation:")
+                    .map(|v| v.trim().to_string())
+            });
+
+            entries.push(AuraLogEntry {
+                commit_short,
+                author,
+                summary,
+                conversation_id,
+            });
+        }
+
+        entries
     }
 
     /// Generate an AI-friendly diff summary for commit message generation.

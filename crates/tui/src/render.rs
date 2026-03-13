@@ -344,8 +344,14 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
+    let experiment_indicator = if app.experimental_mode {
+        " │ [EXPERIMENT]"
+    } else {
+        ""
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -353,7 +359,8 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         last_change,
         diag_str,
         lsp_indicator,
-        mcp_indicator
+        mcp_indicator,
+        experiment_indicator
     );
     let right = format!(" {}:{} ", app.cursor.row + 1, app.cursor.col + 1);
 

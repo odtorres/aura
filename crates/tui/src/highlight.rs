@@ -4,6 +4,7 @@
 //! supported languages. The highlighter is attached to the buffer and
 //! re-parses incrementally on each edit.
 
+use crate::config::Theme;
 use ratatui::style::Color;
 use tree_sitter::Parser;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
@@ -36,15 +37,22 @@ const HIGHLIGHT_NAMES: &[&str] = &[
     "variable.parameter",
 ];
 
-/// Map a highlight group index to a terminal colour.
-fn highlight_color(idx: usize) -> Color {
+/// Map a highlight group index to a terminal colour, consulting the theme when
+/// available and falling back to built-in defaults otherwise.
+fn highlight_color(idx: usize, theme: Option<&Theme>) -> Color {
     match HIGHLIGHT_NAMES.get(idx) {
-        Some(&"comment") => Color::DarkGray,
-        Some(&"keyword") => Color::Magenta,
-        Some(&"string") | Some(&"string.special") => Color::Green,
-        Some(&"number") | Some(&"constant" | &"constant.builtin") => Color::Yellow,
-        Some(&"function" | &"function.builtin" | &"function.macro") => Color::Blue,
-        Some(&"type" | &"type.builtin") => Color::Cyan,
+        Some(&"comment") => theme.map(|t| t.comment).unwrap_or(Color::DarkGray),
+        Some(&"keyword") => theme.map(|t| t.keyword).unwrap_or(Color::Magenta),
+        Some(&"string") | Some(&"string.special") => {
+            theme.map(|t| t.string).unwrap_or(Color::Green)
+        }
+        Some(&"number") | Some(&"constant" | &"constant.builtin") => {
+            theme.map(|t| t.number).unwrap_or(Color::Yellow)
+        }
+        Some(&"function" | &"function.builtin" | &"function.macro") => {
+            theme.map(|t| t.function).unwrap_or(Color::Blue)
+        }
+        Some(&"type" | &"type.builtin") => theme.map(|t| t.type_name).unwrap_or(Color::Cyan),
         Some(&"operator") => Color::LightRed,
         Some(&"variable.builtin" | &"variable.parameter") => Color::LightYellow,
         Some(&"attribute") => Color::LightCyan,
@@ -90,7 +98,9 @@ pub struct HighlightedLine {
 pub struct SyntaxHighlighter {
     language: Language,
     config: HighlightConfiguration,
-    _parser: Parser,
+    parser: Parser,
+    /// Most-recently parsed tree, kept for node-at-position queries.
+    last_tree: Option<tree_sitter::Tree>,
 }
 
 impl SyntaxHighlighter {
@@ -130,12 +140,19 @@ impl SyntaxHighlighter {
         Some(Self {
             language,
             config,
-            _parser: parser,
+            parser,
+            last_tree: None,
         })
     }
 
     /// Highlight the given source text and return per-line colour information.
-    pub fn highlight(&self, source: &str) -> Vec<HighlightedLine> {
+    ///
+    /// When a `theme` is provided the theme's syntax colours are used;
+    /// otherwise built-in defaults are applied.
+    pub fn highlight(&mut self, source: &str, theme: Option<&Theme>) -> Vec<HighlightedLine> {
+        // Re-parse the tree so node-at-position queries stay current.
+        self.last_tree = self.parser.parse(source, None);
+
         let mut highlighter = Highlighter::new();
         let events = highlighter.highlight(&self.config, source.as_bytes(), None, |_| None);
 
@@ -169,7 +186,7 @@ impl SyntaxHighlighter {
                     byte_offset = end;
                 }
                 Ok(HighlightEvent::HighlightStart(highlight)) => {
-                    current_color = highlight_color(highlight.0);
+                    current_color = highlight_color(highlight.0, theme);
                 }
                 Ok(HighlightEvent::HighlightEnd) => {
                     current_color = Color::Reset;
@@ -195,6 +212,18 @@ impl SyntaxHighlighter {
         }
 
         result
+    }
+
+    /// Return the tree-sitter node kind (e.g. `"function_item"`, `"identifier"`)
+    /// for the innermost node covering the given byte offset in the source.
+    ///
+    /// Returns `None` if no tree has been parsed yet or the offset is out of range.
+    pub fn node_type_at_byte(&self, byte_offset: usize) -> Option<&str> {
+        let tree = self.last_tree.as_ref()?;
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(byte_offset, byte_offset)?;
+        Some(node.kind())
     }
 
     /// Return empty (no colour) lines for fallback.

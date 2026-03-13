@@ -75,12 +75,12 @@ Every edit carries metadata: who made it, when, and why.
 ### 1.2 Authorship-aware undo/redo
 - [x] Implement per-author undo: roll back only AI changes, or only human changes
 - [x] Global undo: roll back all changes in chronological order
-- [ ] Undo tree visualization (simple text-based, in a split pane)
+- [x] Undo tree visualization (simple text-based, in a split pane)
 - [x] Keybinding: `u` for global undo, `<leader>u` for AI-only undo
 
 ### 1.3 Change provenance UI
 - [x] Gutter markers: color-coded by author (human = green, AI = blue)
-- [ ] Inline ghost-text for pending AI suggestions (dimmed/italic)
+- [x] Inline ghost-text for pending AI suggestions (dimmed/italic)
 - [x] Toggle: show/hide authorship highlighting (`<leader>a`)
 - [x] Status bar shows "last change by: human | 2s ago"
 
@@ -106,9 +106,9 @@ This is the heart of AURA: the intent → propose → review → accept cycle.
 - [x] Send current buffer content as context
 - [x] Include cursor position and selection
 - [x] Include file path, language, and project structure
-- [ ] Include Tree-sitter syntax node at cursor (see Phase 3)
+- [x] Include Tree-sitter syntax node at cursor (see Phase 3)
 - [x] Include recent edit history (last N changes with authorship)
-- [ ] Include relevant diagnostics from LSP (see Phase 3)
+- [x] Include relevant diagnostics from LSP (see Phase 3)
 - [x] Truncation strategy: prioritize code near cursor, summarize distant code
 
 ### 2.3 Intent mode
@@ -122,12 +122,12 @@ This is the heart of AURA: the intent → propose → review → accept cycle.
 - [x] Split view: current code (top) vs proposed code (bottom)
 - [x] Inline diff highlighting: proposed additions in green
 - [x] Per-hunk accept/reject: `a` to accept, `r` to reject, `Esc` to cancel
-- [ ] Edit-in-place: modify the proposal before accepting
-- [ ] Keybinding: `<leader>rr` to request revision with follow-up intent
+- [x] Edit-in-place: modify the proposal before accepting
+- [x] Keybinding: `<leader>rr` to request revision with follow-up intent
 - [x] Animated streaming: show AI text appearing as it streams
 
 ### 2.5 Quick actions (no review needed)
-- [ ] Inline completion: Tab to accept ghost-text suggestion
+- [x] Inline completion: Tab to accept ghost-text suggestion
 - [x] `<leader>e` — Explain selected code
 - [x] `<leader>f` — Fix diagnostic at cursor
 - [x] `<leader>t` — Generate test for function at cursor
@@ -147,16 +147,16 @@ The editor understands code structure, not just text.
 - [x] Integrate `tree-sitter` crate with Rust bindings
 - [x] Incremental parsing on every edit (must handle AI streaming edits)
 - [x] Syntax highlighting using Tree-sitter queries
-- [ ] Expose syntax tree to AI context: current node, parent, scope
+- [x] Expose syntax tree to AI context: current node, parent, scope
 - [x] Language grammars: start with Rust, TypeScript, Python, Go
-- [ ] Highlight groups configurable via theme file (TOML)
+- [x] Highlight groups configurable via theme file (TOML)
 
 ### 3.2 LSP client
 - [x] Implement LSP client (consider `tower-lsp` or custom over JSON-RPC)
 - [x] Diagnostics: show errors/warnings in gutter + floating window
 - [x] Go to definition, references, hover info
-- [ ] Code actions: integrate with AI (AI can trigger code actions or vice versa)
-- [ ] Feed LSP diagnostics into AI context automatically
+- [x] Code actions: integrate with AI (AI can trigger code actions or vice versa)
+- [x] Feed LSP diagnostics into AI context automatically
 
 ### 3.3 Semantic graph
 - [x] Build a lightweight dependency graph from Tree-sitter + LSP data
@@ -218,7 +218,7 @@ AURA becomes a platform, not just an editor.
 - [x] Each agent gets its own author ID in the CRDT
 - [x] Agent activity shown in status bar (agent count + MCP port)
 - [x] Conflict resolution: if two agents edit the same region, human decides
-- [ ] Agent orchestration: "Agent A handles tests, Agent B handles implementation"
+- [x] Agent orchestration: "Agent A handles tests, Agent B handles implementation"
 
 ### Phase 5 Definition of Done
 > Claude Code can connect to AURA via MCP and read/edit buffers.
@@ -264,13 +264,13 @@ The AI thinks ahead. The human reviews when ready.
 
 ### 7.2 Conversation-linked commits
 - [x] Attach conversation summaries to git commits as `Aura-Conversation` trailers
-- [ ] `git log --aura` (custom formatter) shows intent history
+- [x] `git log --aura` (custom formatter) shows intent history
 - [x] Link between git blame and conversation history
 
 ### 7.3 Branch management
 - [x] Visual branch switcher (`:branches`, `:checkout <name>`)
 - [x] AI can propose changes on a feature branch (`:branch <name>`)
-- [ ] "Experimental" mode: AI works on a branch, human reviews the PR
+- [x] "Experimental" mode: AI works on a branch, human reviews the PR
 
 ---
 

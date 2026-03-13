@@ -97,6 +97,16 @@ pub struct HoverResult {
     pub contents: serde_json::Value,
 }
 
+/// A single code action returned by the language server.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeAction {
+    /// Human-readable title of the action (e.g. "Extract function").
+    pub title: String,
+    /// Optional kind hint (e.g. "quickfix", "refactor.extract").
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
 impl HoverResult {
     /// Extract plain text from the hover contents.
     pub fn to_text(&self) -> String {
@@ -140,6 +150,8 @@ pub enum LspEvent {
     Definition(Vec<LspLocation>),
     /// Response to a hover request.
     Hover(Option<HoverResult>),
+    /// Response to a textDocument/codeAction request.
+    CodeActions(Vec<CodeAction>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
 }
@@ -356,6 +368,31 @@ impl LspClient {
         );
     }
 
+    /// Request code actions at the given position, supplying active diagnostics
+    /// for the cursor line so the server can offer quick-fixes.
+    pub fn request_code_actions(
+        &mut self,
+        line: u32,
+        character: u32,
+        diagnostics: &[serde_json::Value],
+    ) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/codeAction",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "range": {
+                    "start": { "line": line, "character": character },
+                    "end":   { "line": line, "character": character }
+                },
+                "context": {
+                    "diagnostics": diagnostics
+                }
+            }),
+        );
+    }
+
     /// Send shutdown + exit to the server.
     pub fn shutdown(&mut self) {
         let id = self.alloc_id();
@@ -486,6 +523,18 @@ fn reader_thread(stdout: std::process::ChildStdout, tx: mpsc::Sender<LspEvent>) 
                     continue;
                 }
 
+                // Try as code actions (array of objects with a "title" field).
+                // Must be checked before Definition to avoid mis-classifying.
+                if let Some(arr) = result.as_array() {
+                    if arr.iter().all(|v| v.get("title").is_some()) {
+                        let actions: Vec<CodeAction> = arr
+                            .iter()
+                            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                            .collect();
+                        let _ = tx.send(LspEvent::CodeActions(actions));
+                        continue;
+                    }
+                }
                 // Try as definition (array of Location).
                 if let Ok(locations) = serde_json::from_value::<Vec<LspLocation>>(result.clone()) {
                     let _ = tx.send(LspEvent::Definition(locations));

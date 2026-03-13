@@ -11,6 +11,7 @@ pub mod input;
 pub mod lsp;
 pub mod mcp_client;
 pub mod mcp_server;
+pub mod plugin;
 pub mod render;
 pub mod semantic_index;
 pub mod speculative;

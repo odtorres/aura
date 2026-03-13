@@ -60,6 +60,11 @@ pub struct AnthropicClient {
 }
 
 impl AnthropicClient {
+    /// Return the configured context window token limit.
+    pub fn max_context_tokens(&self) -> usize {
+        self.config.max_context_tokens
+    }
+
     /// Create a new client from config.
     pub fn new(config: AiConfig) -> Result<Self> {
         let mut headers = HeaderMap::new();

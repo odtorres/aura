@@ -552,16 +552,16 @@ pub fn handle_intent(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
                     // Grab the current proposed text to include in the revision
                     // request, then clear the proposal so send_intent creates a
                     // fresh one with the same buffer range.
-                    let (revision_intent, start, end) =
-                        if let Some(proposal) = app.proposal.take() {
-                            let revision_intent = format!(
-                                "Revise the following code:\n\n{}\n\nRevision request: {}",
-                                proposal.proposed_text, input
-                            );
-                            (revision_intent, proposal.start, proposal.end)
-                        } else {
-                            (input.clone(), 0, 0)
-                        };
+                    let (revision_intent, start, end) = if let Some(proposal) = app.proposal.take()
+                    {
+                        let revision_intent = format!(
+                            "Revise the following code:\n\n{}\n\nRevision request: {}",
+                            proposal.proposed_text, input
+                        );
+                        (revision_intent, proposal.start, proposal.end)
+                    } else {
+                        (input.clone(), 0, 0)
+                    };
                     // send_intent determines start/end from the visual
                     // selection or current line, which matches proposal.start/end.
                     // We just need the intent string; the range is re-derived.
@@ -721,6 +721,36 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "blame" => {
             app.toggle_blame();
+        }
+        // Aura git log — shows commits with Aura-Conversation trailers.
+        "log" | "gl" => {
+            app.show_aura_log(50);
+        }
+        _ if cmd.trim().starts_with("log ") => {
+            let limit_str = cmd.trim().strip_prefix("log ").unwrap_or("50").trim();
+            let limit = limit_str.parse::<usize>().unwrap_or(50);
+            app.show_aura_log(limit);
+        }
+        // Experimental mode — create a branch and auto-accept AI suggestions.
+        _ if cmd.trim().starts_with("experiment ") => {
+            let name = cmd.trim().strip_prefix("experiment ").unwrap_or("").trim();
+            app.enter_experiment_mode(name);
+        }
+        "experiment" => {
+            app.set_status("Usage: experiment <name>");
+        }
+        // Request LSP code actions at the cursor and optionally feed them to AI.
+        "code-action" | "ca" => {
+            app.lsp_request_code_actions();
+        }
+        // List all registered plugins.
+        "plugins" => {
+            let names = app.plugin_manager.plugin_names();
+            if names.is_empty() {
+                app.set_status("No plugins loaded");
+            } else {
+                app.set_status(format!("Plugins: {}", names.join(", ")));
+            }
         }
         other => {
             app.set_status(format!("Unknown command: {}", other));
