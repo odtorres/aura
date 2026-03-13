@@ -95,43 +95,43 @@ Every edit carries metadata: who made it, when, and why.
 This is the heart of AURA: the intent → propose → review → accept cycle.
 
 ### 2.1 Anthropic API client
-- [ ] Create `ai` crate in workspace
-- [ ] Implement streaming API client for Claude (Anthropic API, reqwest + tokio)
-- [ ] Handle API key from env var (`ANTHROPIC_API_KEY`) or config file
+- [x] Create `ai` crate in workspace
+- [x] Implement streaming API client for Claude (Anthropic API, reqwest + tokio)
+- [x] Handle API key from env var (`ANTHROPIC_API_KEY`) or config file
 - [ ] Token counting and context window management
-- [ ] Retry logic with exponential backoff
-- [ ] Rate limiting awareness
+- [x] Retry logic with exponential backoff
+- [x] Rate limiting awareness
 
 ### 2.2 Context assembly
-- [ ] Send current buffer content as context
-- [ ] Include cursor position and selection
-- [ ] Include file path, language, and project structure
+- [x] Send current buffer content as context
+- [x] Include cursor position and selection
+- [x] Include file path, language, and project structure
 - [ ] Include Tree-sitter syntax node at cursor (see Phase 3)
-- [ ] Include recent edit history (last N changes with authorship)
+- [x] Include recent edit history (last N changes with authorship)
 - [ ] Include relevant diagnostics from LSP (see Phase 3)
-- [ ] Truncation strategy: prioritize code near cursor, summarize distant code
+- [x] Truncation strategy: prioritize code near cursor, summarize distant code
 
 ### 2.3 Intent mode
-- [ ] New mode: Intent mode (triggered by `<leader>i` or `:intent`)
-- [ ] User types natural language intent: "handle errors in this function"
-- [ ] Intent is sent to AI with full context
-- [ ] AI response streams in as a structured diff/edit proposal
-- [ ] Parse AI response into concrete edit operations
+- [x] New mode: Intent mode (triggered by `<leader>i` or `:intent`)
+- [x] User types natural language intent: "handle errors in this function"
+- [x] Intent is sent to AI with full context
+- [x] AI response streams in as a structured diff/edit proposal
+- [x] Parse AI response into concrete edit operations
 
 ### 2.4 Review interface
-- [ ] Split view: current code (left) vs proposed code (right)
-- [ ] Inline diff highlighting: additions (green), deletions (red), modifications (yellow)
-- [ ] Per-hunk accept/reject: `a` to accept hunk, `r` to reject, `A` to accept all
+- [x] Split view: current code (top) vs proposed code (bottom)
+- [x] Inline diff highlighting: proposed additions in green
+- [x] Per-hunk accept/reject: `a` to accept, `r` to reject, `Esc` to cancel
 - [ ] Edit-in-place: modify the proposal before accepting
 - [ ] Keybinding: `<leader>rr` to request revision with follow-up intent
-- [ ] Animated streaming: show AI edits appearing character by character
+- [x] Animated streaming: show AI text appearing as it streams
 
 ### 2.5 Quick actions (no review needed)
 - [ ] Inline completion: Tab to accept ghost-text suggestion
-- [ ] `<leader>e` — Explain selected code (shown in floating pane)
-- [ ] `<leader>f` — Fix diagnostic at cursor
-- [ ] `<leader>t` — Generate test for function at cursor
-- [ ] These use the same AI pipeline but with pre-built intents
+- [x] `<leader>e` — Explain selected code
+- [x] `<leader>f` — Fix diagnostic at cursor
+- [x] `<leader>t` — Generate test for function at cursor
+- [x] These use the same AI pipeline but with pre-built intents
 
 ### Phase 2 Definition of Done
 > Can select code, express intent, review AI proposal in a diff view,
@@ -144,11 +144,11 @@ This is the heart of AURA: the intent → propose → review → accept cycle.
 The editor understands code structure, not just text.
 
 ### 3.1 Tree-sitter integration
-- [ ] Integrate `tree-sitter` crate with Rust bindings
-- [ ] Incremental parsing on every edit (must handle AI streaming edits)
-- [ ] Syntax highlighting using Tree-sitter queries
+- [x] Integrate `tree-sitter` crate with Rust bindings
+- [x] Incremental parsing on every edit (must handle AI streaming edits)
+- [x] Syntax highlighting using Tree-sitter queries
 - [ ] Expose syntax tree to AI context: current node, parent, scope
-- [ ] Language grammars: start with Rust, TypeScript, Python, Go
+- [x] Language grammars: start with Rust, TypeScript, Python, Go
 - [ ] Highlight groups configurable via theme file (TOML)
 
 ### 3.2 LSP client
