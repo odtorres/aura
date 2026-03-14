@@ -203,8 +203,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         app.g_pending = false;
         match code {
             KeyCode::Char('g') => {
-                app.cursor.row = 0;
-                app.cursor.col = 0;
+                app.tab_mut().cursor.row = 0;
+                app.tab_mut().cursor.col = 0;
                 return;
             }
             KeyCode::Char('d') => {
@@ -230,23 +230,24 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.status_message = None;
         }
         KeyCode::Char('a') => {
-            app.cursor.col += 1;
+            app.tab_mut().cursor.col += 1;
             app.clamp_cursor();
             app.mode = Mode::Insert;
         }
         KeyCode::Char('o') => {
             // Open line below.
-            let line_end = app
+            let tab = app.tab_mut();
+            let line_end = tab
                 .buffer
-                .line(app.cursor.row)
+                .line(tab.cursor.row)
                 .map(|l| l.len_chars().saturating_sub(1))
                 .unwrap_or(0);
-            let pos = app
+            let pos = tab
                 .buffer
-                .cursor_to_char_idx(&aura_core::Cursor::new(app.cursor.row, line_end));
-            app.buffer.insert(pos, "\n", AuthorId::human());
-            app.cursor.row += 1;
-            app.cursor.col = 0;
+                .cursor_to_char_idx(&aura_core::Cursor::new(tab.cursor.row, line_end));
+            tab.buffer.insert(pos, "\n", AuthorId::human());
+            tab.cursor.row += 1;
+            tab.cursor.col = 0;
             app.mode = Mode::Insert;
             app.mark_highlights_dirty();
         }
@@ -256,11 +257,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         KeyCode::Char('v') => {
             app.mode = Mode::Visual;
-            app.visual_anchor = Some(app.cursor);
+            let cursor = app.tab().cursor;
+            app.tab_mut().visual_anchor = Some(cursor);
         }
         KeyCode::Char('V') => {
             app.mode = Mode::VisualLine;
-            app.visual_anchor = Some(app.cursor);
+            let cursor = app.tab().cursor;
+            app.tab_mut().visual_anchor = Some(cursor);
         }
 
         // Ghost suggestion controls
@@ -273,34 +276,37 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
         // Navigation (clears hover popup and notifies speculative engine)
         KeyCode::Char('h') | KeyCode::Left => {
-            app.cursor.col = app.cursor.col.saturating_sub(1);
-            app.hover_info = None;
+            let tab = app.tab_mut();
+            tab.cursor.col = tab.cursor.col.saturating_sub(1);
+            tab.hover_info = None;
             app.notify_cursor_moved();
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            app.cursor.col += 1;
+            app.tab_mut().cursor.col += 1;
             app.clamp_cursor();
-            app.hover_info = None;
+            app.tab_mut().hover_info = None;
             app.notify_cursor_moved();
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.cursor.row = app.cursor.row.saturating_sub(1);
+            let tab = app.tab_mut();
+            tab.cursor.row = tab.cursor.row.saturating_sub(1);
+            tab.hover_info = None;
             app.clamp_cursor();
-            app.hover_info = None;
             app.notify_cursor_moved();
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.cursor.row += 1;
+            app.tab_mut().cursor.row += 1;
             app.clamp_cursor();
-            app.hover_info = None;
+            app.tab_mut().hover_info = None;
             app.notify_cursor_moved();
         }
         KeyCode::Char('0') => {
-            app.cursor.col = 0;
+            app.tab_mut().cursor.col = 0;
         }
         KeyCode::Char('$') => {
-            if let Some(line) = app.buffer.line(app.cursor.row) {
-                app.cursor.col = line.len_chars().saturating_sub(1);
+            let tab = app.tab_mut();
+            if let Some(line) = tab.buffer.line(tab.cursor.row) {
+                tab.cursor.col = line.len_chars().saturating_sub(1);
             }
         }
         KeyCode::Char('g') => {
@@ -308,41 +314,46 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.g_pending = true;
         }
         KeyCode::Char('G') => {
-            app.cursor.row = app.buffer.line_count().saturating_sub(1);
-            app.cursor.col = 0;
+            let tab = app.tab_mut();
+            tab.cursor.row = tab.buffer.line_count().saturating_sub(1);
+            tab.cursor.col = 0;
         }
 
         // Word movement
         KeyCode::Char('w') => {
-            let pos = app.buffer.cursor_to_char_idx(&app.cursor);
-            let new_pos = app.buffer.next_word_start(pos);
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let new_pos = tab.buffer.next_word_start(pos);
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.clamp_cursor();
         }
         KeyCode::Char('b') => {
-            let pos = app.buffer.cursor_to_char_idx(&app.cursor);
-            let new_pos = app.buffer.prev_word_start(pos);
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let new_pos = tab.buffer.prev_word_start(pos);
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
         }
         KeyCode::Char('e') => {
-            let pos = app.buffer.cursor_to_char_idx(&app.cursor);
-            let new_pos = app.buffer.word_end(pos);
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let new_pos = tab.buffer.word_end(pos);
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.clamp_cursor();
         }
 
         // Editing
         KeyCode::Char('x') => {
             // Delete character under cursor.
-            let pos = app.buffer.cursor_to_char_idx(&app.cursor);
-            if pos < app.buffer.len_chars() {
-                app.buffer.delete(pos, pos + 1, AuthorId::human());
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            if pos < tab.buffer.len_chars() {
+                tab.buffer.delete(pos, pos + 1, AuthorId::human());
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
             }
         }
         KeyCode::Char('u') => {
-            if let Some(author) = app.buffer.undo() {
+            if let Some(author) = app.tab_mut().buffer.undo() {
                 app.set_status(format!("Undid edit by {}", author));
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
@@ -352,7 +363,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         // dd — delete current line
         KeyCode::Char('d') => {
-            if let Some(text) = app.buffer.delete_line(app.cursor.row, AuthorId::human()) {
+            let row = app.tab().cursor.row;
+            if let Some(text) = app.tab_mut().buffer.delete_line(row, AuthorId::human()) {
                 app.register = Some(text);
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
@@ -360,7 +372,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         // yy — yank current line
         KeyCode::Char('y') => {
-            if let Some(text) = app.buffer.line_text(app.cursor.row) {
+            let row = app.tab().cursor.row;
+            if let Some(text) = app.tab().buffer.line_text(row) {
                 app.register = Some(text);
                 app.set_status("Yanked line");
             }
@@ -370,18 +383,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             if let Some(text) = app.register.clone() {
                 if text.ends_with('\n') {
                     // Line-wise paste: insert on the next line.
-                    let line_count = app.buffer.line_count();
-                    let insert_line = (app.cursor.row + 1).min(line_count);
-                    let pos = app
+                    let tab = app.tab_mut();
+                    let line_count = tab.buffer.line_count();
+                    let insert_line = (tab.cursor.row + 1).min(line_count);
+                    let pos = tab
                         .buffer
                         .cursor_to_char_idx(&aura_core::Cursor::new(insert_line, 0));
-                    app.buffer.insert(pos, &text, AuthorId::human());
-                    app.cursor.row += 1;
-                    app.cursor.col = 0;
+                    tab.buffer.insert(pos, &text, AuthorId::human());
+                    tab.cursor.row += 1;
+                    tab.cursor.col = 0;
                 } else {
                     // Character-wise paste: insert after cursor.
-                    let pos = app.buffer.cursor_to_char_idx(&app.cursor) + 1;
-                    app.buffer.insert(pos, &text, AuthorId::human());
+                    let tab = app.tab_mut();
+                    let pos = tab.buffer.cursor_to_char_idx(&tab.cursor) + 1;
+                    tab.buffer.insert(pos, &text, AuthorId::human());
                 }
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
@@ -413,7 +428,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
         // Save shortcut
         KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
-            match app.buffer.save() {
+            match app.tab_mut().buffer.save() {
                 Ok(_) => app.set_status("Saved"),
                 Err(e) => app.set_status(format!("Error saving: {}", e)),
             }
@@ -442,43 +457,49 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
             // In normal mode, cursor sits on the last char, not after it.
-            app.cursor.col = app.cursor.col.saturating_sub(1);
+            let tab = app.tab_mut();
+            tab.cursor.col = tab.cursor.col.saturating_sub(1);
             app.clamp_cursor();
         }
         KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
-            let new_pos = app.buffer.insert_char(&app.cursor, c, AuthorId::human());
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let new_pos = tab.buffer.insert_char(&tab.cursor, c, AuthorId::human());
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.mark_highlights_dirty();
         }
         KeyCode::Enter => {
-            let new_pos = app.buffer.insert_char(&app.cursor, '\n', AuthorId::human());
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let new_pos = tab.buffer.insert_char(&tab.cursor, '\n', AuthorId::human());
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.mark_highlights_dirty();
         }
         KeyCode::Backspace => {
-            if let Some(new_pos) = app.buffer.backspace(&app.cursor, AuthorId::human()) {
-                app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            if let Some(new_pos) = tab.buffer.backspace(&tab.cursor, AuthorId::human()) {
+                tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
                 app.mark_highlights_dirty();
             }
         }
         KeyCode::Left => {
-            app.cursor.col = app.cursor.col.saturating_sub(1);
+            let tab = app.tab_mut();
+            tab.cursor.col = tab.cursor.col.saturating_sub(1);
         }
         KeyCode::Right => {
-            app.cursor.col += 1;
+            app.tab_mut().cursor.col += 1;
             app.clamp_cursor();
         }
         KeyCode::Up => {
-            app.cursor.row = app.cursor.row.saturating_sub(1);
+            let tab = app.tab_mut();
+            tab.cursor.row = tab.cursor.row.saturating_sub(1);
             app.clamp_cursor();
         }
         KeyCode::Down => {
-            app.cursor.row += 1;
+            app.tab_mut().cursor.row += 1;
             app.clamp_cursor();
         }
         // Ctrl+S to save even in insert mode.
         KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
-            match app.buffer.save() {
+            match app.tab_mut().buffer.save() {
                 Ok(_) => app.set_status("Saved"),
                 Err(e) => app.set_status(format!("Error saving: {}", e)),
             }
@@ -518,73 +539,81 @@ pub fn handle_visual(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
-            app.visual_anchor = None;
+            app.tab_mut().visual_anchor = None;
         }
 
         // Navigation (same as normal mode)
         KeyCode::Char('h') | KeyCode::Left => {
-            app.cursor.col = app.cursor.col.saturating_sub(1);
+            let tab = app.tab_mut();
+            tab.cursor.col = tab.cursor.col.saturating_sub(1);
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            app.cursor.col += 1;
+            app.tab_mut().cursor.col += 1;
             app.clamp_cursor();
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.cursor.row = app.cursor.row.saturating_sub(1);
+            let tab = app.tab_mut();
+            tab.cursor.row = tab.cursor.row.saturating_sub(1);
             app.clamp_cursor();
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.cursor.row += 1;
+            app.tab_mut().cursor.row += 1;
             app.clamp_cursor();
         }
         KeyCode::Char('w') => {
-            let pos = app.buffer.cursor_to_char_idx(&app.cursor);
-            let new_pos = app.buffer.next_word_start(pos);
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let new_pos = tab.buffer.next_word_start(pos);
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.clamp_cursor();
         }
         KeyCode::Char('b') => {
-            let pos = app.buffer.cursor_to_char_idx(&app.cursor);
-            let new_pos = app.buffer.prev_word_start(pos);
-            app.cursor = app.buffer.char_idx_to_cursor(new_pos);
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let new_pos = tab.buffer.prev_word_start(pos);
+            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
         }
-        KeyCode::Char('0') => app.cursor.col = 0,
+        KeyCode::Char('0') => app.tab_mut().cursor.col = 0,
         KeyCode::Char('$') => {
-            if let Some(line) = app.buffer.line(app.cursor.row) {
-                app.cursor.col = line.len_chars().saturating_sub(1);
+            let tab = app.tab_mut();
+            if let Some(line) = tab.buffer.line(tab.cursor.row) {
+                tab.cursor.col = line.len_chars().saturating_sub(1);
             }
         }
         KeyCode::Char('G') => {
-            app.cursor.row = app.buffer.line_count().saturating_sub(1);
-            app.cursor.col = 0;
+            let tab = app.tab_mut();
+            tab.cursor.row = tab.buffer.line_count().saturating_sub(1);
+            tab.cursor.col = 0;
         }
         KeyCode::Char('g') => {
-            app.cursor.row = 0;
-            app.cursor.col = 0;
+            app.tab_mut().cursor.row = 0;
+            app.tab_mut().cursor.col = 0;
         }
 
         // Delete selection
         KeyCode::Char('d') | KeyCode::Char('x') => {
             if let Some((start, end)) = app.visual_selection_range() {
-                let text = app.buffer.rope().slice(start..end).to_string();
+                let tab = app.tab_mut();
+                let text = tab.buffer.rope().slice(start..end).to_string();
                 app.register = Some(text);
-                app.buffer.delete(start, end, AuthorId::human());
-                app.cursor = app.buffer.char_idx_to_cursor(start);
+                let tab = app.tab_mut();
+                tab.buffer.delete(start, end, AuthorId::human());
+                tab.cursor = tab.buffer.char_idx_to_cursor(start);
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
             }
             app.mode = Mode::Normal;
-            app.visual_anchor = None;
+            app.tab_mut().visual_anchor = None;
         }
         // Yank selection
         KeyCode::Char('y') => {
             if let Some((start, end)) = app.visual_selection_range() {
-                let text = app.buffer.rope().slice(start..end).to_string();
+                let text = app.tab().buffer.rope().slice(start..end).to_string();
                 app.register = Some(text);
                 app.set_status("Yanked selection");
             }
             app.mode = Mode::Normal;
-            app.visual_anchor = None;
+            app.tab_mut().visual_anchor = None;
         }
 
         _ => {}
@@ -597,7 +626,7 @@ fn handle_leader(app: &mut App, code: KeyCode) {
         // <leader>u — undo AI edits
         KeyCode::Char('u') => {
             let ai_id = AuthorId::ai("claude");
-            if app.buffer.undo_by_author(&ai_id) {
+            if app.tab_mut().buffer.undo_by_author(&ai_id) {
                 app.set_status("Undid last AI edit");
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
@@ -670,7 +699,8 @@ fn handle_leader(app: &mut App, code: KeyCode) {
         // <leader>s — show semantic info for symbol at cursor
         KeyCode::Char('s') => {
             app.update_semantic_context();
-            if let Some(info) = &app.semantic_info {
+            let info = app.tab().semantic_info.clone();
+            if let Some(info) = info {
                 app.set_status(info.replace('\n', " │ "));
             } else {
                 app.set_status("No semantic info at cursor");
@@ -818,12 +848,12 @@ pub fn handle_review(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
 /// Execute a command-mode command.
 fn execute_command(app: &mut App, cmd: &str) {
     match cmd.trim() {
-        "w" => match app.buffer.save() {
+        "w" => match app.tab_mut().buffer.save() {
             Ok(_) => app.set_status("Written"),
             Err(e) => app.set_status(format!("Error: {}", e)),
         },
         "q" => {
-            if app.buffer.is_modified() {
+            if app.tab().buffer.is_modified() {
                 app.set_status("Unsaved changes! Use :q! to force quit or :wq to save and quit");
             } else {
                 app.should_quit = true;
@@ -832,7 +862,7 @@ fn execute_command(app: &mut App, cmd: &str) {
         "q!" => {
             app.should_quit = true;
         }
-        "wq" => match app.buffer.save() {
+        "wq" => match app.tab_mut().buffer.save() {
             Ok(_) => app.should_quit = true,
             Err(e) => app.set_status(format!("Error saving: {}", e)),
         },

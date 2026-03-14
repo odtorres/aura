@@ -5,13 +5,12 @@ use crate::embedded_terminal::EmbeddedTerminal;
 use crate::file_picker::FilePicker;
 use crate::file_tree::FileTree;
 use crate::git::{GitRepo, LineStatus};
-use crate::highlight::{HighlightedLine, Language, SyntaxHighlighter};
-use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
+use crate::lsp::{Diagnostic, LspEvent};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::plugin::PluginManager;
-use crate::semantic_index::SemanticIndexer;
 use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
+use crate::tab::{EditorTab, TabManager};
 use aura_ai::{estimate_tokens, AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
 use aura_core::conversation::{
     ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
@@ -21,7 +20,7 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::DefaultTerminal;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Get the user's home directory.
 fn dirs_path() -> Option<PathBuf> {
@@ -93,19 +92,14 @@ pub struct ConversationPanel {
 
 /// Top-level application state.
 pub struct App {
-    pub buffer: Buffer,
-    pub cursor: Cursor,
+    /// Tab manager holding all open editor buffers.
+    pub tabs: TabManager,
     pub mode: Mode,
     pub should_quit: bool,
     pub command_input: String,
     pub status_message: Option<String>,
-    /// Viewport offset for scrolling.
-    pub scroll_row: usize,
-    pub scroll_col: usize,
     /// Yank register (clipboard).
     pub register: Option<String>,
-    /// Anchor position for visual mode selection.
-    pub visual_anchor: Option<Cursor>,
     /// Whether to show authorship markers in the gutter.
     pub show_authorship: bool,
     /// Leader key pending (Space was pressed, waiting for next key).
@@ -118,32 +112,8 @@ pub struct App {
     ai_client: Option<AnthropicClient>,
     /// Receiver for streaming AI events.
     ai_receiver: Option<mpsc::Receiver<AiEvent>>,
-    /// Syntax highlighter (None if language not supported).
-    highlighter: Option<SyntaxHighlighter>,
-    /// Cached per-line highlight colours. Regenerated on edits.
-    pub highlight_lines: Vec<HighlightedLine>,
-    /// Whether highlights are stale and need refreshing.
-    highlights_dirty: bool,
-    /// Active LSP client (None if no server available).
-    lsp_client: Option<LspClient>,
-    /// Current diagnostics for the open file.
-    pub diagnostics: Vec<Diagnostic>,
-    /// Hover information to display as a popup.
-    pub hover_info: Option<String>,
     /// Whether `g` was pressed (waiting for second key: `g`→top, `d`→definition).
     pub g_pending: bool,
-    /// Whether the buffer changed since last didChange notification.
-    lsp_change_pending: bool,
-    /// When the last buffer edit occurred (for debouncing didChange).
-    lsp_last_change: Instant,
-    /// Semantic indexer for code structure analysis.
-    semantic_indexer: Option<SemanticIndexer>,
-    /// Detected language for the current file.
-    language: Option<Language>,
-    /// Whether the semantic index needs refreshing.
-    semantic_dirty: bool,
-    /// Cached semantic context for the symbol at cursor.
-    pub semantic_info: Option<String>,
     /// Conversation storage (None if DB could not be opened).
     conversation_store: Option<ConversationStore>,
     /// Active conversation ID for current intent/review cycle.
@@ -154,8 +124,6 @@ pub struct App {
     pub conversation_panel: Option<ConversationPanel>,
     /// Whether to show conversation markers in the gutter.
     pub show_conversations: bool,
-    /// Cached line ranges that have conversation history.
-    pub conversation_lines: Vec<(usize, usize)>,
     /// MCP server (None if not started).
     mcp_server: Option<McpServer>,
     /// Connected external MCP servers.
@@ -214,42 +182,12 @@ impl App {
 
         let ai_client = AiConfig::from_env().and_then(|config| AnthropicClient::new(config).ok());
 
-        // Detect language from file extension and set up highlighter.
-        let language = buffer
-            .file_path()
-            .and_then(|p| p.extension())
-            .and_then(|ext| ext.to_str())
-            .and_then(Language::from_extension);
-        let highlighter = language.and_then(SyntaxHighlighter::new);
-        let semantic_indexer = language.and_then(SemanticIndexer::new);
-
         // Open conversation database.
         let conversation_store = buffer
             .file_path()
             .and_then(|p| p.parent())
             .map(|dir| dir.join(".aura").join("conversations.db"))
             .and_then(|db_path| ConversationStore::open(db_path).ok());
-
-        let conversation_lines = conversation_store
-            .as_ref()
-            .and_then(|store| {
-                let fp = buffer.file_path()?.display().to_string();
-                store.lines_with_conversations(&fp).ok()
-            })
-            .unwrap_or_default();
-
-        // Try to start a language server.
-        let lsp_client = buffer
-            .file_path()
-            .and_then(|p| p.extension())
-            .and_then(|ext| ext.to_str())
-            .and_then(lsp::detect_server)
-            .and_then(|config| {
-                let file_path = buffer.file_path()?;
-                let workspace_root = file_path.parent().unwrap_or(file_path);
-                let content = buffer.rope().to_string();
-                LspClient::start(&config, workspace_root, file_path, &content).ok()
-            });
 
         // Start MCP server.
         let mcp_server = match McpServer::start() {
@@ -320,42 +258,28 @@ impl App {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
 
+        // Create the initial editor tab.
+        let tab = EditorTab::new(buffer, conversation_store.as_ref(), &theme);
+
         let mut app = Self {
-            buffer,
-            cursor: Cursor::origin(),
+            tabs: TabManager::new(tab),
             mode: Mode::Normal,
             should_quit: false,
             command_input: String::new(),
             status_message: None,
-            scroll_row: 0,
-            scroll_col: 0,
             register: None,
-            visual_anchor: None,
             show_authorship: true,
             leader_pending: false,
             intent_input: String::new(),
             proposal: None,
             ai_client,
             ai_receiver: None,
-            highlighter,
-            highlight_lines: Vec::new(),
-            highlights_dirty: true,
-            lsp_client,
-            diagnostics: Vec::new(),
-            hover_info: None,
             g_pending: false,
-            lsp_change_pending: false,
-            lsp_last_change: Instant::now(),
-            semantic_indexer,
-            language,
-            semantic_dirty: true,
-            semantic_info: None,
             conversation_store,
             active_conversation: None,
             active_intent_id: None,
             conversation_panel: None,
             show_conversations: false,
-            conversation_lines,
             mcp_server,
             mcp_clients,
             agent_registry: AgentRegistry::default(),
@@ -383,15 +307,54 @@ impl App {
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
-        app.refresh_highlights();
-        app.refresh_semantic_index();
         app
+    }
+
+    /// Convenience: immutable reference to the active tab.
+    #[inline]
+    pub fn tab(&self) -> &EditorTab {
+        self.tabs.active()
+    }
+
+    /// Convenience: mutable reference to the active tab.
+    #[inline]
+    pub fn tab_mut(&mut self) -> &mut EditorTab {
+        self.tabs.active_mut()
+    }
+
+    // ---- Compatibility accessors ----
+    // These delegate to the active tab so the rest of the codebase can continue
+    // using `app.buffer`, `app.cursor`, etc. via method calls while we
+    // transition.  Gradually these will be removed in favour of `app.tab()`.
+
+    /// Reference to the active buffer.
+    #[inline]
+    pub fn buffer(&self) -> &Buffer {
+        &self.tab().buffer
+    }
+
+    /// Mutable reference to the active buffer.
+    #[inline]
+    pub fn buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.tab_mut().buffer
+    }
+
+    /// Reference to the active cursor.
+    #[inline]
+    pub fn cursor(&self) -> &Cursor {
+        &self.tab().cursor
+    }
+
+    /// Mutable reference to the active cursor.
+    #[inline]
+    pub fn cursor_mut(&mut self) -> &mut Cursor {
+        &mut self.tab_mut().cursor
     }
 
     /// Run the main event loop.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         while !self.should_quit {
-            if self.highlights_dirty {
+            if self.tab().highlights_dirty {
                 self.refresh_highlights();
             }
             terminal.draw(|frame| crate::render::draw(frame, self))?;
@@ -411,11 +374,11 @@ impl App {
             self.maybe_trigger_analysis();
 
             // Send debounced didChange and re-index if needed (300ms delay).
-            if self.lsp_last_change.elapsed() > Duration::from_millis(300) {
-                if self.lsp_change_pending {
+            if self.tab().lsp_last_change.elapsed() > Duration::from_millis(300) {
+                if self.tab().lsp_change_pending {
                     self.send_lsp_did_change();
                 }
-                if self.semantic_dirty {
+                if self.tab().semantic_dirty {
                     self.refresh_semantic_index();
                 }
             }
@@ -443,9 +406,9 @@ impl App {
             client.shutdown();
         }
 
-        // Shutdown LSP on exit.
-        if let Some(mut client) = self.lsp_client.take() {
-            client.shutdown();
+        // Shutdown LSP on exit — all tabs.
+        for tab in self.tabs.tabs_mut() {
+            tab.shutdown_lsp();
         }
 
         Ok(())
@@ -547,9 +510,10 @@ impl App {
         // Build context with semantic info and LSP diagnostics.
         let selection = self.visual_selection_range();
         let semantic = self.semantic_context_for_ai();
+        let tab = self.tab();
         let mut ctx = EditorContext::from_buffer_with_semantic(
-            &self.buffer,
-            &self.cursor,
+            &tab.buffer,
+            &tab.cursor,
             selection,
             semantic,
         );
@@ -557,7 +521,7 @@ impl App {
         ctx.max_tokens = client.max_context_tokens();
 
         // Attach current diagnostics so the AI is aware of errors/warnings.
-        ctx.diagnostics = self
+        ctx.diagnostics = tab
             .diagnostics
             .iter()
             .map(|d| aura_ai::DiagnosticSummary {
@@ -577,19 +541,19 @@ impl App {
             (s, e)
         } else {
             // Default: the current line.
-            let line_start = self
+            let line_start = tab
                 .buffer
-                .cursor_to_char_idx(&Cursor::new(self.cursor.row, 0));
-            let line_end = self
+                .cursor_to_char_idx(&Cursor::new(tab.cursor.row, 0));
+            let line_end = tab
                 .buffer
-                .line(self.cursor.row)
+                .line(tab.cursor.row)
                 .map(|l| line_start + l.len_chars())
                 .unwrap_or(line_start);
             (line_start, line_end)
         };
 
-        let original_text = if start < end && end <= self.buffer.len_chars() {
-            self.buffer.rope().slice(start..end).to_string()
+        let original_text = if start < end && end <= tab.buffer.len_chars() {
+            tab.buffer.rope().slice(start..end).to_string()
         } else {
             String::new()
         };
@@ -601,13 +565,13 @@ impl App {
         }];
 
         // Log intent to conversation store.
-        let file_path_str = self
+        let file_path_str = tab
             .buffer
             .file_path()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        let start_line = self.buffer.char_idx_to_cursor(start).row;
-        let end_line = self.buffer.char_idx_to_cursor(end).row;
+        let start_line = tab.buffer.char_idx_to_cursor(start).row;
+        let end_line = tab.buffer.char_idx_to_cursor(end).row;
 
         if let Some(store) = &self.conversation_store {
             let conv = store
@@ -657,13 +621,14 @@ impl App {
 
             let author = aura_core::AuthorId::ai("claude");
             // Delete the original range, then insert the proposed text.
+            let tab = self.tab_mut();
             if proposal.start < proposal.end {
-                self.buffer
+                tab.buffer
                     .delete(proposal.start, proposal.end, author.clone());
             }
-            self.buffer
+            tab.buffer
                 .insert(proposal.start, &proposal.proposed_text, author);
-            self.cursor = self
+            tab.cursor = tab
                 .buffer
                 .char_idx_to_cursor(proposal.start + proposal.proposed_text.len());
             self.clamp_cursor();
@@ -697,12 +662,10 @@ impl App {
 
     /// Mark syntax highlights and semantic index as stale (call after any buffer edit).
     pub fn mark_highlights_dirty(&mut self) {
-        self.highlights_dirty = true;
-        self.semantic_dirty = true;
-        self.lsp_change_pending = true;
-        self.lsp_last_change = Instant::now();
+        self.tab_mut().mark_highlights_dirty();
+        let cursor_row = self.tab().cursor.row;
         if let Some(engine) = &mut self.speculative {
-            engine.buffer_edited(self.cursor.row);
+            engine.buffer_edited(cursor_row);
         }
         if let Some(repo) = &mut self.git_repo {
             repo.invalidate_status();
@@ -711,64 +674,55 @@ impl App {
 
     /// Regenerate syntax highlights from the current buffer content.
     pub fn refresh_highlights(&mut self) {
-        if let Some(hl) = &mut self.highlighter {
-            let source = self.buffer.rope().to_string();
-            self.highlight_lines = hl.highlight(&source, Some(&self.theme));
-        }
-        self.highlights_dirty = false;
+        let theme = self.theme.clone();
+        self.tab_mut().refresh_highlights(&theme);
     }
 
     /// Rebuild the semantic index from the current buffer.
     pub fn refresh_semantic_index(&mut self) {
-        if let (Some(indexer), Some(lang)) = (&mut self.semantic_indexer, self.language) {
-            let source = self.buffer.rope().to_string();
-            let path = self
-                .buffer
-                .file_path()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_default();
-            indexer.index_file(&path, &source, lang);
-        }
-        self.semantic_dirty = false;
+        self.tab_mut().refresh_semantic_index();
     }
 
     /// Update cached semantic info for the symbol at the current cursor.
     pub fn update_semantic_context(&mut self) {
-        self.semantic_info = None;
-        if let Some(indexer) = &self.semantic_indexer {
-            let path = self
+        let tab = self.tab_mut();
+        tab.semantic_info = None;
+        if let Some(indexer) = &tab.semantic_indexer {
+            let path = tab
                 .buffer
                 .file_path()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_default();
-            if let Some((id, _)) = indexer.graph().symbol_at(&path, self.cursor.row) {
-                self.semantic_info = indexer.graph().context_string(id);
+            if let Some((id, _)) = indexer.graph().symbol_at(&path, tab.cursor.row) {
+                tab.semantic_info = indexer.graph().context_string(id);
             }
         }
     }
 
     /// Get impact summary for a range of lines (used during AI proposal review).
     pub fn impact_summary(&self, start_line: usize, end_line: usize) -> Option<String> {
-        let indexer = self.semantic_indexer.as_ref()?;
-        let path = self.buffer.file_path()?.to_path_buf();
+        let tab = self.tab();
+        let indexer = tab.semantic_indexer.as_ref()?;
+        let path = tab.buffer.file_path()?.to_path_buf();
         indexer.graph().impact_summary(&path, start_line, end_line)
     }
 
     /// Get semantic context string for the AI, optionally including the
     /// Tree-sitter node kind at the cursor position.
     pub fn semantic_context_for_ai(&self) -> Option<String> {
+        let tab = self.tab();
         // Collect symbol-level context from the semantic graph.
-        let symbol_ctx = self.semantic_indexer.as_ref().and_then(|indexer| {
-            let path = self.buffer.file_path()?.to_path_buf();
-            let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
+        let symbol_ctx = tab.semantic_indexer.as_ref().and_then(|indexer| {
+            let path = tab.buffer.file_path()?.to_path_buf();
+            let (id, _) = indexer.graph().symbol_at(&path, tab.cursor.row)?;
             indexer.graph().context_string(id)
         });
 
         // Include the Tree-sitter node kind at cursor if a highlighter is available.
-        let node_type_ctx = self.highlighter.as_ref().and_then(|hl| {
+        let node_type_ctx = tab.highlighter.as_ref().and_then(|hl| {
             // Compute byte offset for current cursor position.
-            let source = self.buffer.rope().to_string();
-            let char_idx = self.buffer.cursor_to_char_idx(&self.cursor);
+            let source = tab.buffer.rope().to_string();
+            let char_idx = tab.buffer.cursor_to_char_idx(&tab.cursor);
             // Convert char index to byte offset.
             let byte_off = source
                 .char_indices()
@@ -798,18 +752,19 @@ impl App {
     ) {
         if let (Some(store), Some(conv_id)) = (&self.conversation_store, &self.active_conversation)
         {
-            let file_path = self
+            let tab = self.tab();
+            let file_path = tab
                 .buffer
                 .file_path()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            let start_line = self
+            let start_line = tab
                 .buffer
-                .char_idx_to_cursor(start.min(self.buffer.len_chars()))
+                .char_idx_to_cursor(start.min(tab.buffer.len_chars()))
                 .row;
-            let end_line = self
+            let end_line = tab
                 .buffer
-                .char_idx_to_cursor(end.min(self.buffer.len_chars()))
+                .char_idx_to_cursor(end.min(tab.buffer.len_chars()))
                 .row;
             let _ = store.log_decision(
                 conv_id,
@@ -826,26 +781,29 @@ impl App {
 
     /// Refresh the cached list of lines with conversation history.
     fn refresh_conversation_lines(&mut self) {
-        self.conversation_lines = self
+        let conv_lines = self
             .conversation_store
             .as_ref()
             .and_then(|store| {
-                let fp = self.buffer.file_path()?.display().to_string();
+                let fp = self.tab().buffer.file_path()?.display().to_string();
                 store.lines_with_conversations(&fp).ok()
             })
             .unwrap_or_default();
+        self.tab_mut().conversation_lines = conv_lines;
     }
 
     /// Show conversation history for the line at cursor.
     pub fn show_conversation_at_cursor(&mut self) {
         let file_path = self
+            .tab()
             .buffer
             .file_path()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
+        let cursor_row = self.tab().cursor.row;
 
         if let Some(store) = &self.conversation_store {
-            match store.conversation_for_code(&file_path, self.cursor.row) {
+            match store.conversation_for_code(&file_path, cursor_row) {
                 Ok(Some((conv, messages))) => {
                     let file_info = format!(
                         "{}:{}-{}",
@@ -880,8 +838,8 @@ impl App {
     /// `q` or `Esc` just like the conversation history panel.
     pub fn show_undo_tree(&mut self) {
         use aura_core::conversation::{ConversationMessage, MessageRole};
-        let tree_text = self.buffer.undo_tree_text();
-        let history_len = self.buffer.history().len();
+        let tree_text = self.tab().buffer.undo_tree_text();
+        let history_len = self.tab().buffer.history().len();
         let total = tree_text.lines().count();
         // Wrap the tree text as a single System message so the renderer can
         // display it verbatim inside the ConversationPanel.
@@ -956,17 +914,18 @@ impl App {
 
     /// Check if a line has conversation history.
     pub fn line_has_conversation(&self, line: usize) -> bool {
-        self.conversation_lines
+        self.tab()
+            .conversation_lines
             .iter()
             .any(|(start, end)| line >= *start && line <= *end)
     }
 
     /// Poll the LSP client for events.
     fn poll_lsp_events(&mut self) {
-        let events = match &self.lsp_client {
-            Some(client) => client.poll_events(),
-            None => return,
-        };
+        let events = self.tab_mut().poll_lsp_events();
+        if events.is_empty() {
+            return;
+        }
 
         for event in events {
             match event {
@@ -974,7 +933,7 @@ impl App {
                     self.set_status("LSP server ready");
                 }
                 LspEvent::Diagnostics(diags) => {
-                    self.diagnostics = diags;
+                    self.tab_mut().diagnostics = diags;
                 }
                 LspEvent::Definition(locations) => {
                     if let Some(loc) = locations.first() {
@@ -984,14 +943,16 @@ impl App {
 
                         // Check if it's in the same file.
                         let current_uri = self
+                            .tab()
                             .buffer
                             .file_path()
                             .map(|p| format!("file://{}", p.display()))
                             .unwrap_or_default();
 
                         if loc.uri == current_uri {
-                            self.cursor.row = target_row;
-                            self.cursor.col = target_col;
+                            let tab = self.tab_mut();
+                            tab.cursor.row = target_row;
+                            tab.cursor.col = target_col;
                             self.clamp_cursor();
                             self.set_status(format!(
                                 "Definition at {}:{}",
@@ -1015,12 +976,12 @@ impl App {
                     if let Some(hover) = result {
                         let text = hover.to_text();
                         if text.is_empty() {
-                            self.hover_info = None;
+                            self.tab_mut().hover_info = None;
                         } else {
-                            self.hover_info = Some(text);
+                            self.tab_mut().hover_info = Some(text);
                         }
                     } else {
-                        self.hover_info = None;
+                        self.tab_mut().hover_info = None;
                         self.set_status("No hover info");
                     }
                 }
@@ -1054,7 +1015,7 @@ impl App {
                 }
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);
-                    self.lsp_client = None;
+                    self.tab_mut().lsp_client = None;
                     self.set_status(format!("LSP error: {e}"));
                 }
             }
@@ -1063,17 +1024,16 @@ impl App {
 
     /// Send a didChange notification with the current buffer content.
     fn send_lsp_did_change(&mut self) {
-        if let Some(client) = &mut self.lsp_client {
-            let text = self.buffer.rope().to_string();
-            client.did_change(&text);
-        }
-        self.lsp_change_pending = false;
+        self.tab_mut().send_lsp_did_change();
     }
 
     /// Request go-to-definition at the current cursor position.
     pub fn lsp_goto_definition(&mut self) {
-        if let Some(client) = &mut self.lsp_client {
-            client.goto_definition(self.cursor.row as u32, self.cursor.col as u32);
+        let tab = self.tab_mut();
+        let row = tab.cursor.row as u32;
+        let col = tab.cursor.col as u32;
+        if let Some(client) = &mut tab.lsp_client {
+            client.goto_definition(row, col);
             self.set_status("Looking up definition...");
         } else {
             self.set_status("No LSP server");
@@ -1082,8 +1042,10 @@ impl App {
 
     /// Request hover info at the current cursor position.
     pub fn lsp_hover(&mut self) {
-        if let Some(client) = &mut self.lsp_client {
-            client.hover(self.cursor.row as u32, self.cursor.col as u32);
+        let row = self.tab().cursor.row as u32;
+        let col = self.tab().cursor.col as u32;
+        if let Some(client) = &mut self.tab_mut().lsp_client {
+            client.hover(row, col);
         } else {
             self.set_status("No LSP server");
         }
@@ -1095,11 +1057,12 @@ impl App {
     /// can offer targeted quick-fixes. The result is handled asynchronously
     /// in [`poll_lsp_events`] via [`lsp::LspEvent::CodeActions`].
     pub fn lsp_request_code_actions(&mut self) {
-        let row = self.cursor.row as u32;
-        let col = self.cursor.col as u32;
+        let tab = self.tab();
+        let row = tab.cursor.row as u32;
+        let col = tab.cursor.col as u32;
 
         // Serialise diagnostics on this line into the LSP JSON format.
-        let diag_json: Vec<serde_json::Value> = self
+        let diag_json: Vec<serde_json::Value> = tab
             .diagnostics
             .iter()
             .filter(|d| d.range.start.line == row)
@@ -1115,9 +1078,9 @@ impl App {
             })
             .collect();
 
-        if let Some(client) = &mut self.lsp_client {
+        if let Some(client) = &mut self.tab_mut().lsp_client {
             client.request_code_actions(row, col, &diag_json);
-            self.set_status("Requesting code actions…");
+            self.set_status("Requesting code actions...");
         } else {
             self.set_status("No LSP server");
         }
@@ -1125,30 +1088,34 @@ impl App {
 
     /// Check if an LSP client is active.
     pub fn has_lsp(&self) -> bool {
-        self.lsp_client.is_some()
+        self.tab().lsp_client.is_some()
     }
 
     /// Get diagnostics for a specific line.
     pub fn line_diagnostics(&self, line: usize) -> Option<&Diagnostic> {
-        self.diagnostics
+        self.tab()
+            .diagnostics
             .iter()
             .find(|d| d.range.start.line as usize == line)
     }
 
     /// Count errors and warnings.
     pub fn diagnostic_counts(&self) -> (usize, usize) {
-        let errors = self.diagnostics.iter().filter(|d| d.is_error()).count();
-        let warnings = self.diagnostics.iter().filter(|d| d.is_warning()).count();
+        let tab = self.tab();
+        let errors = tab.diagnostics.iter().filter(|d| d.is_error()).count();
+        let warnings = tab.diagnostics.iter().filter(|d| d.is_warning()).count();
         (errors, warnings)
     }
 
     /// Jump to the next diagnostic after the current cursor position.
     pub fn next_diagnostic(&mut self) {
-        let target = self
+        let tab = self.tab();
+        let cursor_row = tab.cursor.row;
+        let target = tab
             .diagnostics
             .iter()
-            .find(|d| d.range.start.line as usize > self.cursor.row)
-            .or_else(|| self.diagnostics.first())
+            .find(|d| d.range.start.line as usize > cursor_row)
+            .or_else(|| tab.diagnostics.first())
             .map(|d| {
                 (
                     d.range.start.line as usize,
@@ -1158,8 +1125,9 @@ impl App {
             });
 
         if let Some((row, col, msg)) = target {
-            self.cursor.row = row;
-            self.cursor.col = col;
+            let tab = self.tab_mut();
+            tab.cursor.row = row;
+            tab.cursor.col = col;
             self.clamp_cursor();
             self.set_status(msg);
         } else {
@@ -1169,12 +1137,14 @@ impl App {
 
     /// Jump to the previous diagnostic before the current cursor position.
     pub fn prev_diagnostic(&mut self) {
-        let target = self
+        let tab = self.tab();
+        let cursor_row = tab.cursor.row;
+        let target = tab
             .diagnostics
             .iter()
             .rev()
-            .find(|d| (d.range.start.line as usize) < self.cursor.row)
-            .or_else(|| self.diagnostics.last())
+            .find(|d| (d.range.start.line as usize) < cursor_row)
+            .or_else(|| tab.diagnostics.last())
             .map(|d| {
                 (
                     d.range.start.line as usize,
@@ -1184,8 +1154,9 @@ impl App {
             });
 
         if let Some((row, col, msg)) = target {
-            self.cursor.row = row;
-            self.cursor.col = col;
+            let tab = self.tab_mut();
+            tab.cursor.row = row;
+            tab.cursor.col = col;
             self.clamp_cursor();
             self.set_status(msg);
         } else {
@@ -1195,34 +1166,37 @@ impl App {
 
     /// Clamp cursor to valid buffer positions.
     pub fn clamp_cursor(&mut self) {
-        let max_row = self.buffer.line_count().saturating_sub(1);
-        self.cursor.row = self.cursor.row.min(max_row);
+        let mode = self.mode;
+        let tab = self.tab_mut();
+        let max_row = tab.buffer.line_count().saturating_sub(1);
+        tab.cursor.row = tab.cursor.row.min(max_row);
 
-        if let Some(line) = self.buffer.line(self.cursor.row) {
+        if let Some(line) = tab.buffer.line(tab.cursor.row) {
             let line_len = line.len_chars();
-            let max_col = if self.mode == Mode::Insert {
+            let max_col = if mode == Mode::Insert {
                 line_len
             } else {
                 line_len.saturating_sub(1)
             };
-            self.cursor.col = self.cursor.col.min(max_col);
+            tab.cursor.col = tab.cursor.col.min(max_col);
         }
     }
 
     /// Ensure the cursor is visible within the viewport.
     pub fn scroll_to_cursor(&mut self, viewport_height: usize, viewport_width: usize) {
+        let tab = self.tab_mut();
         let margin = 5;
-        if self.cursor.row < self.scroll_row + margin {
-            self.scroll_row = self.cursor.row.saturating_sub(margin);
+        if tab.cursor.row < tab.scroll_row + margin {
+            tab.scroll_row = tab.cursor.row.saturating_sub(margin);
         }
-        if self.cursor.row >= self.scroll_row + viewport_height - margin {
-            self.scroll_row = self.cursor.row + margin - viewport_height + 1;
+        if tab.cursor.row >= tab.scroll_row + viewport_height - margin {
+            tab.scroll_row = tab.cursor.row + margin - viewport_height + 1;
         }
-        if self.cursor.col < self.scroll_col {
-            self.scroll_col = self.cursor.col;
+        if tab.cursor.col < tab.scroll_col {
+            tab.scroll_col = tab.cursor.col;
         }
-        if self.cursor.col >= self.scroll_col + viewport_width {
-            self.scroll_col = self.cursor.col - viewport_width + 1;
+        if tab.cursor.col >= tab.scroll_col + viewport_width {
+            tab.scroll_col = tab.cursor.col - viewport_width + 1;
         }
     }
 
@@ -1250,13 +1224,14 @@ impl App {
                 start_line,
                 end_line,
             } => {
-                let total = self.buffer.line_count();
+                let tab = self.tab();
+                let total = tab.buffer.line_count();
                 let start = start_line.unwrap_or(0).min(total);
                 let end = end_line.unwrap_or(total).min(total);
 
                 let mut lines = Vec::new();
                 for i in start..end {
-                    if let Some(text) = self.buffer.line_text(i) {
+                    if let Some(text) = tab.buffer.line_text(i) {
                         lines.push(text);
                     }
                 }
@@ -1268,7 +1243,7 @@ impl App {
                         "start_line": start,
                         "end_line": end,
                         "total_lines": total,
-                        "file_path": self.buffer.file_path().map(|p| p.display().to_string()),
+                        "file_path": tab.buffer.file_path().map(|p| p.display().to_string()),
                     }),
                 }
             }
@@ -1288,20 +1263,58 @@ impl App {
                     .map(|r| r.to_string());
 
                 let author = AuthorId::ai(agent_id.clone());
+                let tab = self.tab_mut();
                 let start_cursor = Cursor::new(*start_line, *start_col);
-                let start_idx = self.buffer.cursor_to_char_idx(&start_cursor);
+                let start_idx = tab.buffer.cursor_to_char_idx(&start_cursor);
 
                 if let (Some(el), Some(ec)) = (end_line, end_col) {
                     // Replace range.
                     let end_cursor = Cursor::new(*el, *ec);
-                    let end_idx = self.buffer.cursor_to_char_idx(&end_cursor);
-                    if start_idx < end_idx && end_idx <= self.buffer.len_chars() {
-                        self.buffer.delete(start_idx, end_idx, author.clone());
+                    let end_idx = tab.buffer.cursor_to_char_idx(&end_cursor);
+                    if start_idx < end_idx && end_idx <= tab.buffer.len_chars() {
+                        tab.buffer.delete(start_idx, end_idx, author.clone());
                     }
                 }
 
-                self.buffer.insert(start_idx, text, author);
+                tab.buffer.insert(start_idx, text, author);
                 self.mark_highlights_dirty();
+
+                // Auto-log this edit as a conversation entry.
+                if let Some(store) = &self.conversation_store {
+                    let file_path = self
+                        .tab()
+                        .buffer
+                        .file_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<scratch>".to_string());
+                    let end_l = end_line.unwrap_or(*start_line);
+                    let conv = store
+                        .conversations_for_range(&file_path, *start_line, end_l)
+                        .ok()
+                        .and_then(|v| v.into_iter().next())
+                        .or_else(|| {
+                            store
+                                .create_conversation(&file_path, *start_line, end_l, None)
+                                .ok()
+                        });
+                    if let Some(c) = conv {
+                        let preview = if text.len() > 200 {
+                            format!("{}...", &text[..200])
+                        } else {
+                            text.to_string()
+                        };
+                        let content = format!(
+                            "[{}] Edited lines {}-{}: {}",
+                            agent_id, start_line, end_l, preview
+                        );
+                        let _ = store.add_message(
+                            &c.id,
+                            MessageRole::AiResponse,
+                            &content,
+                            Some(agent_id),
+                        );
+                    }
+                }
 
                 // Show agent edit in status bar, including role if available.
                 let status_msg = if let Some(role) = &agent_role {
@@ -1324,6 +1337,7 @@ impl App {
             }
             McpAction::GetDiagnostics => {
                 let diags: Vec<serde_json::Value> = self
+                    .tab()
                     .diagnostics
                     .iter()
                     .map(|d| {
@@ -1344,9 +1358,10 @@ impl App {
             }
             McpAction::GetSelection => {
                 let selection = self.visual_selection_range().map(|(s, e)| {
-                    let text = self.buffer.rope().slice(s..e).to_string();
-                    let start_cursor = self.buffer.char_idx_to_cursor(s);
-                    let end_cursor = self.buffer.char_idx_to_cursor(e);
+                    let tab = self.tab();
+                    let text = tab.buffer.rope().slice(s..e).to_string();
+                    let start_cursor = tab.buffer.char_idx_to_cursor(s);
+                    let end_cursor = tab.buffer.char_idx_to_cursor(e);
                     serde_json::json!({
                         "text": text,
                         "start": { "line": start_cursor.row, "col": start_cursor.col },
@@ -1360,20 +1375,25 @@ impl App {
                 }
             }
             McpAction::GetCursorContext => {
-                let line_text = self.buffer.line_text(self.cursor.row).unwrap_or_default();
+                let tab = self.tab();
+                let line_text = tab.buffer.line_text(tab.cursor.row).unwrap_or_default();
+                let cursor_row = tab.cursor.row;
+                let cursor_col = tab.cursor.col;
+                let file_path = tab.buffer.file_path().map(|p| p.display().to_string());
+                let total_lines = tab.buffer.line_count();
                 let semantic = self.semantic_context_for_ai();
 
                 McpAppResponse {
                     success: true,
                     data: serde_json::json!({
                         "cursor": {
-                            "line": self.cursor.row,
-                            "col": self.cursor.col,
+                            "line": cursor_row,
+                            "col": cursor_col,
                         },
                         "mode": self.mode.label(),
                         "current_line": line_text,
-                        "file_path": self.buffer.file_path().map(|p| p.display().to_string()),
-                        "total_lines": self.buffer.line_count(),
+                        "file_path": file_path,
+                        "total_lines": total_lines,
                         "semantic_context": semantic,
                     }),
                 }
@@ -1392,14 +1412,15 @@ impl App {
                     }
                 };
 
-                let file_path = self
+                let tab = self.tab();
+                let file_path = tab
                     .buffer
                     .file_path()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
 
                 let start = start_line.unwrap_or(0);
-                let end = end_line.unwrap_or(self.buffer.line_count());
+                let end = end_line.unwrap_or(tab.buffer.line_count());
 
                 match store.conversations_for_range(&file_path, start, end) {
                     Ok(convs) => {
@@ -1516,18 +1537,108 @@ impl App {
                     }),
                 }
             }
-            McpAction::GetBufferInfo => McpAppResponse {
-                success: true,
-                data: serde_json::json!({
-                    "file_path": self.buffer.file_path().map(|p| p.display().to_string()),
-                    "line_count": self.buffer.line_count(),
-                    "char_count": self.buffer.len_chars(),
-                    "modified": self.buffer.is_modified(),
-                    "language": self.language.map(|l| format!("{:?}", l)),
-                    "has_lsp": self.has_lsp(),
-                    "connected_agents": self.agent_registry.count(),
-                }),
-            },
+            McpAction::GetBufferInfo => {
+                let tab = self.tab();
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "file_path": tab.buffer.file_path().map(|p| p.display().to_string()),
+                        "line_count": tab.buffer.line_count(),
+                        "char_count": tab.buffer.len_chars(),
+                        "modified": tab.buffer.is_modified(),
+                        "language": tab.language.map(|l| format!("{:?}", l)),
+                        "has_lsp": self.has_lsp(),
+                        "connected_agents": self.agent_registry.count(),
+                    }),
+                }
+            }
+            McpAction::LogConversation {
+                agent_id,
+                message,
+                role,
+                context,
+                line_start,
+                line_end,
+            } => {
+                let store = match &self.conversation_store {
+                    Some(s) => s,
+                    None => {
+                        // Try to initialize a conversation store in ~/.aura/ as fallback.
+                        let fallback = dirs_path()
+                            .map(|d| d.join("conversations.db"))
+                            .and_then(|p| ConversationStore::open(p).ok());
+                        if let Some(s) = fallback {
+                            self.conversation_store = Some(s);
+                            self.conversation_store.as_ref().unwrap()
+                        } else {
+                            return McpAppResponse {
+                                success: false,
+                                data: serde_json::json!({ "error": "No conversation store available" }),
+                            };
+                        }
+                    }
+                };
+
+                let file_path = self
+                    .tab()
+                    .buffer
+                    .file_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<scratch>".to_string());
+
+                let start = line_start.unwrap_or(0);
+                let end = line_end.unwrap_or(self.tab().buffer.line_count().saturating_sub(1));
+
+                let msg_role = match role.as_str() {
+                    "human_intent" => MessageRole::HumanIntent,
+                    "system" => MessageRole::System,
+                    _ => MessageRole::AiResponse,
+                };
+
+                // Create or find a conversation for this range.
+                let conv = store
+                    .conversations_for_range(&file_path, start, end)
+                    .ok()
+                    .and_then(|v| v.into_iter().next())
+                    .or_else(|| {
+                        store
+                            .create_conversation(&file_path, start, end, None)
+                            .ok()
+                    });
+
+                match conv {
+                    Some(c) => {
+                        let content = if let Some(ctx) = context {
+                            format!("[{}] {}\n\nContext: {}", agent_id, message, ctx)
+                        } else {
+                            format!("[{}] {}", agent_id, message)
+                        };
+                        match store.add_message(&c.id, msg_role, &content, Some(agent_id)) {
+                            Ok(msg) => {
+                                self.set_status(format!(
+                                    "Logged conversation from '{}'",
+                                    agent_id
+                                ));
+                                McpAppResponse {
+                                    success: true,
+                                    data: serde_json::json!({
+                                        "conversation_id": c.id,
+                                        "message_id": msg.id,
+                                    }),
+                                }
+                            }
+                            Err(e) => McpAppResponse {
+                                success: false,
+                                data: serde_json::json!({ "error": e.to_string() }),
+                            },
+                        }
+                    }
+                    None => McpAppResponse {
+                        success: false,
+                        data: serde_json::json!({ "error": "Failed to create conversation" }),
+                    },
+                }
+            }
         }
     }
 
@@ -1585,24 +1696,29 @@ impl App {
         }
 
         // Gather diagnostic messages for context.
-        let diag_msgs: Vec<String> = self
+        let tab = self.tab();
+        let diag_msgs: Vec<String> = tab
             .diagnostics
             .iter()
             .map(|d| format!("line {}: {}", d.range.start.line + 1, d.message))
             .collect();
+        let cursor = tab.cursor;
 
         let semantic = self.semantic_context_for_ai();
-        let cursor = self.cursor;
 
+        // We need to borrow speculative mutably and tab immutably at the same
+        // time.  Since they live in different fields of `self`, we split the
+        // borrows by accessing `self.tabs` and `self.speculative` directly.
         if let Some(engine) = &mut self.speculative {
-            engine.analyze(&self.buffer, &cursor, semantic, &diag_msgs);
+            engine.analyze(&self.tabs.active().buffer, &cursor, semantic, &diag_msgs);
         }
     }
 
     /// Notify the speculative engine that the cursor moved.
     pub fn notify_cursor_moved(&mut self) {
+        let cursor = self.tab().cursor;
         if let Some(engine) = &mut self.speculative {
-            engine.cursor_moved(&self.cursor);
+            engine.cursor_moved(&cursor);
         }
     }
 
@@ -1636,19 +1752,20 @@ impl App {
             let author = AuthorId::ai("speculative");
 
             // Replace the region with the suggested text.
+            let tab = self.tab_mut();
             let start_cursor = Cursor::new(suggestion.start_line, 0);
-            let start_idx = self.buffer.cursor_to_char_idx(&start_cursor);
+            let start_idx = tab.buffer.cursor_to_char_idx(&start_cursor);
 
             let end_cursor = Cursor::new(suggestion.end_line, 0);
-            let end_idx = self
+            let end_idx = tab
                 .buffer
                 .cursor_to_char_idx(&end_cursor)
-                .min(self.buffer.len_chars());
+                .min(tab.buffer.len_chars());
 
             if start_idx < end_idx {
-                self.buffer.delete(start_idx, end_idx, author.clone());
+                tab.buffer.delete(start_idx, end_idx, author.clone());
             }
-            self.buffer.insert(start_idx, &suggestion.text, author);
+            tab.buffer.insert(start_idx, &suggestion.text, author);
             self.mark_highlights_dirty();
 
             self.set_status(format!(
@@ -1706,19 +1823,20 @@ impl App {
     /// Trigger cross-file change check after accepting an edit.
     fn trigger_cross_file_check(&mut self) {
         // Find related files via semantic graph.
-        let related = self
+        let tab = self.tab();
+        let related = tab
             .semantic_indexer
             .as_ref()
             .and_then(|indexer| {
-                let path = self.buffer.file_path()?.to_path_buf();
-                let (id, _) = indexer.graph().symbol_at(&path, self.cursor.row)?;
+                let path = tab.buffer.file_path()?.to_path_buf();
+                let (id, _) = indexer.graph().symbol_at(&path, tab.cursor.row)?;
                 let impact = indexer.graph().impact_of(id);
                 // Collect unique file paths from callers and tests.
                 let mut files: Vec<String> = Vec::new();
+                let current = tab.buffer.file_path()?.display().to_string();
                 for caller_id in &impact.direct_callers {
                     if let Some(sym) = indexer.graph().symbol(*caller_id) {
                         let fp = sym.file_path.display().to_string();
-                        let current = self.buffer.file_path()?.display().to_string();
                         if fp != current && !files.contains(&fp) {
                             files.push(fp);
                         }
@@ -1727,7 +1845,6 @@ impl App {
                 for test_id in &impact.affected_tests {
                     if let Some(sym) = indexer.graph().symbol(*test_id) {
                         let fp = sym.file_path.display().to_string();
-                        let current = self.buffer.file_path()?.display().to_string();
                         if fp != current && !files.contains(&fp) {
                             files.push(fp);
                         }
@@ -1743,9 +1860,9 @@ impl App {
 
         if !related.is_empty() {
             let semantic = self.semantic_context_for_ai();
-            let cursor = self.cursor;
+            let cursor = self.tabs.active().cursor;
             if let Some(engine) = &mut self.speculative {
-                engine.propose_cross_file_changes(&self.buffer, &cursor, semantic, related);
+                engine.propose_cross_file_changes(&self.tabs.active().buffer, &cursor, semantic, related);
             }
         }
     }
@@ -1780,7 +1897,7 @@ impl App {
 
     /// Get line-level git diff status for the current file.
     pub fn git_line_status(&mut self, line: usize) -> Option<LineStatus> {
-        let file_path = self.buffer.file_path()?.to_path_buf();
+        let file_path = self.tab().buffer.file_path()?.to_path_buf();
         let repo = self.git_repo.as_mut()?;
         let status = repo.line_status(&file_path);
         status.get(&line).copied()
@@ -1788,7 +1905,7 @@ impl App {
 
     /// Get blame info for a specific line.
     pub fn git_blame_for_line(&mut self, line: usize) -> Option<crate::git::BlameEntry> {
-        let file_path = self.buffer.file_path()?.to_path_buf();
+        let file_path = self.tab().buffer.file_path()?.to_path_buf();
         let repo = self.git_repo.as_mut()?;
         let blame = repo.blame(&file_path);
         blame.get(line).and_then(|e| e.clone())
@@ -1806,7 +1923,7 @@ impl App {
 
     /// Commit the current file with a message.
     pub fn git_commit(&self, message: &str) {
-        let file_path = match self.buffer.file_path() {
+        let file_path = match self.tab().buffer.file_path() {
             Some(p) => p.to_path_buf(),
             None => {
                 return;
@@ -1850,7 +1967,7 @@ impl App {
             .git_repo
             .as_ref()
             .and_then(|repo| {
-                let fp = self.buffer.file_path()?;
+                let fp = self.tab().buffer.file_path()?;
                 repo.diff_summary(fp).ok()
             })
             .unwrap_or_default();
@@ -1860,6 +1977,12 @@ impl App {
             return;
         }
 
+        let file_path_str = self
+            .tab()
+            .buffer
+            .file_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         let system = "You are generating a git commit message. \
                       Write a concise, conventional commit message (type: description). \
                       Output ONLY the commit message, no explanations."
@@ -1869,10 +1992,7 @@ impl App {
             content: format!(
                 "Generate a commit message for these changes:\n\n{}\n\nFile: {}",
                 diff_summary,
-                self.buffer
-                    .file_path()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default()
+                file_path_str
             ),
         }];
 
@@ -2055,7 +2175,23 @@ impl App {
         self.file_picker.open();
     }
 
-    /// Load the file currently selected in the file picker into the buffer,
+    /// Open a file by path in a new tab, or switch to an existing tab.
+    pub fn open_file(&mut self, path: PathBuf) -> Result<(), String> {
+        let conversation_store = self.conversation_store.as_ref();
+        let theme = self.theme.clone();
+        let was_new = self.tabs.open_or_switch(&path, || {
+            let buf = Buffer::from_file(&path).map_err(|e| format!("Error opening file: {}", e))?;
+            Ok(EditorTab::new(buf, conversation_store, &theme))
+        })?;
+        if was_new {
+            self.set_status(format!("Opened {}", path.display()));
+        } else {
+            self.set_status(format!("Switched to {}", path.display()));
+        }
+        Ok(())
+    }
+
+    /// Load the file currently selected in the file picker into a tab,
     /// then close the picker. If no file is selected, or loading fails, a
     /// status message is shown instead.
     pub fn open_selected_file(&mut self) {
@@ -2067,31 +2203,8 @@ impl App {
             }
         };
         self.file_picker.close();
-        match Buffer::from_file(&path) {
-            Ok(buf) => {
-                self.buffer = buf;
-                self.cursor = Cursor::origin();
-                self.scroll_row = 0;
-                self.scroll_col = 0;
-                self.hover_info = None;
-                self.diagnostics = Vec::new();
-                // Re-detect language and reset highlighter.
-                self.language = self
-                    .buffer
-                    .file_path()
-                    .and_then(|p| p.extension())
-                    .and_then(|ext| ext.to_str())
-                    .and_then(crate::highlight::Language::from_extension);
-                self.highlighter = self
-                    .language
-                    .and_then(crate::highlight::SyntaxHighlighter::new);
-                self.highlight_lines = Vec::new();
-                self.mark_highlights_dirty();
-                self.set_status(format!("Opened {}", path.display()));
-            }
-            Err(e) => {
-                self.set_status(format!("Error opening file: {}", e));
-            }
+        if let Err(e) = self.open_file(path) {
+            self.set_status(e);
         }
     }
 
@@ -2140,56 +2253,56 @@ impl App {
         }
         let path = entry.path.clone();
         self.file_tree_focused = false;
-        match Buffer::from_file(&path) {
-            Ok(buf) => {
-                self.buffer = buf;
-                self.cursor = Cursor::origin();
-                self.scroll_row = 0;
-                self.scroll_col = 0;
-                self.hover_info = None;
-                self.diagnostics = Vec::new();
-                self.language = self
-                    .buffer
-                    .file_path()
-                    .and_then(|p| p.extension())
-                    .and_then(|ext| ext.to_str())
-                    .and_then(crate::highlight::Language::from_extension);
-                self.highlighter = self
-                    .language
-                    .and_then(crate::highlight::SyntaxHighlighter::new);
-                self.highlight_lines = Vec::new();
-                self.mark_highlights_dirty();
-                self.set_status(format!("Opened {}", path.display()));
-            }
-            Err(e) => {
-                self.set_status(format!("Error opening file: {}", e));
-            }
+        if let Err(e) = self.open_file(path) {
+            self.set_status(e);
         }
     }
 
     /// Returns the (start, end) character indices of the visual selection, if active.
     pub fn visual_selection_range(&self) -> Option<(usize, usize)> {
-        let anchor = self.visual_anchor?;
-        let a = self.buffer.cursor_to_char_idx(&anchor);
-        let b = self.buffer.cursor_to_char_idx(&self.cursor);
+        let tab = self.tab();
+        let anchor = tab.visual_anchor?;
+        let a = tab.buffer.cursor_to_char_idx(&anchor);
+        let b = tab.buffer.cursor_to_char_idx(&tab.cursor);
 
         match self.mode {
             Mode::Visual => {
                 let (start, end) = if a <= b { (a, b + 1) } else { (b, a + 1) };
-                Some((start, end.min(self.buffer.len_chars())))
+                Some((start, end.min(tab.buffer.len_chars())))
             }
             Mode::VisualLine => {
-                let (start_row, end_row) = if anchor.row <= self.cursor.row {
-                    (anchor.row, self.cursor.row)
+                let (start_row, end_row) = if anchor.row <= tab.cursor.row {
+                    (anchor.row, tab.cursor.row)
                 } else {
-                    (self.cursor.row, anchor.row)
+                    (tab.cursor.row, anchor.row)
                 };
-                let start = self.buffer.cursor_to_char_idx(&Cursor::new(start_row, 0));
+                let start = tab.buffer.cursor_to_char_idx(&Cursor::new(start_row, 0));
                 let end_cursor = Cursor::new(end_row + 1, 0);
-                let end = self.buffer.cursor_to_char_idx(&end_cursor);
-                Some((start, end.min(self.buffer.len_chars())))
+                let end = tab.buffer.cursor_to_char_idx(&end_cursor);
+                Some((start, end.min(tab.buffer.len_chars())))
             }
             _ => None,
         }
+    }
+
+    /// Close the current tab. Returns `true` if the app should quit.
+    pub fn close_current_tab(&mut self) -> bool {
+        if self.tab().is_modified() {
+            self.set_status("Unsaved changes! Use :tabclose! to force or :w first");
+            return false;
+        }
+        self.close_current_tab_force()
+    }
+
+    /// Force-close the current tab without checking for modifications.
+    /// Returns `true` if there are no more tabs (app should quit).
+    pub fn close_current_tab_force(&mut self) -> bool {
+        // Shutdown LSP for this tab.
+        self.tab_mut().shutdown_lsp();
+        if self.tabs.close_active().is_none() {
+            // Last tab — signal quit.
+            return true;
+        }
+        false
     }
 }

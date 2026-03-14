@@ -19,3 +19,4 @@ pub mod plugin;
 pub mod render;
 pub mod semantic_index;
 pub mod speculative;
+pub mod tab;

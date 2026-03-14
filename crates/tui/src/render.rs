@@ -73,7 +73,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let visible_lines = editor_area.height as usize;
         let mut status = std::collections::HashMap::new();
         for i in 0..visible_lines {
-            let line_idx = app.scroll_row + i;
+            let line_idx = app.tab().scroll_row + i;
             if let Some(s) = app.git_line_status(line_idx) {
                 status.insert(line_idx, s);
             }
@@ -106,8 +106,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     // Render hover popup if present.
-    if let Some(hover_text) = &app.hover_info {
-        draw_hover_popup(frame, app, editor_area, hover_text);
+    if let Some(hover_text) = app.tab().hover_info.clone() {
+        draw_hover_popup(frame, app, editor_area, &hover_text);
     }
 
     // Render conversation panel if present.
@@ -128,8 +128,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // in draw_terminal, so don't set a hardware cursor here.
     } else if app.mode != Mode::Review {
         // Editor cursor (6 = gutter width).
-        let cursor_x = (app.cursor.col - app.scroll_col) as u16 + editor_area.x + 6;
-        let cursor_y = (app.cursor.row - app.scroll_row) as u16 + editor_area.y;
+        let tab = app.tab();
+        let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_area.x + 6;
+        let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_area.y;
         if cursor_x < editor_area.right() && cursor_y < editor_area.bottom() {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
@@ -449,14 +450,15 @@ fn draw_editor(
         .bg(theme.selection_bg)
         .fg(theme.selection_fg);
     let show_authorship = app.show_authorship;
+    let tab = app.tab();
 
     for i in 0..visible_lines {
-        let line_idx = app.scroll_row + i;
-        if let Some(rope_line) = app.buffer.line(line_idx) {
+        let line_idx = tab.scroll_row + i;
+        if let Some(rope_line) = tab.buffer.line(line_idx) {
             let line_num = format!("{:>4} ", line_idx + 1);
             let content: String = rope_line
                 .chars()
-                .skip(app.scroll_col)
+                .skip(tab.scroll_col)
                 .take(text_width as usize)
                 .filter(|c| *c != '\n' && *c != '\r')
                 .collect();
@@ -493,7 +495,7 @@ fn draw_editor(
                     }
                 }
             } else if show_authorship {
-                if let Some(author) = app.buffer.line_author(line_idx) {
+                if let Some(author) = tab.buffer.line_author(line_idx) {
                     Span::styled("▎", Style::default().fg(author_color(author, theme)))
                 } else {
                     Span::raw(" ")
@@ -508,12 +510,12 @@ fn draw_editor(
             ];
 
             // Build per-character styles combining syntax highlighting and selection.
-            let line_start_idx = app
+            let line_start_idx = tab
                 .buffer
                 .cursor_to_char_idx(&aura_core::Cursor::new(line_idx, 0));
-            let visible_start = app.scroll_col;
+            let visible_start = tab.scroll_col;
             let visible_chars: Vec<char> = content.chars().collect();
-            let hl_line = app.highlight_lines.get(line_idx);
+            let hl_line = tab.highlight_lines.get(line_idx);
 
             let mut current_span = String::new();
             let mut current_style: Option<Style> = None;
@@ -619,17 +621,17 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let file_name = app
-        .buffer
+        .buffer()
         .file_path()
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .unwrap_or("[scratch]");
 
-    let modified = if app.buffer.is_modified() { " [+]" } else { "" };
+    let modified = if app.buffer().is_modified() { " [+]" } else { "" };
 
     // Build "last change by" indicator.
     let last_change = app
-        .buffer
+        .buffer()
         .last_edit()
         .map(|(author, when)| {
             let ago = when.elapsed().as_secs();
@@ -688,7 +690,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         mcp_indicator,
         experiment_indicator
     );
-    let right = format!(" {}:{} ", app.cursor.row + 1, app.cursor.col + 1);
+    let right = format!(" {}:{} ", app.cursor().row + 1, app.cursor().col + 1);
 
     let padding = area
         .width
@@ -725,12 +727,12 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     // Show impact analysis alongside review controls.
                     let start_line = app
-                        .buffer
-                        .char_idx_to_cursor(proposal.start.min(app.buffer.len_chars()))
+                        .buffer()
+                        .char_idx_to_cursor(proposal.start.min(app.buffer().len_chars()))
                         .row;
                     let end_line = app
-                        .buffer
-                        .char_idx_to_cursor(proposal.end.min(app.buffer.len_chars()))
+                        .buffer()
+                        .char_idx_to_cursor(proposal.end.min(app.buffer().len_chars()))
                         .row;
                     let impact = app.impact_summary(start_line, end_line).unwrap_or_default();
                     if impact.is_empty() {
@@ -780,8 +782,8 @@ fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str)
     let width = max_width + 4; // border + padding
 
     // Position below and to the right of the cursor.
-    let cursor_x = (app.cursor.col - app.scroll_col) as u16 + editor_area.x + 6;
-    let cursor_y = (app.cursor.row - app.scroll_row) as u16 + editor_area.y + 1;
+    let cursor_x = (app.cursor().col - app.tab().scroll_col) as u16 + editor_area.x + 6;
+    let cursor_y = (app.cursor().row - app.tab().scroll_row) as u16 + editor_area.y + 1;
 
     let x = cursor_x.min(editor_area.right().saturating_sub(width));
     let y = if cursor_y + height < editor_area.bottom() {
@@ -884,8 +886,8 @@ fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: 
         .add_modifier(Modifier::ITALIC);
 
     // Show ghost text inline after the cursor position.
-    let cursor_screen_y = app.cursor.row.saturating_sub(app.scroll_row) as u16 + editor_area.y;
-    let cursor_screen_x = app.cursor.col.saturating_sub(app.scroll_col) as u16 + editor_area.x + 6; // gutter width
+    let cursor_screen_y = app.cursor().row.saturating_sub(app.tab().scroll_row) as u16 + editor_area.y;
+    let cursor_screen_x = app.cursor().col.saturating_sub(app.tab().scroll_col) as u16 + editor_area.x + 6; // gutter width
 
     // Only render if cursor is visible.
     if cursor_screen_y >= editor_area.bottom() || cursor_screen_x >= editor_area.right() {
