@@ -302,6 +302,40 @@ The AI thinks ahead. The human reviews when ready.
 
 ---
 
+## Phase 9: UX Improvements & Claude Code Integration (Post-launch)
+
+Focused on making the editor feel polished and deeply integrated with Claude Code.
+
+### 9.1 Interactive panel navigation
+- [x] File tree focus mode: `Ctrl+n` opens tree with keyboard focus
+- [x] Navigate with `j`/`k`, expand dirs with `Enter`/`l`, collapse with `h`
+- [x] Open files by pressing `Enter` on a file entry
+- [x] `Esc` returns focus to editor, `Ctrl+n` again closes tree
+- [x] Visual indicator: focused panel shows yellow border with `[focused]` label
+
+### 9.2 Real PTY terminal
+- [x] Replace command runner with full PTY terminal (`portable-pty` + `vte`)
+- [x] Real shell (inherits `$SHELL`) with colors, tab completion, history
+- [x] ANSI 256-color parsing and rendering via VTE state machine
+- [x] Streaming output — no more blocking on long-running commands
+- [x] Scrollback buffer (5000 lines) with scroll navigation
+- [x] Cursor rendered as reversed cell in the terminal pane
+- [x] Auto-resize: PTY dimensions sync to actual pane size every frame
+- [x] Full key forwarding: `Ctrl+C`, `Ctrl+D`, arrows, tab, etc.
+
+### 9.3 Claude Code auto-discovery
+- [x] `AURA_MCP_PORT` env var injected into the embedded terminal shell
+- [x] Discovery file `~/.aura/mcp.json` written on startup (host, port, pid, file)
+- [x] Discovery file cleaned up on editor exit
+- [x] Manual override: users can set `AURA_MCP_PORT` externally to connect
+
+### Phase 9 Definition of Done
+> File tree and terminal panels are fully interactive with keyboard focus.
+> PTY terminal runs a real shell with colors and streaming output.
+> Claude Code running inside or outside AURA can auto-discover the MCP server.
+
+---
+
 ## Tech Stack Summary
 
 | Layer              | Tool / Crate            | Purpose                                    |
@@ -319,6 +353,7 @@ The AI thinks ahead. The human reviews when ready.
 | Git                | gitoxide                | Native Rust git operations                 |
 | Serialization      | serde + toml            | Config files, data persistence             |
 | Testing            | proptest + insta        | Property-based + snapshot testing          |
+| Terminal emulation | portable-pty + vte      | Real PTY shell with ANSI color parsing     |
 | Profiling          | flamegraph              | Performance analysis                       |
 
 ---
