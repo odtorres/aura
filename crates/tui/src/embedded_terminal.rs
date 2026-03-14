@@ -171,14 +171,85 @@ impl TerminalScreen {
     }
 
     /// Resize the screen to new dimensions.
+    ///
+    /// Content is anchored so the cursor row stays at the same position
+    /// relative to the bottom of the screen. When the screen grows, blank
+    /// lines appear at the top (or scrollback lines are restored). When it
+    /// shrinks, lines above the cursor are pushed into scrollback.
     fn resize(&mut self, cols: usize, rows: usize) {
-        let mut new_cells = vec![vec![TerminalCell::default(); cols]; rows];
-        let copy_rows = self.rows.min(rows);
-        let copy_cols = self.cols.min(cols);
-        for (new_row, old_row) in new_cells.iter_mut().zip(self.cells.iter()).take(copy_rows) {
-            new_row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
+        if rows == self.rows && cols == self.cols {
+            return;
         }
-        self.cells = new_cells;
+
+        let old_rows = self.rows;
+        let copy_cols = self.cols.min(cols);
+
+        if rows > old_rows {
+            // Screen grew — pull lines from scrollback to fill the top,
+            // or insert blanks if scrollback is empty.
+            let extra = rows - old_rows;
+            let from_scrollback = extra.min(self.scrollback.len());
+            let blank_count = extra - from_scrollback;
+
+            let mut new_cells = Vec::with_capacity(rows);
+
+            // Blank lines at the top (if not enough scrollback).
+            for _ in 0..blank_count {
+                new_cells.push(vec![TerminalCell::default(); cols]);
+            }
+
+            // Restored scrollback lines.
+            let sb_start = self.scrollback.len() - from_scrollback;
+            for sb_line in self.scrollback.drain(sb_start..) {
+                let mut row = vec![TerminalCell::default(); cols];
+                let copy = copy_cols.min(sb_line.len());
+                row[..copy].copy_from_slice(&sb_line[..copy]);
+                new_cells.push(row);
+            }
+
+            // Existing screen content.
+            for old_row in &self.cells {
+                let mut row = vec![TerminalCell::default(); cols];
+                row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
+                new_cells.push(row);
+            }
+
+            self.cursor_row += extra;
+            self.cells = new_cells;
+        } else if rows < old_rows {
+            // Screen shrank — push lines above the cursor area into scrollback.
+            let removed = old_rows - rows;
+            // Number of lines above cursor that can be pushed to scrollback.
+            let pushable = removed.min(self.cursor_row);
+            for i in 0..pushable {
+                self.scrollback.push(self.cells[i].clone());
+                if self.scrollback.len() > self.max_scrollback {
+                    self.scrollback.remove(0);
+                }
+            }
+
+            // Remove from the top.
+            self.cells.drain(0..pushable);
+            // If we still have too many rows, truncate from the bottom.
+            self.cells.truncate(rows);
+            // Pad if needed (shouldn't happen normally).
+            while self.cells.len() < rows {
+                self.cells.push(vec![TerminalCell::default(); cols]);
+            }
+
+            self.cursor_row = self.cursor_row.saturating_sub(pushable);
+
+            // Resize columns for remaining rows.
+            for row in &mut self.cells {
+                row.resize(cols, TerminalCell::default());
+            }
+        } else {
+            // Only columns changed — resize each row.
+            for row in &mut self.cells {
+                row.resize(cols, TerminalCell::default());
+            }
+        }
+
         self.cols = cols;
         self.rows = rows;
         self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
