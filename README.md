@@ -4,6 +4,8 @@
 
 > The human steers. The AI proposes. The editor mediates.
 
+<!-- ANCHOR: overview-start -->
+
 ## What makes AURA different?
 
 Current editors treat AI as a plugin — a guest in a house built for a single human cursor. AURA treats human and AI as **co-authors**, with the editor as the mediator between them.
@@ -14,18 +16,23 @@ Current editors treat AI as a plugin — a guest in a house built for a single h
 - **Multi-agent collaboration**: Multiple AI agents can work simultaneously via CRDT, with conflict-free concurrent editing.
 - **Speculative execution**: The AI thinks ahead in the background, offering improvement suggestions as ghost text overlays.
 
+<!-- ANCHOR: overview-end -->
+
 ## Status
 
-🚧 **Early development — Phase 0 (Foundation)**
+**All development phases complete.** AURA is a fully-featured AI-native editor with CRDT-based multi-author editing, Anthropic AI integration, Tree-sitter syntax highlighting, LSP support, MCP protocol, speculative execution, git integration, an embedded PTY terminal, and a plugin system.
 
-Currently building the minimal viable editor: rope-based buffer, modal editing, file I/O, and TUI rendering.
+See [TODO.md](TODO.md) for the full roadmap and phase history.
 
-See [TODO.md](TODO.md) for the full roadmap.
+<!-- ANCHOR: quickstart-start -->
 
 ## Quick Start
 
 ```bash
-# Build
+# Install from crates.io
+cargo install aura-editor
+
+# Or build from source
 cargo build --release
 
 # Open a file
@@ -35,26 +42,187 @@ cargo run -p aura -- path/to/file.rs
 cargo run -p aura
 ```
 
-## Keybindings (Phase 0)
+<!-- ANCHOR: quickstart-end -->
 
-| Key       | Mode    | Action                |
-|-----------|---------|-----------------------|
-| `i`       | Normal  | Enter Insert mode     |
-| `a`       | Normal  | Append after cursor   |
-| `o`       | Normal  | Open line below       |
-| `Esc`     | Insert  | Return to Normal mode |
-| `h/j/k/l` | Normal | Navigate              |
-| `x`       | Normal  | Delete character      |
-| `u`       | Normal  | Undo                  |
-| `:`       | Normal  | Enter Command mode    |
-| `:w`      | Command | Save                  |
-| `:q`      | Command | Quit                  |
-| `:wq`     | Command | Save and quit         |
-| `Ctrl+S`  | Any     | Save                  |
+<!-- ANCHOR: keybindings-start -->
+
+## Keybindings
+
+### Modes
+
+AURA uses vim-inspired modal editing with additional modes for AI interaction:
+
+| Mode | Description | Indicator |
+|------|-------------|-----------|
+| **Normal** | Navigation and commands | `NORMAL` (blue) |
+| **Insert** | Text input | `INSERT` (green) |
+| **Visual** | Character selection | `VISUAL` (magenta) |
+| **VisualLine** | Line selection | `V-LINE` (magenta) |
+| **Command** | Ex-style commands (`:`) | `COMMAND` (yellow) |
+| **Intent** | Natural language AI input | `INTENT` (cyan) |
+| **Review** | AI proposal review | `REVIEW` (red) |
+
+### Normal Mode
+
+| Key | Action |
+|-----|--------|
+| `i` | Enter Insert mode |
+| `a` | Append after cursor (enter Insert) |
+| `o` | Open line below (enter Insert) |
+| `v` | Enter Visual mode |
+| `V` | Enter Visual Line mode |
+| `:` | Enter Command mode |
+| `h` / `Left` | Move left |
+| `j` / `Down` | Move down |
+| `k` / `Up` | Move up |
+| `l` / `Right` | Move right |
+| `w` | Next word start |
+| `b` | Previous word start |
+| `e` | Word end |
+| `0` | Line start |
+| `$` | Line end |
+| `gg` | Go to top of file |
+| `G` | Go to end of file |
+| `gd` | Go to definition (LSP) |
+| `K` | Hover info (LSP) |
+| `x` | Delete character |
+| `d` | Delete line |
+| `y` | Yank line |
+| `p` | Paste |
+| `u` | Undo |
+| `Tab` | Accept ghost suggestion |
+| `Esc` | Dismiss ghost suggestion |
+| `Alt+]` / `Alt+[` | Cycle ghost suggestions |
+| `]` / `[` | Next / previous diagnostic |
+| `Ctrl+S` | Save |
+| `Ctrl+N` | Toggle file tree sidebar |
+| `Ctrl+J` / `` Ctrl+` `` | Toggle terminal pane |
+
+### Leader Key (`Space`)
+
+| Sequence | Action |
+|----------|--------|
+| `<Space>i` | Enter Intent mode (AI) |
+| `<Space>e` | Explain selected code (AI) |
+| `<Space>f` | Fix errors at cursor (AI) |
+| `<Space>t` | Generate test (AI) |
+| `<Space>u` | Undo AI edits only |
+| `<Space>a` | Toggle authorship markers |
+| `<Space>b` | Toggle inline blame |
+| `<Space>c` | Show conversation history |
+| `<Space>d` | Show recent decisions |
+| `<Space>g` | Cycle AI aggressiveness |
+| `<Space>s` | Show semantic info |
+| `<Space>p` | Open fuzzy file picker |
+
+### Insert Mode
+
+| Key | Action |
+|-----|--------|
+| `Esc` | Return to Normal mode |
+| `Ctrl+S` | Save |
+| Characters | Insert text |
+| `Enter` | New line |
+| `Backspace` | Delete backwards |
+| Arrow keys | Navigate |
+
+### Visual / Visual Line Mode
+
+| Key | Action |
+|-----|--------|
+| `Esc` | Return to Normal mode |
+| `d` / `x` | Delete selection |
+| `y` | Yank selection |
+| Navigation | Extend selection |
+
+### Command Mode
+
+| Command | Action |
+|---------|--------|
+| `:w` | Save |
+| `:q` | Quit (warns on unsaved changes) |
+| `:q!` | Force quit |
+| `:wq` | Save and quit |
+| `:intent` | Enter Intent mode |
+| `:search <query>` | Search conversation history |
+| `:decisions` / `:dec` | Show recent decisions |
+| `:undo-tree` / `:ut` | Show undo tree |
+| `:commit` / `:gc` | AI-generated commit |
+| `:commit <msg>` | Commit with message |
+| `:branches` / `:br` | List branches |
+| `:checkout <name>` | Switch branch |
+| `:branch <name>` | Create branch |
+| `:blame` | Toggle inline blame |
+| `:log` / `:gl` | Show aura git log |
+| `:experiment <name>` | Enter experimental mode |
+| `:code-action` / `:ca` | LSP code actions |
+| `:plugins` | List loaded plugins |
+| `:files` / `:fp` | Open fuzzy file picker |
+| `:term` / `:terminal` | Toggle terminal pane |
+| `:tree` | Toggle file tree |
+| `:term-height <N>` / `:th <N>` | Set terminal height |
+
+### Review Mode (AI Proposals)
+
+| Key | Action |
+|-----|--------|
+| `a` / `Enter` | Accept proposal |
+| `r` / `Esc` | Reject proposal |
+| `e` | Edit proposal in-place |
+| `R` | Request revision |
+
+### Terminal Pane (when focused)
+
+| Key | Action |
+|-----|--------|
+| `Esc` / `Ctrl+J` / `` Ctrl+` `` | Return focus to editor |
+| `Ctrl+Shift+Up/Down` | Resize terminal pane |
+| `Ctrl+C` | Send interrupt |
+| `Ctrl+D` | Send EOF |
+| `Ctrl+L` | Clear screen |
+| All other keys | Forwarded to PTY |
+
+### File Tree (when focused)
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Select next |
+| `k` / `Up` | Select previous |
+| `Enter` / `l` | Open file / expand directory |
+| `h` | Collapse directory / go to parent |
+| `Esc` | Return focus to editor |
+| `Ctrl+N` | Close file tree |
+
+<!-- ANCHOR: keybindings-end -->
+
+<!-- ANCHOR: techstack-start -->
 
 ## Tech Stack
 
-Rust · Tokio · Ropey · Ratatui · Crossterm · Automerge (planned) · Tree-sitter (planned) · MCP (planned)
+| Layer | Tool / Crate | Purpose |
+|-------|-------------|---------|
+| Language | Rust | Performance, safety, async |
+| Async runtime | Tokio | Concurrent AI streams + user input |
+| Text buffer | ropey | Efficient rope data structure |
+| CRDT | automerge | Multi-author conflict-free editing |
+| TUI framework | ratatui + crossterm | Terminal rendering |
+| Syntax parsing | tree-sitter | Incremental syntax highlighting |
+| Language server | LSP client | Diagnostics, go-to-def, hover, code actions |
+| AI API | reqwest + tokio-stream | Anthropic API streaming client |
+| Protocol | MCP (WebSocket) | AI agent-editor communication |
+| Storage | rusqlite | Conversation + decision history |
+| Git | gitoxide (gix) | Native Rust git operations |
+| Terminal | portable-pty + vte | Embedded PTY with ANSI color |
+| Config | serde + toml | Settings and theme files |
+| Testing | proptest + criterion | Property-based + benchmark testing |
+
+<!-- ANCHOR: techstack-end -->
+
+## Documentation
+
+- [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
+- [API Reference](https://odtorres.github.io/aura/api/) — Rustdoc for all crates
+- [Contributing](CONTRIBUTING.md) — Development guide
 
 ## License
 
