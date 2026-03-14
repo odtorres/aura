@@ -19,8 +19,22 @@ use aura_core::conversation::{
 use aura_core::{AuthorId, Buffer, Cursor};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::DefaultTerminal;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+/// Get the user's home directory.
+fn dirs_path() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// Simple ISO-8601 timestamp without pulling in the `chrono` crate.
+fn chrono_now() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}", d.as_secs())
+}
 
 /// The editing mode — vim-inspired but simplified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,6 +255,9 @@ impl App {
         let mcp_server = match McpServer::start() {
             Ok(server) => {
                 tracing::info!("MCP server listening on port {}", server.port);
+                // Write discovery file so external tools (Claude Code, etc.)
+                // can auto-discover the running AURA instance.
+                Self::write_mcp_discovery(server.port, buffer.file_path());
                 Some(server)
             }
             Err(e) => {
@@ -290,6 +307,9 @@ impl App {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+
+        // Extract MCP port for the embedded terminal environment.
+        let mcp_port = mcp_server.as_ref().map(|s| s.port);
 
         // Determine the working directory for the embedded terminal.
         let terminal_cwd = buffer
@@ -348,7 +368,14 @@ impl App {
             revising_proposal: false,
             experimental_mode: false,
             plugin_manager: PluginManager::new(),
-            terminal: EmbeddedTerminal::new(terminal_cwd.clone()),
+            terminal: {
+                let port_str = mcp_port.map(|p| p.to_string());
+                let mut env_vars: Vec<(&str, &str)> = Vec::new();
+                if let Some(ref ps) = port_str {
+                    env_vars.push(("AURA_MCP_PORT", ps.as_str()));
+                }
+                EmbeddedTerminal::with_env(terminal_cwd.clone(), &env_vars)
+            },
             terminal_focused: false,
             file_tree_focused: false,
             file_picker: FilePicker::new(terminal_cwd.clone()),
@@ -407,6 +434,9 @@ impl App {
         if let Some(server) = &self.mcp_server {
             server.shutdown();
         }
+
+        // Clean up MCP discovery file.
+        Self::remove_mcp_discovery();
 
         // Shutdown MCP clients on exit.
         for client in &self.mcp_clients {
@@ -2067,6 +2097,38 @@ impl App {
 
     /// Open the file currently selected in the file tree into the buffer.
     /// If the selected entry is a directory, toggles its expansion instead.
+    /// Write the MCP discovery file to `~/.aura/mcp.json`.
+    ///
+    /// This file allows external tools like Claude Code to auto-discover
+    /// the running AURA MCP server without manual port configuration.
+    fn write_mcp_discovery(port: u16, file_path: Option<&std::path::Path>) {
+        let Some(home) = dirs_path() else { return };
+        let aura_dir = home.join(".aura");
+        if std::fs::create_dir_all(&aura_dir).is_err() {
+            tracing::warn!("Could not create ~/.aura directory");
+            return;
+        }
+        let discovery = serde_json::json!({
+            "host": "127.0.0.1",
+            "port": port,
+            "pid": std::process::id(),
+            "file": file_path.map(|p| p.display().to_string()),
+            "started": chrono_now(),
+        });
+        let path = aura_dir.join("mcp.json");
+        match std::fs::write(&path, serde_json::to_string_pretty(&discovery).unwrap_or_default()) {
+            Ok(()) => tracing::info!("MCP discovery file written to {}", path.display()),
+            Err(e) => tracing::warn!("Failed to write MCP discovery file: {}", e),
+        }
+    }
+
+    /// Remove the MCP discovery file on shutdown.
+    fn remove_mcp_discovery() {
+        let Some(home) = dirs_path() else { return };
+        let path = home.join(".aura").join("mcp.json");
+        let _ = std::fs::remove_file(&path);
+    }
+
     pub fn open_file_tree_selection(&mut self) {
         if self.file_tree.entries.is_empty() {
             return;

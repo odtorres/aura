@@ -488,7 +488,15 @@ impl EmbeddedTerminal {
     /// Spawns a shell (prefers `$SHELL`, falls back to `/bin/zsh` then `/bin/bash`)
     /// in a pseudo-terminal. A background thread reads output and feeds it to
     /// the VTE parser, which updates the shared screen buffer.
+    ///
+    /// Extra environment variables can be injected via `env_vars` — these are
+    /// set in the spawned shell so child processes (e.g. Claude Code) inherit them.
     pub fn new(cwd: PathBuf) -> Self {
+        Self::with_env(cwd, &[])
+    }
+
+    /// Create a new PTY-backed terminal with extra environment variables.
+    pub fn with_env(cwd: PathBuf, env_vars: &[(&str, &str)]) -> Self {
         let cols = 80u16;
         let rows = 10u16;
 
@@ -534,6 +542,11 @@ impl EmbeddedTerminal {
 
         // Set TERM so the shell/programs know what escape sequences to use.
         cmd.env("TERM", "xterm-256color");
+
+        // Inject additional environment variables (e.g., AURA_MCP_PORT).
+        for (key, value) in env_vars {
+            cmd.env(key, value);
+        }
 
         let _child = match pair.slave.spawn_command(cmd) {
             Ok(child) => child,
