@@ -115,7 +115,7 @@ pub struct App {
     /// Whether `g` was pressed (waiting for second key: `g`→top, `d`→definition).
     pub g_pending: bool,
     /// Conversation storage (None if DB could not be opened).
-    conversation_store: Option<ConversationStore>,
+    pub(crate) conversation_store: Option<ConversationStore>,
     /// Active conversation ID for current intent/review cycle.
     active_conversation: Option<ConversationId>,
     /// Active intent ID for current cycle.
@@ -511,12 +511,8 @@ impl App {
         let selection = self.visual_selection_range();
         let semantic = self.semantic_context_for_ai();
         let tab = self.tab();
-        let mut ctx = EditorContext::from_buffer_with_semantic(
-            &tab.buffer,
-            &tab.cursor,
-            selection,
-            semantic,
-        );
+        let mut ctx =
+            EditorContext::from_buffer_with_semantic(&tab.buffer, &tab.cursor, selection, semantic);
         // Propagate the context window limit from the client config.
         ctx.max_tokens = client.max_context_tokens();
 
@@ -1600,11 +1596,7 @@ impl App {
                     .conversations_for_range(&file_path, start, end)
                     .ok()
                     .and_then(|v| v.into_iter().next())
-                    .or_else(|| {
-                        store
-                            .create_conversation(&file_path, start, end, None)
-                            .ok()
-                    });
+                    .or_else(|| store.create_conversation(&file_path, start, end, None).ok());
 
                 match conv {
                     Some(c) => {
@@ -1615,10 +1607,7 @@ impl App {
                         };
                         match store.add_message(&c.id, msg_role, &content, Some(agent_id)) {
                             Ok(msg) => {
-                                self.set_status(format!(
-                                    "Logged conversation from '{}'",
-                                    agent_id
-                                ));
+                                self.set_status(format!("Logged conversation from '{}'", agent_id));
                                 McpAppResponse {
                                     success: true,
                                     data: serde_json::json!({
@@ -1862,7 +1851,12 @@ impl App {
             let semantic = self.semantic_context_for_ai();
             let cursor = self.tabs.active().cursor;
             if let Some(engine) = &mut self.speculative {
-                engine.propose_cross_file_changes(&self.tabs.active().buffer, &cursor, semantic, related);
+                engine.propose_cross_file_changes(
+                    &self.tabs.active().buffer,
+                    &cursor,
+                    semantic,
+                    related,
+                );
             }
         }
     }
@@ -1991,8 +1985,7 @@ impl App {
             role: "user".to_string(),
             content: format!(
                 "Generate a commit message for these changes:\n\n{}\n\nFile: {}",
-                diff_summary,
-                file_path_str
+                diff_summary, file_path_str
             ),
         }];
 
@@ -2229,7 +2222,10 @@ impl App {
             "started": chrono_now(),
         });
         let path = aura_dir.join("mcp.json");
-        match std::fs::write(&path, serde_json::to_string_pretty(&discovery).unwrap_or_default()) {
+        match std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&discovery).unwrap_or_default(),
+        ) {
             Ok(()) => tracing::info!("MCP discovery file written to {}", path.display()),
             Err(e) => tracing::warn!("Failed to write MCP discovery file: {}", e),
         }

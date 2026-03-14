@@ -553,13 +553,9 @@ impl vte::Perform for Performer {
                         // Default background.
                         49 => scr.current_bg = TermColor::Default,
                         // Bright foreground 90-97.
-                        90..=97 => {
-                            scr.current_fg = TermColor::Indexed((pv[i] - 90 + 8) as u8)
-                        }
+                        90..=97 => scr.current_fg = TermColor::Indexed((pv[i] - 90 + 8) as u8),
                         // Bright background 100-107.
-                        100..=107 => {
-                            scr.current_bg = TermColor::Indexed((pv[i] - 100 + 8) as u8)
-                        }
+                        100..=107 => scr.current_bg = TermColor::Indexed((pv[i] - 100 + 8) as u8),
                         // Extended color: 38;5;N (256-color) or 38;2;R;G;B (true color)
                         38 => {
                             if i + 2 < pv.len() && pv[i + 1] == 5 {
@@ -643,11 +639,7 @@ impl vte::Perform for Performer {
             // DECSTBM — Set Scrolling Region.
             'r' => {
                 let top = if p0 == 0 { 1 } else { p0 as usize };
-                let bot = if p1 == 0 {
-                    scr.rows
-                } else {
-                    p1 as usize
-                };
+                let bot = if p1 == 0 { scr.rows } else { p1 as usize };
                 scr.scroll_top = top.saturating_sub(1);
                 scr.scroll_bottom = bot.saturating_sub(1).min(scr.rows.saturating_sub(1));
                 scr.cursor_row = 0;

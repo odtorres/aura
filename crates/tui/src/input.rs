@@ -198,7 +198,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
-    // g-prefix sequences: gg → top, gd → definition.
+    // g-prefix sequences: gg → top, gd → definition, gt/gT → tab nav.
     if app.g_pending {
         app.g_pending = false;
         match code {
@@ -209,6 +209,14 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Char('d') => {
                 app.lsp_goto_definition();
+                return;
+            }
+            KeyCode::Char('t') => {
+                app.tabs.next();
+                return;
+            }
+            KeyCode::Char('T') => {
+                app.tabs.prev();
                 return;
             }
             _ => {
@@ -710,6 +718,33 @@ fn handle_leader(app: &mut App, code: KeyCode) {
         KeyCode::Char('p') => {
             app.open_file_picker();
         }
+        // <leader>n — next tab
+        KeyCode::Char('n') => {
+            if app.tabs.count() > 1 {
+                app.tabs.next();
+            } else {
+                app.set_status("Only one tab open");
+            }
+        }
+        // <leader>w — close current tab
+        KeyCode::Char('w') => {
+            if app.tabs.count() > 1 {
+                if app.close_current_tab() {
+                    app.should_quit = true;
+                }
+            } else {
+                app.set_status("Cannot close last tab (use :q to quit)");
+            }
+        }
+        // <leader>1-9 — switch to tab by index
+        KeyCode::Char(c @ '1'..='9') => {
+            let idx = (c as usize) - ('1' as usize);
+            if idx < app.tabs.count() {
+                app.tabs.switch_to(idx);
+            } else {
+                app.set_status(format!("No tab {}", c));
+            }
+        }
         _ => {
             app.set_status("Unknown leader command");
         }
@@ -853,17 +888,43 @@ fn execute_command(app: &mut App, cmd: &str) {
             Err(e) => app.set_status(format!("Error: {}", e)),
         },
         "q" => {
-            if app.tab().buffer.is_modified() {
-                app.set_status("Unsaved changes! Use :q! to force quit or :wq to save and quit");
+            if app.tabs.count() > 1 {
+                // Multiple tabs: close current tab.
+                if app.tab().is_modified() {
+                    app.set_status("Unsaved changes! Use :q! to force or :wq to save and close");
+                } else if app.close_current_tab() {
+                    app.should_quit = true;
+                }
+            } else {
+                // Last tab: quit app.
+                if app.tab().buffer.is_modified() {
+                    app.set_status(
+                        "Unsaved changes! Use :q! to force quit or :wq to save and quit",
+                    );
+                } else {
+                    app.should_quit = true;
+                }
+            }
+        }
+        "q!" => {
+            if app.tabs.count() > 1 {
+                if app.close_current_tab_force() {
+                    app.should_quit = true;
+                }
             } else {
                 app.should_quit = true;
             }
         }
-        "q!" => {
-            app.should_quit = true;
-        }
         "wq" => match app.tab_mut().buffer.save() {
-            Ok(_) => app.should_quit = true,
+            Ok(_) => {
+                if app.tabs.count() > 1 {
+                    if app.close_current_tab_force() {
+                        app.should_quit = true;
+                    }
+                } else {
+                    app.should_quit = true;
+                }
+            }
             Err(e) => app.set_status(format!("Error saving: {}", e)),
         },
         "intent" => {
@@ -965,6 +1026,52 @@ fn execute_command(app: &mut App, cmd: &str) {
         "files" | "fp" => {
             app.open_file_picker();
         }
+        // :tabnew — open a new scratch tab.
+        "tabnew" => {
+            let buf = aura_core::Buffer::new();
+            let theme = app.theme.clone();
+            let conv_store = app.conversation_store.as_ref();
+            let tab = crate::tab::EditorTab::new(buf, conv_store, &theme);
+            app.tabs.open(tab);
+            app.set_status("[scratch] tab opened");
+        }
+        // :tabe <file> / :tabedit <file> — open file in new tab.
+        _ if cmd.trim().starts_with("tabe ") || cmd.trim().starts_with("tabedit ") => {
+            let arg = cmd
+                .trim()
+                .strip_prefix("tabedit ")
+                .or_else(|| cmd.trim().strip_prefix("tabe "))
+                .unwrap_or("")
+                .trim();
+            if arg.is_empty() {
+                app.set_status("Usage: :tabe <file>");
+            } else {
+                let path = std::path::PathBuf::from(arg);
+                if let Err(e) = app.open_file(path) {
+                    app.set_status(e);
+                }
+            }
+        }
+        // :tabc / :tabclose — close current tab.
+        "tabc" | "tabclose" => {
+            if app.close_current_tab() {
+                app.should_quit = true;
+            }
+        }
+        // :tabc! / :tabclose! — force close current tab.
+        "tabc!" | "tabclose!" => {
+            if app.close_current_tab_force() {
+                app.should_quit = true;
+            }
+        }
+        // :tabn / :tabnext — next tab.
+        "tabn" | "tabnext" => {
+            app.tabs.next();
+        }
+        // :tabp / :tabprev — previous tab.
+        "tabp" | "tabprev" => {
+            app.tabs.prev();
+        }
         // :term / :terminal — toggle terminal pane and give it focus.
         "term" | "terminal" => {
             if app.terminal.visible && app.terminal_focused {
@@ -992,7 +1099,10 @@ fn execute_command(app: &mut App, cmd: &str) {
                     app.set_status(format!("Terminal height: {h} rows"));
                 }
                 Err(_) => {
-                    app.set_status(format!("Current terminal height: {} rows", app.terminal.height));
+                    app.set_status(format!(
+                        "Current terminal height: {} rows",
+                        app.terminal.height
+                    ));
                 }
             }
         }

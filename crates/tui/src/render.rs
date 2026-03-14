@@ -13,15 +13,18 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Layout: editor area + optional proposal + optional terminal + status bar + command bar.
+    // Layout: optional tab bar + editor area + optional proposal + optional terminal + status bar + command bar.
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
     let has_terminal = app.terminal.visible;
     let terminal_height = if has_terminal { app.terminal.height } else { 0 };
+    let has_tab_bar = app.tabs.count() > 1;
+    let tab_bar_height: u16 = if has_tab_bar { 1 } else { 0 };
 
     let chunks = if has_proposal {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(tab_bar_height),  // Tab bar (0 or 1 row)
                 Constraint::Percentage(50),          // Editor (original)
                 Constraint::Percentage(50),          // Proposal (diff)
                 Constraint::Length(terminal_height), // Terminal pane (0 when hidden)
@@ -33,6 +36,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(tab_bar_height),  // Tab bar (0 or 1 row)
                 Constraint::Min(1),                  // Editor
                 Constraint::Length(0),               // No proposal pane
                 Constraint::Length(terminal_height), // Terminal pane (0 when hidden)
@@ -42,14 +46,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .split(area)
     };
 
-    let editor_area_raw = chunks[0];
-    let proposal_area = chunks[1];
-    let terminal_area = chunks[2];
-    let status_area = chunks[3];
-    let command_area = chunks[4];
+    let tab_bar_area = chunks[0];
+    let editor_area_raw = chunks[1];
+    let proposal_area = chunks[2];
+    let terminal_area = chunks[3];
+    let status_area = chunks[4];
+    let command_area = chunks[5];
+
+    // Draw tab bar if multiple tabs are open.
+    if has_tab_bar {
+        draw_tab_bar(frame, app, tab_bar_area);
+    }
 
     // If the file tree is visible, split the editor area horizontally.
-    let (file_tree_area, editor_area) = if app.file_tree.visible {
+    let (file_tree_area, editor_area_outer) = if app.file_tree.visible {
         let tree_width = app.file_tree.width;
         let hsplit = Layout::default()
             .direction(Direction::Horizontal)
@@ -65,12 +75,29 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_file_tree(frame, app, tree_area);
     }
 
-    // Adjust scroll so cursor is visible.
-    app.scroll_to_cursor(editor_area.height as usize, editor_area.width as usize - 6);
+    // Draw editor border with filename as title.
+    let border_color = if !app.terminal_focused && !app.file_tree_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
+    let editor_title = format!(" {} ", app.tab().title());
+    let editor_block = Block::default()
+        .borders(Borders::ALL)
+        .title(editor_title)
+        .border_style(Style::default().fg(border_color));
+    let editor_inner = editor_block.inner(editor_area_outer);
+    frame.render_widget(editor_block, editor_area_outer);
+
+    // Adjust scroll so cursor is visible (using inner dimensions).
+    let gutter_width_usize = 6;
+    let viewport_h = editor_inner.height as usize;
+    let viewport_w = editor_inner.width.saturating_sub(gutter_width_usize as u16) as usize;
+    app.scroll_to_cursor(viewport_h, viewport_w);
 
     // Pre-compute git line status for visible lines.
     let git_status: std::collections::HashMap<usize, LineStatus> = {
-        let visible_lines = editor_area.height as usize;
+        let visible_lines = viewport_h;
         let mut status = std::collections::HashMap::new();
         for i in 0..visible_lines {
             let line_idx = app.tab().scroll_row + i;
@@ -81,7 +108,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         status
     };
 
-    draw_editor(frame, app, editor_area, &git_status);
+    draw_editor(frame, app, editor_inner, &git_status);
 
     if has_proposal {
         draw_proposal(frame, app, proposal_area);
@@ -102,17 +129,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Render ghost suggestion if present.
     if let Some(suggestion) = app.current_ghost_suggestion() {
-        draw_ghost_text(frame, app, editor_area, suggestion);
+        draw_ghost_text(frame, app, editor_inner, suggestion);
     }
 
     // Render hover popup if present.
     if let Some(hover_text) = app.tab().hover_info.clone() {
-        draw_hover_popup(frame, app, editor_area, &hover_text);
+        draw_hover_popup(frame, app, editor_inner, &hover_text);
     }
 
     // Render conversation panel if present.
     if let Some(panel) = &app.conversation_panel {
-        draw_conversation_panel(frame, editor_area, panel);
+        draw_conversation_panel(frame, editor_inner, panel);
     }
 
     // Render file picker overlay if visible.
@@ -127,21 +154,76 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // The PTY manages its own cursor — we render it as reversed text
         // in draw_terminal, so don't set a hardware cursor here.
     } else if app.mode != Mode::Review {
-        // Editor cursor (6 = gutter width).
+        // Editor cursor (6 = gutter width), positioned inside the border.
         let tab = app.tab();
-        let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_area.x + 6;
-        let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_area.y;
-        if cursor_x < editor_area.right() && cursor_y < editor_area.bottom() {
+        let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_inner.x + 6;
+        let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_inner.y;
+        if cursor_x < editor_inner.right() && cursor_y < editor_inner.bottom() {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }
 }
 
+/// Draw the tab bar showing all open tabs.
+fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+
+    let active_idx = app.tabs.active_index();
+    let tabs = app.tabs.tabs();
+    let mut spans: Vec<Span> = Vec::new();
+    let max_width = area.width as usize;
+    let mut used_width = 0;
+
+    for (i, tab) in tabs.iter().enumerate() {
+        let is_active = i == active_idx;
+        let label = if i < 9 {
+            format!(" {}:{} ", i + 1, tab.title())
+        } else {
+            format!(" {} ", tab.title())
+        };
+
+        let label_len = label.len();
+        if used_width + label_len + 1 > max_width {
+            // Truncate with indicator.
+            if used_width < max_width {
+                let remaining = max_width - used_width;
+                let truncated: String = "...".chars().take(remaining).collect();
+                spans.push(Span::styled(
+                    truncated,
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            break;
+        }
+
+        let style = if is_active {
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        spans.push(Span::styled(label, style));
+
+        // Separator between tabs.
+        if i + 1 < tabs.len() {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            used_width += 1;
+        }
+        used_width += label_len;
+    }
+
+    let line = ratatui::text::Line::from(spans);
+    let bg_style = Style::default().bg(Color::Black);
+    let paragraph = Paragraph::new(line).style(bg_style);
+    frame.render_widget(paragraph, area);
+}
+
 /// Convert a `TermColor` to a ratatui `Color`, using `fallback` for Default.
-fn term_color_to_ratatui(
-    tc: crate::embedded_terminal::TermColor,
-    fallback: Color,
-) -> Color {
+fn term_color_to_ratatui(tc: crate::embedded_terminal::TermColor, fallback: Color) -> Color {
     use crate::embedded_terminal::TermColor;
     match tc {
         TermColor::Default => fallback,
@@ -627,7 +709,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         .and_then(|n| n.to_str())
         .unwrap_or("[scratch]");
 
-    let modified = if app.buffer().is_modified() { " [+]" } else { "" };
+    let modified = if app.buffer().is_modified() {
+        " [+]"
+    } else {
+        ""
+    };
 
     // Build "last change by" indicator.
     let last_change = app
@@ -886,8 +972,10 @@ fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: 
         .add_modifier(Modifier::ITALIC);
 
     // Show ghost text inline after the cursor position.
-    let cursor_screen_y = app.cursor().row.saturating_sub(app.tab().scroll_row) as u16 + editor_area.y;
-    let cursor_screen_x = app.cursor().col.saturating_sub(app.tab().scroll_col) as u16 + editor_area.x + 6; // gutter width
+    let cursor_screen_y =
+        app.cursor().row.saturating_sub(app.tab().scroll_row) as u16 + editor_area.y;
+    let cursor_screen_x =
+        app.cursor().col.saturating_sub(app.tab().scroll_col) as u16 + editor_area.x + 6; // gutter width
 
     // Only render if cursor is visible.
     if cursor_screen_y >= editor_area.bottom() || cursor_screen_x >= editor_area.right() {

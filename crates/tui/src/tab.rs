@@ -55,7 +55,11 @@ pub struct EditorTab {
 
 impl EditorTab {
     /// Create a new tab from a buffer, optionally starting LSP and highlighter.
-    pub fn new(buffer: Buffer, conversation_store: Option<&ConversationStore>, theme: &Theme) -> Self {
+    pub fn new(
+        buffer: Buffer,
+        conversation_store: Option<&ConversationStore>,
+        theme: &Theme,
+    ) -> Self {
         // Detect language from file extension and set up highlighter.
         let language = buffer
             .file_path()
