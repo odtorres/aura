@@ -939,6 +939,20 @@ fn execute_command(app: &mut App, cmd: &str) {
             let state = if app.file_tree.visible { "on" } else { "off" };
             app.set_status(format!("File tree: {state}"));
         }
+        // :term-height <N> — set terminal pane height in rows.
+        cmd if cmd.starts_with("term-height ") || cmd.starts_with("th ") => {
+            let arg = cmd.split_whitespace().nth(1).unwrap_or("");
+            match arg.parse::<u16>() {
+                Ok(h) => {
+                    let h = h.clamp(5, 50);
+                    app.terminal.height = h;
+                    app.set_status(format!("Terminal height: {h} rows"));
+                }
+                Err(_) => {
+                    app.set_status(format!("Current terminal height: {} rows", app.terminal.height));
+                }
+            }
+        }
         other => {
             app.set_status(format!("Unknown command: {}", other));
         }
