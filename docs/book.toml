@@ -1,0 +1,25 @@
+[book]
+authors = ["AURA Contributors"]
+language = "en"
+src = "src"
+title = "AURA Editor Documentation"
+description = "Documentation for the AURA AI-native terminal text editor"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/odtorres/aura"
+edit-url-template = "https://github.com/odtorres/aura/edit/main/docs/{path}"
+site-url = "/aura/"
+
+[output.html.search]
+enable = true
+limit-results = 30
+boost-hierarchy = 2
+
+[output.html.fold]
+enable = true
+level = 1
