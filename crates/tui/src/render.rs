@@ -2,7 +2,6 @@
 
 use crate::app::{App, ConversationPanel, Mode};
 use crate::config::Theme;
-use crate::embedded_terminal::EmbeddedTerminal;
 use crate::git::LineStatus;
 use crate::speculative::GhostSuggestion;
 use aura_core::conversation::MessageRole;
@@ -89,6 +88,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     if has_terminal {
+        // Sync the PTY screen size with the actual rendered inner area.
+        let inner_h = terminal_area.height.saturating_sub(2); // borders
+        let inner_w = terminal_area.width.saturating_sub(2);
+        if inner_h > 0 && inner_w > 0 {
+            app.terminal.resize(inner_w, inner_h);
+        }
         draw_terminal(frame, app, terminal_area);
     }
 
@@ -119,13 +124,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.file_picker.visible {
         // No editor cursor while the file picker is open.
     } else if app.terminal_focused && has_terminal {
-        // Place cursor at the input line: last row of the terminal border inner area.
-        // The input prompt "$ <input>" sits on the last inner row.
-        let inner_x = terminal_area.x + 1; // inside left border
-        let inner_bottom = terminal_area.bottom().saturating_sub(2); // above bottom border
-        let prompt_prefix = format!("$ {}", app.terminal.input);
-        let cursor_x = (inner_x + prompt_prefix.len() as u16).min(terminal_area.right() - 1);
-        frame.set_cursor_position((cursor_x, inner_bottom));
+        // The PTY manages its own cursor — we render it as reversed text
+        // in draw_terminal, so don't set a hardware cursor here.
     } else if app.mode != Mode::Review {
         // Editor cursor (6 = gutter width).
         let cursor_x = (app.cursor.col - app.scroll_col) as u16 + editor_area.x + 6;
@@ -136,12 +136,40 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-/// Draw the embedded terminal pane.
+/// Convert an ANSI 256-color index to a ratatui `Color`.
+fn ansi_to_color(idx: u8) -> Color {
+    match idx {
+        0 => Color::Black,
+        1 => Color::Red,
+        2 => Color::Green,
+        3 => Color::Yellow,
+        4 => Color::Blue,
+        5 => Color::Magenta,
+        6 => Color::Cyan,
+        7 => Color::White,
+        8 => Color::DarkGray,
+        9 => Color::LightRed,
+        10 => Color::LightGreen,
+        11 => Color::LightYellow,
+        12 => Color::LightBlue,
+        13 => Color::LightMagenta,
+        14 => Color::LightCyan,
+        15 => Color::Gray,
+        n => Color::Indexed(n),
+    }
+}
+
+/// Draw the embedded PTY terminal pane.
 fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.terminal_focused;
 
     let title = if focused {
-        " Terminal (focused) "
+        let offset = app.terminal.scroll_offset();
+        if offset > 0 {
+            " Terminal (scrollback) "
+        } else {
+            " Terminal (focused) "
+        }
     } else {
         " Terminal "
     };
@@ -160,46 +188,104 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if inner.height == 0 {
+    if inner.height == 0 || inner.width == 0 {
         return;
     }
 
-    // The bottom row of inner is reserved for the input line; the rest shows output.
-    let output_height = inner.height.saturating_sub(1) as usize;
-    let input_y = inner.y + inner.height.saturating_sub(1);
+    // Get a snapshot of the terminal screen.
+    let snapshot = app.terminal.snapshot();
+    let (cursor_row, cursor_col) = app.terminal.cursor_position();
 
-    // Render output lines with scroll offset.
-    let terminal: &EmbeddedTerminal = &app.terminal;
-    let visible_output: Vec<&crate::embedded_terminal::TerminalLine> = terminal
-        .output
-        .iter()
-        .skip(terminal.scroll)
-        .take(output_height)
-        .collect();
-
-    for (i, line) in visible_output.iter().enumerate() {
-        let y = inner.y + i as u16;
-        if y >= input_y {
+    for (row_idx, row) in snapshot.iter().enumerate() {
+        let y = inner.y + row_idx as u16;
+        if y >= inner.y + inner.height {
             break;
         }
-        let style = if line.is_command {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        let display: String = line.content.chars().take(inner.width as usize).collect();
-        let line_widget = Paragraph::new(Span::styled(display, style));
-        frame.render_widget(line_widget, Rect::new(inner.x, y, inner.width, 1));
-    }
 
-    // Render input line.
-    let input_text = format!("$ {}", terminal.input);
-    let display_input: String = input_text.chars().take(inner.width as usize).collect();
-    let input_style = Style::default().fg(Color::Cyan);
-    let input_widget = Paragraph::new(Span::styled(display_input, input_style));
-    frame.render_widget(input_widget, Rect::new(inner.x, input_y, inner.width, 1));
+        // Build styled spans for this row.
+        let mut spans: Vec<Span> = Vec::new();
+        let max_col = (inner.width as usize).min(row.len());
+
+        let mut col = 0;
+        while col < max_col {
+            // Group consecutive cells with the same style.
+            let cell = &row[col];
+            let fg = if cell.fg == 0 {
+                Color::White
+            } else {
+                ansi_to_color(cell.fg)
+            };
+            let bg = if cell.bg == 0 {
+                Color::Reset
+            } else {
+                ansi_to_color(cell.bg)
+            };
+            let bold = cell.bold;
+
+            let mut text = String::new();
+            text.push(cell.ch);
+
+            let mut next = col + 1;
+            while next < max_col {
+                let nc = &row[next];
+                let nfg = if nc.fg == 0 {
+                    Color::White
+                } else {
+                    ansi_to_color(nc.fg)
+                };
+                let nbg = if nc.bg == 0 {
+                    Color::Reset
+                } else {
+                    ansi_to_color(nc.bg)
+                };
+                if nfg == fg && nbg == bg && nc.bold == bold {
+                    text.push(nc.ch);
+                    next += 1;
+                } else {
+                    break;
+                }
+            }
+
+            let mut style = Style::default().fg(fg).bg(bg);
+            if bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+
+            // Show cursor as reversed when terminal is focused.
+            if focused
+                && row_idx == cursor_row
+                && col <= cursor_col
+                && cursor_col < next
+                && app.terminal.scroll_offset() == 0
+            {
+                // Split the span at the cursor position to reverse just that cell.
+                let cursor_offset = cursor_col - col;
+                let before: String = text.chars().take(cursor_offset).collect();
+                let cursor_ch: String = text.chars().skip(cursor_offset).take(1).collect();
+                let after: String = text.chars().skip(cursor_offset + 1).collect();
+
+                if !before.is_empty() {
+                    spans.push(Span::styled(before, style));
+                }
+                if !cursor_ch.is_empty() {
+                    spans.push(Span::styled(
+                        cursor_ch,
+                        style.add_modifier(Modifier::REVERSED),
+                    ));
+                }
+                if !after.is_empty() {
+                    spans.push(Span::styled(after, style));
+                }
+            } else {
+                spans.push(Span::styled(text, style));
+            }
+
+            col = next;
+        }
+
+        let line = ratatui::text::Line::from(spans);
+        frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+    }
 }
 
 /// Draw the file tree sidebar.

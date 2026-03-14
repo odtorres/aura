@@ -1,50 +1,618 @@
-//! Embedded terminal / command runner plugin.
+//! Embedded PTY terminal pane for AURA.
 //!
-//! Provides a bottom-split pane that can execute shell commands and display
-//! their output without requiring a full VTE terminal emulator.
+//! Spawns a real shell (zsh/bash) in a pseudo-terminal so that interactive
+//! commands, colors, and shell features work natively. Output is parsed
+//! via the `vte` crate and stored as a grid of styled cells.
 
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-/// A single line of terminal output.
-#[derive(Debug, Clone)]
-pub struct TerminalLine {
-    /// The text content of this line.
-    pub content: String,
-    /// `true` for "$ command" prompt lines, `false` for command output.
-    pub is_command: bool,
+/// A single cell in the terminal screen grid.
+#[derive(Debug, Clone, Copy)]
+pub struct TerminalCell {
+    /// The character displayed in this cell.
+    pub ch: char,
+    /// Foreground color index (0–255 for ANSI 256, or 0 for default).
+    pub fg: u8,
+    /// Background color index.
+    pub bg: u8,
+    /// Whether the cell is bold.
+    pub bold: bool,
 }
 
-/// An embedded command-runner pane displayed at the bottom of the editor.
+impl Default for TerminalCell {
+    fn default() -> Self {
+        Self {
+            ch: ' ',
+            fg: 0,
+            bg: 0,
+            bold: false,
+        }
+    }
+}
+
+/// The virtual screen buffer that the PTY output renders into.
+pub struct TerminalScreen {
+    /// 2D grid of cells: `cells[row][col]`.
+    pub cells: Vec<Vec<TerminalCell>>,
+    /// Current cursor row.
+    pub cursor_row: usize,
+    /// Current cursor column.
+    pub cursor_col: usize,
+    /// Screen width in columns.
+    pub cols: usize,
+    /// Screen height in rows.
+    pub rows: usize,
+    /// Current SGR foreground color.
+    current_fg: u8,
+    /// Current SGR background color.
+    current_bg: u8,
+    /// Current SGR bold flag.
+    current_bold: bool,
+    /// Top of the scroll region (0-indexed).
+    scroll_top: usize,
+    /// Bottom of the scroll region (0-indexed, inclusive).
+    scroll_bottom: usize,
+    /// Scrollback buffer: lines that scrolled off the top.
+    pub scrollback: Vec<Vec<TerminalCell>>,
+    /// Maximum scrollback lines to keep.
+    max_scrollback: usize,
+    /// Scrollback viewing offset (0 = live view, >0 = looking at history).
+    pub scroll_offset: usize,
+}
+
+impl TerminalScreen {
+    /// Create a new screen with the given dimensions.
+    fn new(cols: usize, rows: usize) -> Self {
+        let cells = vec![vec![TerminalCell::default(); cols]; rows];
+        Self {
+            cells,
+            cursor_row: 0,
+            cursor_col: 0,
+            cols,
+            rows,
+            current_fg: 0,
+            current_bg: 0,
+            current_bold: false,
+            scroll_top: 0,
+            scroll_bottom: rows.saturating_sub(1),
+            scrollback: Vec::new(),
+            max_scrollback: 5000,
+            scroll_offset: 0,
+        }
+    }
+
+    /// Scroll the screen contents up by one line within the scroll region.
+    fn scroll_up(&mut self) {
+        if self.scroll_top < self.rows {
+            // Save the top line to scrollback.
+            if self.scroll_top == 0 {
+                let line = self.cells[0].clone();
+                self.scrollback.push(line);
+                if self.scrollback.len() > self.max_scrollback {
+                    self.scrollback.remove(0);
+                }
+            }
+
+            let bottom = self.scroll_bottom.min(self.rows.saturating_sub(1));
+            for r in self.scroll_top..bottom {
+                self.cells[r] = self.cells[r + 1].clone();
+            }
+            self.cells[bottom] = vec![TerminalCell::default(); self.cols];
+        }
+    }
+
+    /// Scroll the screen contents down by one line within the scroll region.
+    fn scroll_down_region(&mut self) {
+        let bottom = self.scroll_bottom.min(self.rows.saturating_sub(1));
+        for r in (self.scroll_top + 1..=bottom).rev() {
+            self.cells[r] = self.cells[r - 1].clone();
+        }
+        self.cells[self.scroll_top] = vec![TerminalCell::default(); self.cols];
+    }
+
+    /// Clear the entire screen.
+    fn clear(&mut self) {
+        for row in &mut self.cells {
+            for cell in row.iter_mut() {
+                *cell = TerminalCell::default();
+            }
+        }
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+    }
+
+    /// Erase from cursor to end of line.
+    fn erase_to_eol(&mut self) {
+        if self.cursor_row < self.rows {
+            for c in self.cursor_col..self.cols {
+                self.cells[self.cursor_row][c] = TerminalCell::default();
+            }
+        }
+    }
+
+    /// Erase from start of line to cursor (inclusive).
+    fn erase_to_bol(&mut self) {
+        if self.cursor_row < self.rows {
+            let end = (self.cursor_col + 1).min(self.cols);
+            for c in 0..end {
+                self.cells[self.cursor_row][c] = TerminalCell::default();
+            }
+        }
+    }
+
+    /// Erase entire line.
+    fn erase_line(&mut self) {
+        if self.cursor_row < self.rows {
+            for cell in &mut self.cells[self.cursor_row] {
+                *cell = TerminalCell::default();
+            }
+        }
+    }
+
+    /// Resize the screen to new dimensions.
+    fn resize(&mut self, cols: usize, rows: usize) {
+        let mut new_cells = vec![vec![TerminalCell::default(); cols]; rows];
+        let copy_rows = self.rows.min(rows);
+        let copy_cols = self.cols.min(cols);
+        for (new_row, old_row) in new_cells.iter_mut().zip(self.cells.iter()).take(copy_rows) {
+            new_row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
+        }
+        self.cells = new_cells;
+        self.cols = cols;
+        self.rows = rows;
+        self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
+        self.cursor_col = self.cursor_col.min(cols.saturating_sub(1));
+        self.scroll_top = 0;
+        self.scroll_bottom = rows.saturating_sub(1);
+    }
+}
+
+/// VTE performer: receives parsed escape sequences and updates the screen.
+struct Performer {
+    screen: Arc<Mutex<TerminalScreen>>,
+}
+
+impl vte::Perform for Performer {
+    fn print(&mut self, c: char) {
+        let mut scr = self.screen.lock().unwrap();
+        let row = scr.cursor_row;
+        let col = scr.cursor_col;
+        if row < scr.rows && col < scr.cols {
+            let cell = TerminalCell {
+                ch: c,
+                fg: scr.current_fg,
+                bg: scr.current_bg,
+                bold: scr.current_bold,
+            };
+            scr.cells[row][col] = cell;
+            scr.cursor_col += 1;
+            if scr.cursor_col >= scr.cols {
+                scr.cursor_col = 0;
+                if scr.cursor_row == scr.scroll_bottom {
+                    scr.scroll_up();
+                } else if scr.cursor_row + 1 < scr.rows {
+                    scr.cursor_row += 1;
+                }
+            }
+        }
+    }
+
+    fn execute(&mut self, byte: u8) {
+        let mut scr = self.screen.lock().unwrap();
+        match byte {
+            // Newline (LF).
+            b'\n' => {
+                if scr.cursor_row == scr.scroll_bottom {
+                    scr.scroll_up();
+                } else if scr.cursor_row + 1 < scr.rows {
+                    scr.cursor_row += 1;
+                }
+            }
+            // Carriage return.
+            b'\r' => {
+                scr.cursor_col = 0;
+            }
+            // Backspace.
+            8 => {
+                scr.cursor_col = scr.cursor_col.saturating_sub(1);
+            }
+            // Tab.
+            b'\t' => {
+                let next_tab = ((scr.cursor_col / 8) + 1) * 8;
+                scr.cursor_col = next_tab.min(scr.cols.saturating_sub(1));
+            }
+            // Bell — ignore.
+            7 => {}
+            _ => {}
+        }
+    }
+
+    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
+    }
+
+    fn put(&mut self, _byte: u8) {}
+
+    fn unhook(&mut self) {}
+
+    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
+        // OSC sequences (title changes, etc.) — ignore for now.
+    }
+
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
+        let mut scr = self.screen.lock().unwrap();
+
+        // Helper: extract params as a Vec<u16> for easy access.
+        let pv: Vec<u16> = params.iter().map(|sub| sub[0]).collect();
+        let p0 = pv.first().copied().unwrap_or(0);
+        let p1 = pv.get(1).copied().unwrap_or(0);
+
+        match action {
+            // CUU — Cursor Up.
+            'A' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                scr.cursor_row = scr.cursor_row.saturating_sub(n);
+            }
+            // CUB — Cursor Backward.
+            'D' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                scr.cursor_col = scr.cursor_col.saturating_sub(n);
+            }
+            // CUF — Cursor Forward.
+            'C' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                scr.cursor_col = (scr.cursor_col + n).min(scr.cols.saturating_sub(1));
+            }
+            // CUD — Cursor Down.
+            'B' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                scr.cursor_row = (scr.cursor_row + n).min(scr.rows.saturating_sub(1));
+            }
+            // CUP / HVP — Cursor Position (1-based).
+            'H' | 'f' => {
+                let row = if p0 == 0 { 1 } else { p0 as usize };
+                let col = if p1 == 0 { 1 } else { p1 as usize };
+                scr.cursor_row = (row.saturating_sub(1)).min(scr.rows.saturating_sub(1));
+                scr.cursor_col = (col.saturating_sub(1)).min(scr.cols.saturating_sub(1));
+            }
+            // ED — Erase in Display.
+            'J' => match p0 {
+                0 => {
+                    // Erase from cursor to end of screen.
+                    scr.erase_to_eol();
+                    for r in (scr.cursor_row + 1)..scr.rows {
+                        for cell in &mut scr.cells[r] {
+                            *cell = TerminalCell::default();
+                        }
+                    }
+                }
+                1 => {
+                    // Erase from start to cursor.
+                    for r in 0..scr.cursor_row {
+                        for cell in &mut scr.cells[r] {
+                            *cell = TerminalCell::default();
+                        }
+                    }
+                    scr.erase_to_bol();
+                }
+                2 | 3 => {
+                    scr.clear();
+                }
+                _ => {}
+            },
+            // EL — Erase in Line.
+            'K' => match p0 {
+                0 => scr.erase_to_eol(),
+                1 => scr.erase_to_bol(),
+                2 => scr.erase_line(),
+                _ => {}
+            },
+            // SGR — Select Graphic Rendition.
+            'm' => {
+                if pv.is_empty() || (pv.len() == 1 && p0 == 0) {
+                    scr.current_fg = 0;
+                    scr.current_bg = 0;
+                    scr.current_bold = false;
+                    return;
+                }
+                let mut i = 0;
+                while i < pv.len() {
+                    match pv[i] {
+                        0 => {
+                            scr.current_fg = 0;
+                            scr.current_bg = 0;
+                            scr.current_bold = false;
+                        }
+                        1 => scr.current_bold = true,
+                        22 => scr.current_bold = false,
+                        // Standard foreground colors 30-37.
+                        30..=37 => scr.current_fg = (pv[i] - 30) as u8,
+                        // Default foreground.
+                        39 => scr.current_fg = 0,
+                        // Standard background colors 40-47.
+                        40..=47 => scr.current_bg = (pv[i] - 40) as u8,
+                        // Default background.
+                        49 => scr.current_bg = 0,
+                        // Bright foreground 90-97.
+                        90..=97 => scr.current_fg = (pv[i] - 90 + 8) as u8,
+                        // Bright background 100-107.
+                        100..=107 => scr.current_bg = (pv[i] - 100 + 8) as u8,
+                        // 256-color: 38;5;N or 48;5;N
+                        38 => {
+                            if i + 2 < pv.len() && pv[i + 1] == 5 {
+                                scr.current_fg = pv[i + 2] as u8;
+                                i += 2;
+                            }
+                        }
+                        48 => {
+                            if i + 2 < pv.len() && pv[i + 1] == 5 {
+                                scr.current_bg = pv[i + 2] as u8;
+                                i += 2;
+                            }
+                        }
+                        _ => {} // Ignore unsupported attributes.
+                    }
+                    i += 1;
+                }
+            }
+            // IL — Insert Lines.
+            'L' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                for _ in 0..n {
+                    scr.scroll_down_region();
+                }
+            }
+            // DL — Delete Lines.
+            'M' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                for _ in 0..n {
+                    scr.scroll_up();
+                }
+            }
+            // DCH — Delete Characters.
+            'P' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                let row = scr.cursor_row;
+                let col = scr.cursor_col;
+                if row < scr.rows {
+                    let end = (col + n).min(scr.cols);
+                    for c in col..scr.cols {
+                        scr.cells[row][c] = if c + n < scr.cols {
+                            scr.cells[row][c + n]
+                        } else {
+                            TerminalCell::default()
+                        };
+                    }
+                    let _ = end; // suppress warning
+                }
+            }
+            // ICH — Insert Characters.
+            '@' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                let row = scr.cursor_row;
+                let col = scr.cursor_col;
+                if row < scr.rows {
+                    for c in (col..scr.cols).rev() {
+                        if c + n < scr.cols {
+                            scr.cells[row][c + n] = scr.cells[row][c];
+                        }
+                    }
+                    let end = (col + n).min(scr.cols);
+                    for c in col..end {
+                        scr.cells[row][c] = TerminalCell::default();
+                    }
+                }
+            }
+            // DECSTBM — Set Scrolling Region.
+            'r' => {
+                let top = if p0 == 0 { 1 } else { p0 as usize };
+                let bot = if p1 == 0 {
+                    scr.rows
+                } else {
+                    p1 as usize
+                };
+                scr.scroll_top = top.saturating_sub(1);
+                scr.scroll_bottom = bot.saturating_sub(1).min(scr.rows.saturating_sub(1));
+                scr.cursor_row = 0;
+                scr.cursor_col = 0;
+            }
+            // CHA — Cursor Horizontal Absolute (1-based).
+            'G' => {
+                let col = if p0 == 0 { 1 } else { p0 as usize };
+                scr.cursor_col = col.saturating_sub(1).min(scr.cols.saturating_sub(1));
+            }
+            // VPA — Vertical Position Absolute (1-based).
+            'd' => {
+                let row = if p0 == 0 { 1 } else { p0 as usize };
+                scr.cursor_row = row.saturating_sub(1).min(scr.rows.saturating_sub(1));
+            }
+            // ECH — Erase Characters.
+            'X' => {
+                let n = if p0 == 0 { 1 } else { p0 as usize };
+                let row = scr.cursor_row;
+                if row < scr.rows {
+                    let end = (scr.cursor_col + n).min(scr.cols);
+                    for c in scr.cursor_col..end {
+                        scr.cells[row][c] = TerminalCell::default();
+                    }
+                }
+            }
+            _ => {} // Ignore unsupported sequences.
+        }
+    }
+
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
+        // Handle RI (Reverse Index) = ESC M.
+        if _byte == b'M' {
+            let mut scr = self.screen.lock().unwrap();
+            if scr.cursor_row == scr.scroll_top {
+                scr.scroll_down_region();
+            } else {
+                scr.cursor_row = scr.cursor_row.saturating_sub(1);
+            }
+        }
+    }
+}
+
+/// An embedded PTY terminal pane displayed at the bottom of the editor.
+///
+/// Spawns a real shell process in a pseudo-terminal, so interactive commands,
+/// colors, and shell features (tab completion, history) all work.
 pub struct EmbeddedTerminal {
     /// Whether the terminal pane is visible.
     pub visible: bool,
-    /// Command history output lines.
-    pub output: Vec<TerminalLine>,
-    /// Current command input.
-    pub input: String,
-    /// Scroll offset in the output.
-    pub scroll: usize,
     /// Height of the terminal pane (in rows).
     pub height: u16,
-    /// Working directory for spawned commands.
-    cwd: PathBuf,
-    /// Whether a command is currently running.
+    /// Shared screen buffer updated by the reader thread.
+    screen: Arc<Mutex<TerminalScreen>>,
+    /// Writer end of the PTY master — used to send keystrokes to the shell.
+    writer: Option<Box<dyn Write + Send>>,
+    /// Whether the PTY is alive.
     pub running: bool,
 }
 
 impl EmbeddedTerminal {
-    /// Create a new `EmbeddedTerminal` rooted at `cwd`.
+    /// Create a new PTY-backed terminal with the given working directory.
     ///
-    /// The pane starts hidden with no output and a default height of 10 rows.
+    /// Spawns a shell (prefers `$SHELL`, falls back to `/bin/zsh` then `/bin/bash`)
+    /// in a pseudo-terminal. A background thread reads output and feeds it to
+    /// the VTE parser, which updates the shared screen buffer.
     pub fn new(cwd: PathBuf) -> Self {
+        let cols = 80u16;
+        let rows = 10u16;
+
+        let screen = Arc::new(Mutex::new(TerminalScreen::new(
+            cols as usize,
+            rows as usize,
+        )));
+
+        let pty_system = native_pty_system();
+        let pair = match pty_system.openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("Failed to open PTY: {}", e);
+                return Self {
+                    visible: false,
+                    height: rows,
+                    screen,
+                    writer: None,
+                    running: false,
+                };
+            }
+        };
+
+        // Determine the shell to use.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+            if std::path::Path::new("/bin/zsh").exists() {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        });
+
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.cwd(&cwd);
+        // Ensure interactive shell with login.
+        cmd.arg("-l");
+
+        // Set TERM so the shell/programs know what escape sequences to use.
+        cmd.env("TERM", "xterm-256color");
+
+        let _child = match pair.slave.spawn_command(cmd) {
+            Ok(child) => child,
+            Err(e) => {
+                tracing::error!("Failed to spawn shell: {}", e);
+                return Self {
+                    visible: false,
+                    height: rows,
+                    screen,
+                    writer: None,
+                    running: false,
+                };
+            }
+        };
+
+        // Get the writer (master PTY write end).
+        let writer = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!("Failed to get PTY writer: {}", e);
+                return Self {
+                    visible: false,
+                    height: rows,
+                    screen,
+                    writer: None,
+                    running: false,
+                };
+            }
+        };
+
+        // Get the reader (master PTY read end) and spawn a background thread.
+        let reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Failed to get PTY reader: {}", e);
+                return Self {
+                    visible: false,
+                    height: rows,
+                    screen,
+                    writer: Some(writer),
+                    running: false,
+                };
+            }
+        };
+
+        let screen_clone = Arc::clone(&screen);
+        thread::spawn(move || {
+            Self::reader_thread(reader, screen_clone);
+        });
+
         Self {
             visible: false,
-            output: Vec::new(),
-            input: String::new(),
-            scroll: 0,
-            height: 10,
-            cwd,
-            running: false,
+            height: rows,
+            screen,
+            writer: Some(writer),
+            running: true,
+        }
+    }
+
+    /// Background thread: reads bytes from the PTY and feeds them to the VTE parser.
+    fn reader_thread(mut reader: Box<dyn Read + Send>, screen: Arc<Mutex<TerminalScreen>>) {
+        let performer = Performer {
+            screen: Arc::clone(&screen),
+        };
+        let mut parser = vte::Parser::new();
+        let mut stash = performer;
+        let mut buf = [0u8; 4096];
+
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break, // EOF — shell exited.
+                Ok(n) => {
+                    for &byte in &buf[..n] {
+                        parser.advance(&mut stash, byte);
+                    }
+                    // Reset scroll offset to live view when new output arrives.
+                    if let Ok(mut scr) = screen.lock() {
+                        scr.scroll_offset = 0;
+                    }
+                }
+                Err(_) => break,
+            }
         }
     }
 
@@ -53,108 +621,170 @@ impl EmbeddedTerminal {
         self.visible = !self.visible;
     }
 
-    /// Append a character to the command input.
-    pub fn type_char(&mut self, c: char) {
-        self.input.push(c);
-    }
-
-    /// Remove the last character from the command input (backspace).
-    pub fn backspace(&mut self) {
-        self.input.pop();
-    }
-
-    /// Execute the current command input.
-    ///
-    /// Adds a prompt line (`$ cmd`), runs the command via `sh -c`, appends
-    /// stdout and stderr lines to the output buffer, clears the input, and
-    /// auto-scrolls to the bottom.
-    pub fn execute(&mut self) {
-        if self.input.trim().is_empty() {
-            return;
+    /// Send a single character to the PTY (as the user types).
+    pub fn send_char(&mut self, c: char) {
+        if let Some(ref mut writer) = self.writer {
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            let _ = writer.write_all(s.as_bytes());
+            let _ = writer.flush();
         }
-
-        let cmd = std::mem::take(&mut self.input);
-
-        // Echo the command as a prompt line.
-        self.output.push(TerminalLine {
-            content: format!("$ {}", cmd),
-            is_command: true,
-        });
-
-        self.running = true;
-
-        let result = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&cmd)
-            .current_dir(&self.cwd)
-            .output();
-
-        self.running = false;
-
-        match result {
-            Ok(out) => {
-                // Append stdout lines.
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                for line in stdout.lines() {
-                    self.output.push(TerminalLine {
-                        content: line.to_string(),
-                        is_command: false,
-                    });
-                }
-
-                // Append stderr lines (if any).
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                for line in stderr.lines() {
-                    self.output.push(TerminalLine {
-                        content: line.to_string(),
-                        is_command: false,
-                    });
-                }
-
-                // Show exit code on non-zero exit.
-                if let Some(code) = out.status.code() {
-                    if code != 0 {
-                        self.output.push(TerminalLine {
-                            content: format!("[exit {}]", code),
-                            is_command: false,
-                        });
-                    }
-                }
-            }
-            Err(e) => {
-                self.output.push(TerminalLine {
-                    content: format!("[error: {}]", e),
-                    is_command: false,
-                });
-            }
-        }
-
-        // Auto-scroll to bottom.
-        self.scroll = self.output.len().saturating_sub(1);
     }
 
-    /// Scroll the output view up by one line.
+    /// Send raw bytes to the PTY (for special keys).
+    pub fn send_bytes(&mut self, bytes: &[u8]) {
+        if let Some(ref mut writer) = self.writer {
+            let _ = writer.write_all(bytes);
+            let _ = writer.flush();
+        }
+    }
+
+    /// Send Enter key to the PTY.
+    pub fn send_enter(&mut self) {
+        self.send_bytes(b"\r");
+    }
+
+    /// Send backspace to the PTY.
+    pub fn send_backspace(&mut self) {
+        self.send_bytes(b"\x7f");
+    }
+
+    /// Send Ctrl+C to the PTY.
+    pub fn send_ctrl_c(&mut self) {
+        self.send_bytes(b"\x03");
+    }
+
+    /// Send Ctrl+D to the PTY.
+    pub fn send_ctrl_d(&mut self) {
+        self.send_bytes(b"\x04");
+    }
+
+    /// Send Ctrl+L (clear) to the PTY.
+    pub fn send_ctrl_l(&mut self) {
+        self.send_bytes(b"\x0c");
+    }
+
+    /// Send an arrow key escape sequence to the PTY.
+    pub fn send_arrow_up(&mut self) {
+        self.send_bytes(b"\x1b[A");
+    }
+
+    /// Send an arrow key escape sequence to the PTY.
+    pub fn send_arrow_down(&mut self) {
+        self.send_bytes(b"\x1b[B");
+    }
+
+    /// Send an arrow key escape sequence to the PTY.
+    pub fn send_arrow_right(&mut self) {
+        self.send_bytes(b"\x1b[C");
+    }
+
+    /// Send an arrow key escape sequence to the PTY.
+    pub fn send_arrow_left(&mut self) {
+        self.send_bytes(b"\x1b[D");
+    }
+
+    /// Send a Tab key to the PTY.
+    pub fn send_tab(&mut self) {
+        self.send_bytes(b"\t");
+    }
+
+    /// Scroll the scrollback buffer view up.
     pub fn scroll_up(&mut self) {
-        self.scroll = self.scroll.saturating_sub(1);
-    }
-
-    /// Scroll the output view down by one line.
-    pub fn scroll_down(&mut self) {
-        if self.scroll + 1 < self.output.len() {
-            self.scroll = self.scroll.saturating_add(1);
+        if let Ok(mut scr) = self.screen.lock() {
+            if scr.scroll_offset < scr.scrollback.len() {
+                scr.scroll_offset += 1;
+            }
         }
     }
 
-    /// Clear all output lines and reset the scroll offset.
-    pub fn clear(&mut self) {
-        self.output.clear();
-        self.scroll = 0;
+    /// Scroll the scrollback buffer view down (towards live view).
+    pub fn scroll_down(&mut self) {
+        if let Ok(mut scr) = self.screen.lock() {
+            scr.scroll_offset = scr.scroll_offset.saturating_sub(1);
+        }
     }
 
-    /// Resize the pane by `delta` rows, clamped between 3 and 30.
-    pub fn resize(&mut self, delta: i16) {
-        let new_height = (self.height as i16).saturating_add(delta);
-        self.height = new_height.clamp(3, 30) as u16;
+    /// Clear the terminal screen by sending Ctrl+L.
+    pub fn clear(&mut self) {
+        self.send_ctrl_l();
+    }
+
+    /// Resize the PTY and screen buffer.
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.height = rows;
+        if let Ok(mut scr) = self.screen.lock() {
+            scr.resize(cols as usize, rows as usize);
+        }
+    }
+
+    /// Get a snapshot of the current screen for rendering.
+    ///
+    /// Returns the visible rows of cells. If the user has scrolled back,
+    /// scrollback lines replace screen lines at the top.
+    pub fn snapshot(&self) -> Vec<Vec<TerminalCell>> {
+        let scr = self.screen.lock().unwrap();
+        let offset = scr.scroll_offset;
+
+        if offset == 0 {
+            // Live view — just return the current screen.
+            return scr.cells.clone();
+        }
+
+        // Show scrollback lines at the top, with the remaining screen rows below.
+        let total_scrollback = scr.scrollback.len();
+        let start = total_scrollback.saturating_sub(offset);
+        let mut result = Vec::with_capacity(scr.rows);
+
+        // Pull lines from scrollback.
+        let sb_lines = scr.scrollback[start..].to_vec();
+        for line in &sb_lines {
+            if result.len() >= scr.rows {
+                break;
+            }
+            let mut padded = line.clone();
+            padded.resize(scr.cols, TerminalCell::default());
+            result.push(padded);
+        }
+
+        // Fill the rest from the top of the current screen.
+        let remaining = scr.rows.saturating_sub(result.len());
+        for r in 0..remaining {
+            if r < scr.cells.len() {
+                result.push(scr.cells[r].clone());
+            }
+        }
+
+        result
+    }
+
+    /// Get the current cursor position (row, col) for rendering.
+    pub fn cursor_position(&self) -> (usize, usize) {
+        let scr = self.screen.lock().unwrap();
+        (scr.cursor_row, scr.cursor_col)
+    }
+
+    /// Get the current scroll offset.
+    pub fn scroll_offset(&self) -> usize {
+        self.screen.lock().unwrap().scroll_offset
+    }
+
+    // Keep these stubs for compatibility — old code called them.
+    // They are no-ops since we now send raw chars to the PTY.
+
+    /// Deprecated: use `send_char` instead.
+    pub fn type_char(&mut self, c: char) {
+        self.send_char(c);
+    }
+
+    /// Deprecated: use `send_backspace` instead.
+    pub fn backspace(&mut self) {
+        self.send_backspace();
+    }
+
+    /// Deprecated: use `send_enter` instead.
+    pub fn execute(&mut self) {
+        self.send_enter();
     }
 }
 
@@ -162,102 +792,74 @@ impl EmbeddedTerminal {
 mod tests {
     use super::*;
 
-    /// Helper: create a terminal rooted at a known temp dir.
-    fn make_terminal() -> EmbeddedTerminal {
-        EmbeddedTerminal::new(std::env::temp_dir())
+    #[test]
+    fn test_screen_new() {
+        let scr = TerminalScreen::new(80, 24);
+        assert_eq!(scr.cols, 80);
+        assert_eq!(scr.rows, 24);
+        assert_eq!(scr.cursor_row, 0);
+        assert_eq!(scr.cursor_col, 0);
+        assert_eq!(scr.cells.len(), 24);
+        assert_eq!(scr.cells[0].len(), 80);
     }
 
     #[test]
-    fn test_new_terminal() {
-        let t = make_terminal();
-        assert!(!t.visible, "should start hidden");
-        assert!(t.output.is_empty(), "output should start empty");
-        assert!(t.input.is_empty(), "input should start empty");
-        assert_eq!(t.scroll, 0);
-        assert_eq!(t.height, 10);
-        assert!(!t.running);
+    fn test_screen_clear() {
+        let mut scr = TerminalScreen::new(10, 5);
+        scr.cells[0][0].ch = 'A';
+        scr.cursor_row = 3;
+        scr.cursor_col = 5;
+        scr.clear();
+        assert_eq!(scr.cells[0][0].ch, ' ');
+        assert_eq!(scr.cursor_row, 0);
+        assert_eq!(scr.cursor_col, 0);
     }
 
     #[test]
-    fn test_toggle() {
-        let mut t = make_terminal();
+    fn test_screen_scroll_up() {
+        let mut scr = TerminalScreen::new(5, 3);
+        scr.cells[0][0].ch = 'A';
+        scr.cells[1][0].ch = 'B';
+        scr.cells[2][0].ch = 'C';
+        scr.scroll_up();
+        // Row 0 should now be what was row 1.
+        assert_eq!(scr.cells[0][0].ch, 'B');
+        assert_eq!(scr.cells[1][0].ch, 'C');
+        assert_eq!(scr.cells[2][0].ch, ' ');
+        // Scrollback should contain the old row 0.
+        assert_eq!(scr.scrollback.len(), 1);
+        assert_eq!(scr.scrollback[0][0].ch, 'A');
+    }
+
+    #[test]
+    fn test_screen_resize() {
+        let mut scr = TerminalScreen::new(10, 5);
+        scr.cells[0][0].ch = 'X';
+        scr.cursor_row = 4;
+        scr.cursor_col = 9;
+        scr.resize(20, 3);
+        assert_eq!(scr.cols, 20);
+        assert_eq!(scr.rows, 3);
+        assert_eq!(scr.cells[0][0].ch, 'X');
+        // Cursor should be clamped.
+        assert_eq!(scr.cursor_row, 2);
+        assert_eq!(scr.cursor_col, 9);
+    }
+
+    #[test]
+    fn test_terminal_new() {
+        let t = EmbeddedTerminal::new(std::env::temp_dir());
+        assert!(!t.visible);
+        assert!(t.running);
+    }
+
+    #[test]
+    fn test_terminal_toggle() {
+        let mut t = EmbeddedTerminal::new(std::env::temp_dir());
         assert!(!t.visible);
         t.toggle();
         assert!(t.visible);
         t.toggle();
         assert!(!t.visible);
-    }
-
-    #[test]
-    fn test_type_and_backspace() {
-        let mut t = make_terminal();
-        t.type_char('l');
-        t.type_char('s');
-        assert_eq!(t.input, "ls");
-        t.backspace();
-        assert_eq!(t.input, "l");
-        t.backspace();
-        assert!(t.input.is_empty());
-        // Extra backspace on empty input should be a no-op.
-        t.backspace();
-        assert!(t.input.is_empty());
-    }
-
-    #[test]
-    fn test_execute_echo() {
-        let mut t = make_terminal();
-        t.input = "echo hello".to_string();
-        t.execute();
-
-        // Input should be cleared after execution.
-        assert!(t.input.is_empty());
-
-        // First output line should be the prompt.
-        assert!(!t.output.is_empty(), "output should not be empty");
-        let prompt = &t.output[0];
-        assert!(prompt.is_command);
-        assert_eq!(prompt.content, "$ echo hello");
-
-        // Second line should contain the command output.
-        let found = t
-            .output
-            .iter()
-            .any(|l| !l.is_command && l.content.contains("hello"));
-        assert!(found, "expected 'hello' in output; got: {:?}", t.output);
-    }
-
-    #[test]
-    fn test_clear() {
-        let mut t = make_terminal();
-        t.input = "echo test".to_string();
-        t.execute();
-        assert!(!t.output.is_empty());
-        t.clear();
-        assert!(t.output.is_empty());
-        assert_eq!(t.scroll, 0);
-    }
-
-    #[test]
-    fn test_scroll() {
-        let mut t = make_terminal();
-
-        // Populate output with several lines.
-        for i in 0..5 {
-            t.output.push(TerminalLine {
-                content: format!("line {i}"),
-                is_command: false,
-            });
-        }
-        t.scroll = 0;
-
-        t.scroll_down();
-        assert_eq!(t.scroll, 1);
-
-        t.scroll_up();
-        assert_eq!(t.scroll, 0);
-
-        // scroll_up at 0 should stay at 0.
-        t.scroll_up();
-        assert_eq!(t.scroll, 0);
     }
 }

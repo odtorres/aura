@@ -48,6 +48,10 @@ gix = { version = "0.70", default-features = false, features = ["basic", "index"
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 
+# Terminal emulation
+portable-pty = "0.8"
+vte = "0.13"
+
 # Testing
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }

@@ -20,6 +20,8 @@ tree-sitter-typescript.workspace = true
 tree-sitter-go.workspace = true
 toml.workspace = true
 gix.workspace = true
+portable-pty.workspace = true
+vte.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

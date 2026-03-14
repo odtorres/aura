@@ -6,31 +6,57 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 /// Handle keys in Normal mode.
 pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
-    // When the terminal pane is focused, route all keystrokes to it.
+    // When the terminal pane is focused, route all keystrokes to the PTY.
     if app.terminal_focused {
         match code {
-            // Ctrl+L — clear terminal output.
-            KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.terminal.clear();
-            }
             // Esc — unfocus terminal (return focus to editor).
             KeyCode::Esc => {
                 app.terminal_focused = false;
             }
+            // Ctrl+` — unfocus terminal.
+            KeyCode::Char('`') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal_focused = false;
+            }
+            // Ctrl+C — send interrupt.
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal.send_ctrl_c();
+            }
+            // Ctrl+D — send EOF.
+            KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal.send_ctrl_d();
+            }
+            // Ctrl+L — clear screen.
+            KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal.send_ctrl_l();
+            }
+            // Other Ctrl+char — send as control code.
+            KeyCode::Char(c) if modifiers.contains(KeyModifiers::CONTROL) => {
+                let ctrl_byte = (c as u8).wrapping_sub(b'a').wrapping_add(1);
+                app.terminal.send_bytes(&[ctrl_byte]);
+            }
             KeyCode::Enter => {
-                app.terminal.execute();
+                app.terminal.send_enter();
             }
             KeyCode::Backspace => {
-                app.terminal.backspace();
+                app.terminal.send_backspace();
+            }
+            KeyCode::Tab => {
+                app.terminal.send_tab();
             }
             KeyCode::Up => {
-                app.terminal.scroll_up();
+                app.terminal.send_arrow_up();
             }
             KeyCode::Down => {
-                app.terminal.scroll_down();
+                app.terminal.send_arrow_down();
             }
-            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
-                app.terminal.type_char(c);
+            KeyCode::Left => {
+                app.terminal.send_arrow_left();
+            }
+            KeyCode::Right => {
+                app.terminal.send_arrow_right();
+            }
+            KeyCode::Char(c) => {
+                app.terminal.send_char(c);
             }
             _ => {}
         }
