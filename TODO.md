@@ -98,7 +98,7 @@ This is the heart of AURA: the intent → propose → review → accept cycle.
 - [x] Create `ai` crate in workspace
 - [x] Implement streaming API client for Claude (Anthropic API, reqwest + tokio)
 - [x] Handle API key from env var (`ANTHROPIC_API_KEY`) or config file
-- [ ] Token counting and context window management
+- [x] Token counting and context window management
 - [x] Retry logic with exponential backoff
 - [x] Rate limiting awareness
 
@@ -289,15 +289,15 @@ The AI thinks ahead. The human reviews when ready.
 - [x] Memory profiling: ensure CRDT history doesn't grow unbounded (compact on save)
 
 ### 8.3 Plugin system (future)
-- [ ] Lua or WASM plugin API (evaluate tradeoffs)
-- [ ] Plugins can register new intents, modes, and UI panels
+- [x] Lua or WASM plugin API (evaluate tradeoffs)
+- [x] Plugins can register new intents, modes, and UI panels
 - [ ] Ship with core plugins: file picker (fuzzy finder), file tree, terminal
 
 ### 8.4 Distribution
 - [x] `cargo install aura-editor`
 - [x] Homebrew formula
-- [ ] AUR package
-- [ ] AppImage for Linux
+- [x] AUR package
+- [x] AppImage for Linux
 - [x] Release automation with `cargo-dist`
 
 ---
