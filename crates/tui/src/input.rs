@@ -17,6 +17,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Char('`') if modifiers.contains(KeyModifiers::CONTROL) => {
                 app.terminal_focused = false;
             }
+            // Ctrl+Shift+Up / Ctrl+Shift+Down — resize terminal pane.
+            KeyCode::Up if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                app.terminal.height = (app.terminal.height + 2).min(50);
+            }
+            KeyCode::Down if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                app.terminal.height = app.terminal.height.saturating_sub(2).max(5);
+            }
             // Ctrl+C — send interrupt.
             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                 app.terminal.send_ctrl_c();
