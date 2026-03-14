@@ -253,40 +253,18 @@ impl TerminalScreen {
         }
 
         let old_rows = self.rows;
-        let copy_cols = self.cols.min(cols);
 
         if rows > old_rows {
-            // Screen grew — pull lines from scrollback to fill the top,
-            // or insert blanks if scrollback is empty.
-            let extra = rows - old_rows;
-            let from_scrollback = extra.min(self.scrollback.len());
-            let blank_count = extra - from_scrollback;
-
-            let mut new_cells = Vec::with_capacity(rows);
-
-            // Blank lines at the top (if not enough scrollback).
-            for _ in 0..blank_count {
-                new_cells.push(vec![TerminalCell::default(); cols]);
+            // Screen grew — add blank rows at the bottom, keeping cursor
+            // position unchanged. This matches how real terminal emulators
+            // handle resize. The visual bottom-anchoring is handled by
+            // `snapshot()` instead, avoiding double-shifting artifacts.
+            for old_row in &mut self.cells {
+                old_row.resize(cols, TerminalCell::default());
             }
-
-            // Restored scrollback lines.
-            let sb_start = self.scrollback.len() - from_scrollback;
-            for sb_line in self.scrollback.drain(sb_start..) {
-                let mut row = vec![TerminalCell::default(); cols];
-                let copy = copy_cols.min(sb_line.len());
-                row[..copy].copy_from_slice(&sb_line[..copy]);
-                new_cells.push(row);
+            for _ in old_rows..rows {
+                self.cells.push(vec![TerminalCell::default(); cols]);
             }
-
-            // Existing screen content.
-            for old_row in &self.cells {
-                let mut row = vec![TerminalCell::default(); cols];
-                row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
-                new_cells.push(row);
-            }
-
-            self.cursor_row += extra;
-            self.cells = new_cells;
         } else if rows < old_rows {
             // Screen shrank — push lines above the cursor area into scrollback.
             let removed = old_rows - rows;
