@@ -4,7 +4,7 @@
 //! commands, colors, and shell features work natively. Output is parsed
 //! via the `vte` crate and stored as a grid of styled cells.
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -476,6 +476,8 @@ pub struct EmbeddedTerminal {
     screen: Arc<Mutex<TerminalScreen>>,
     /// Writer end of the PTY master — used to send keystrokes to the shell.
     writer: Option<Box<dyn Write + Send>>,
+    /// The PTY master handle — kept alive to allow resize operations.
+    master: Option<Box<dyn MasterPty + Send>>,
     /// Whether the PTY is alive.
     pub running: bool,
 }
@@ -510,6 +512,7 @@ impl EmbeddedTerminal {
                     height: rows,
                     screen,
                     writer: None,
+                    master: None,
                     running: false,
                 };
             }
@@ -541,6 +544,7 @@ impl EmbeddedTerminal {
                     height: rows,
                     screen,
                     writer: None,
+                    master: None,
                     running: false,
                 };
             }
@@ -556,6 +560,7 @@ impl EmbeddedTerminal {
                     height: rows,
                     screen,
                     writer: None,
+                    master: None,
                     running: false,
                 };
             }
@@ -571,6 +576,7 @@ impl EmbeddedTerminal {
                     height: rows,
                     screen,
                     writer: Some(writer),
+                    master: None,
                     running: false,
                 };
             }
@@ -586,6 +592,7 @@ impl EmbeddedTerminal {
             height: rows,
             screen,
             writer: Some(writer),
+            master: Some(pair.master),
             running: true,
         }
     }
@@ -710,11 +717,30 @@ impl EmbeddedTerminal {
         self.send_ctrl_l();
     }
 
-    /// Resize the PTY and screen buffer.
+    /// Resize the PTY and screen buffer to match the visible area.
+    ///
+    /// Only sends a resize to the PTY if the dimensions actually changed,
+    /// to avoid unnecessary SIGWINCH signals on every frame.
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.height = rows;
-        if let Ok(mut scr) = self.screen.lock() {
-            scr.resize(cols as usize, rows as usize);
+        let changed = if let Ok(scr) = self.screen.lock() {
+            scr.cols != cols as usize || scr.rows != rows as usize
+        } else {
+            false
+        };
+        if changed {
+            if let Ok(mut scr) = self.screen.lock() {
+                scr.resize(cols as usize, rows as usize);
+            }
+            // Notify the PTY of the new size so the shell adjusts.
+            if let Some(ref master) = self.master {
+                let _ = master.resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
         }
     }
 
