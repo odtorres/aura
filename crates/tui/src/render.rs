@@ -204,10 +204,15 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the file tree sidebar.
 fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
+    let (title, border_color) = if app.file_tree_focused {
+        (" Files [focused] ", Color::Yellow)
+    } else {
+        (" Files ", Color::Cyan)
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Files ")
-        .border_style(Style::default().fg(Color::Cyan));
+        .title(title)
+        .border_style(Style::default().fg(border_color));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);

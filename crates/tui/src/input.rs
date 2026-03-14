@@ -37,6 +37,53 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // When the file tree sidebar is focused, route navigation keys to it.
+    if app.file_tree_focused {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.file_tree.select_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.file_tree.select_up();
+            }
+            KeyCode::Enter | KeyCode::Char('l') => {
+                app.open_file_tree_selection();
+            }
+            KeyCode::Char('h') => {
+                // Collapse current dir, or move to parent.
+                let idx = app.file_tree.selected;
+                if idx < app.file_tree.entries.len() {
+                    let entry = &app.file_tree.entries[idx];
+                    if entry.is_dir && entry.expanded {
+                        app.file_tree.toggle_expand();
+                    } else if entry.depth > 0 {
+                        // Jump up to the parent directory entry.
+                        let target_depth = entry.depth - 1;
+                        let mut i = idx;
+                        while i > 0 {
+                            i -= 1;
+                            if app.file_tree.entries[i].is_dir
+                                && app.file_tree.entries[i].depth == target_depth
+                            {
+                                app.file_tree.selected = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                app.file_tree_focused = false;
+            }
+            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.file_tree_focused = false;
+                app.file_tree.toggle();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Ctrl+` — toggle terminal visibility and focus.
     if code == KeyCode::Char('`') && modifiers.contains(KeyModifiers::CONTROL) {
         if app.terminal.visible {
@@ -326,9 +373,15 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
 
-        // Ctrl+n — toggle file tree sidebar
+        // Ctrl+n — toggle file tree sidebar and focus
         KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.file_tree.toggle();
+            if app.file_tree.visible {
+                app.file_tree_focused = false;
+                app.file_tree.toggle();
+            } else {
+                app.file_tree.toggle();
+                app.file_tree_focused = true;
+            }
             let state = if app.file_tree.visible { "on" } else { "off" };
             app.set_status(format!("File tree: {state}"));
         }

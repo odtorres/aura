@@ -176,6 +176,8 @@ pub struct App {
     /// When `true`, keystrokes are routed to the terminal input instead of the
     /// editor.
     pub terminal_focused: bool,
+    /// Whether the file tree sidebar has keyboard focus.
+    pub file_tree_focused: bool,
     /// Fuzzy file picker overlay.
     pub file_picker: FilePicker,
     /// File tree sidebar.
@@ -348,6 +350,7 @@ impl App {
             plugin_manager: PluginManager::new(),
             terminal: EmbeddedTerminal::new(terminal_cwd.clone()),
             terminal_focused: false,
+            file_tree_focused: false,
             file_picker: FilePicker::new(terminal_cwd.clone()),
             file_tree: FileTree::new(terminal_cwd),
         };
@@ -2043,6 +2046,46 @@ impl App {
                 self.hover_info = None;
                 self.diagnostics = Vec::new();
                 // Re-detect language and reset highlighter.
+                self.language = self
+                    .buffer
+                    .file_path()
+                    .and_then(|p| p.extension())
+                    .and_then(|ext| ext.to_str())
+                    .and_then(crate::highlight::Language::from_extension);
+                self.highlighter = self
+                    .language
+                    .and_then(crate::highlight::SyntaxHighlighter::new);
+                self.highlight_lines = Vec::new();
+                self.mark_highlights_dirty();
+                self.set_status(format!("Opened {}", path.display()));
+            }
+            Err(e) => {
+                self.set_status(format!("Error opening file: {}", e));
+            }
+        }
+    }
+
+    /// Open the file currently selected in the file tree into the buffer.
+    /// If the selected entry is a directory, toggles its expansion instead.
+    pub fn open_file_tree_selection(&mut self) {
+        if self.file_tree.entries.is_empty() {
+            return;
+        }
+        let entry = &self.file_tree.entries[self.file_tree.selected];
+        if entry.is_dir {
+            self.file_tree.toggle_expand();
+            return;
+        }
+        let path = entry.path.clone();
+        self.file_tree_focused = false;
+        match Buffer::from_file(&path) {
+            Ok(buf) => {
+                self.buffer = buf;
+                self.cursor = Cursor::origin();
+                self.scroll_row = 0;
+                self.scroll_col = 0;
+                self.hover_info = None;
+                self.diagnostics = Vec::new();
                 self.language = self
                     .buffer
                     .file_path()
