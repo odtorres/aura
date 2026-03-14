@@ -730,12 +730,13 @@ impl EmbeddedTerminal {
         self.send_ctrl_l();
     }
 
-    /// Resize the PTY and screen buffer to match the visible area.
+    /// Resize the PTY and screen buffer to match the visible inner area.
     ///
+    /// Note: this does NOT change `self.height` (the layout pane height including
+    /// borders). It only updates the internal screen buffer and PTY dimensions.
     /// Only sends a resize to the PTY if the dimensions actually changed,
     /// to avoid unnecessary SIGWINCH signals on every frame.
     pub fn resize(&mut self, cols: u16, rows: u16) {
-        self.height = rows;
         let changed = if let Ok(scr) = self.screen.lock() {
             scr.cols != cols as usize || scr.rows != rows as usize
         } else {
