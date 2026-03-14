@@ -26,20 +26,41 @@ See [TODO.md](TODO.md) for the full roadmap and phase history.
 
 <!-- ANCHOR: quickstart-start -->
 
+## Installation
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install aura-editor/tap/aura
+```
+
+### Shell installer (macOS / Linux)
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh
+```
+
+### Cargo
+
+```bash
+cargo install aura
+```
+
+### Download binaries
+
+Pre-built binaries for macOS (Intel & ARM), Linux (x86-64 & ARM), and Windows are available on the [GitHub Releases](https://github.com/odtorres/aura/releases) page.
+
 ## Quick Start
 
 ```bash
-# Install from crates.io
-cargo install aura-editor
-
-# Or build from source
-cargo build --release
-
 # Open a file
-cargo run -p aura -- path/to/file.rs
+aura path/to/file.rs
 
 # Open scratch buffer
-cargo run -p aura
+aura
+
+# Or run from source
+cargo run -p aura -- path/to/file.rs
 ```
 
 <!-- ANCHOR: quickstart-end -->

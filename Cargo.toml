@@ -58,23 +58,28 @@ vte = "0.13"
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 
-# Config for 'cargo dist'
+# Config for 'dist'
 [workspace.metadata.dist]
-# CI backends to generate
+# CI backends to support
 ci = "github"
-# Targets to build for
-targets = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-pc-windows-msvc",
-]
-# Generate shell installer scripts
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# The installers to generate for each app
 installers = ["shell", "homebrew"]
-# Enable GitHub releases
+# Publish jobs to run in CI
 publish-jobs = ["homebrew"]
-# Homebrew tap repository
+# A GitHub repo to push Homebrew formulas to
 tap = "aura-editor/homebrew-tap"
-# Formula name
+# Customize the Homebrew formula name
 formula = "aura"
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.31.0"
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

@@ -300,6 +300,16 @@ The AI thinks ahead. The human reviews when ready.
 - [x] AppImage for Linux
 - [x] Release automation with `cargo-dist`
 
+### 8.5 Distribution — Remaining Manual Steps
+- [ ] Create `aura-editor/homebrew-tap` repo on GitHub (needed for `brew install aura-editor/tap/aura`)
+- [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo (GitHub Settings > Secrets) — a PAT with write access to the tap repo
+- [ ] Cut a test release to verify the full pipeline: `git tag v0.1.0-rc.1 && git push --tags`
+  - [ ] Verify GitHub Release is created with binaries for all 5 targets
+  - [ ] Verify shell installer works: `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh`
+  - [ ] Verify `brew install aura-editor/tap/aura` works after tap repo is set up
+- [ ] Publish to crates.io: `cargo publish -p aura`
+- [ ] Verify `cargo install aura` works after crates.io publish
+
 ---
 
 ## Phase 9: UX Improvements & Claude Code Integration (Post-launch)
