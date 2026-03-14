@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! aura-ai: AI integration layer for AURA.
 //!
 //! This crate provides:

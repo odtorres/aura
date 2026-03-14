@@ -200,9 +200,8 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Get a snapshot of the terminal screen.
-    let snapshot = app.terminal.snapshot();
-    let (cursor_row, cursor_col) = app.terminal.cursor_position();
+    // Get a bottom-anchored snapshot of the terminal screen.
+    let (snapshot, cursor_row, cursor_col) = app.terminal.snapshot();
 
     for (row_idx, row) in snapshot.iter().enumerate() {
         let y = inner.y + row_idx as u16;

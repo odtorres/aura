@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! aura-core: Fundamental data structures for the AURA editor.
 //!
 //! This crate provides the text buffer (rope-based), authorship tracking,

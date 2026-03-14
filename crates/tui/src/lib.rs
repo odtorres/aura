@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! aura-tui: Terminal rendering layer for AURA.
 //!
 //! Handles drawing the buffer, status bar, command bar, gutter,

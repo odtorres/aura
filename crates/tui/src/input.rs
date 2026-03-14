@@ -13,8 +13,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Esc => {
                 app.terminal_focused = false;
             }
-            // Ctrl+` — unfocus terminal.
-            KeyCode::Char('`') if modifiers.contains(KeyModifiers::CONTROL) => {
+            // Ctrl+` or Ctrl+t — unfocus terminal.
+            KeyCode::Char('`') | KeyCode::Char('t')
+                if modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 app.terminal_focused = false;
             }
             // Ctrl+Shift+Up / Ctrl+Shift+Down — resize terminal pane.
@@ -117,7 +119,18 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
-    // Ctrl+` — toggle terminal visibility and focus.
+    // Ctrl+t — toggle terminal visibility and focus.
+    if code == KeyCode::Char('t') && modifiers.contains(KeyModifiers::CONTROL) {
+        if app.terminal.visible {
+            app.terminal_focused = !app.terminal_focused;
+        } else {
+            app.terminal.visible = true;
+            app.terminal_focused = true;
+        }
+        return;
+    }
+
+    // Ctrl+` — toggle terminal visibility and focus (alternate binding).
     if code == KeyCode::Char('`') && modifiers.contains(KeyModifiers::CONTROL) {
         if app.terminal.visible {
             // Toggle focus: if already focused, unfocus; otherwise focus.

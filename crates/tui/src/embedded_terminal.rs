@@ -1039,43 +1039,92 @@ impl EmbeddedTerminal {
     ///
     /// Returns the visible rows of cells. If the user has scrolled back,
     /// scrollback lines replace screen lines at the top.
-    pub fn snapshot(&self) -> Vec<Vec<TerminalCell>> {
+    /// Get a snapshot of the current screen for rendering.
+    ///
+    /// Returns a bottom-anchored view: empty rows below the cursor are
+    /// removed and replaced by scrollback or blank lines at the top, so
+    /// the active content sits at the bottom of the pane (like VS Code).
+    /// Also returns the adjusted cursor row for rendering.
+    pub fn snapshot(&self) -> (Vec<Vec<TerminalCell>>, usize, usize) {
         let scr = self.screen.lock().unwrap();
         let offset = scr.scroll_offset;
 
-        if offset == 0 {
-            // Live view — just return the current screen.
-            return scr.cells.clone();
+        if offset > 0 {
+            // Scrollback view — show historical lines.
+            let total_scrollback = scr.scrollback.len();
+            let start = total_scrollback.saturating_sub(offset);
+            let mut result = Vec::with_capacity(scr.rows);
+
+            for line in &scr.scrollback[start..] {
+                if result.len() >= scr.rows {
+                    break;
+                }
+                let mut padded = line.clone();
+                padded.resize(scr.cols, TerminalCell::default());
+                result.push(padded);
+            }
+
+            let remaining = scr.rows.saturating_sub(result.len());
+            for r in 0..remaining {
+                if r < scr.cells.len() {
+                    result.push(scr.cells[r].clone());
+                }
+            }
+
+            return (result, scr.cursor_row, scr.cursor_col);
         }
 
-        // Show scrollback lines at the top, with the remaining screen rows below.
-        let total_scrollback = scr.scrollback.len();
-        let start = total_scrollback.saturating_sub(offset);
+        // Live view — bottom-anchor content.
+        // If the alternate screen is active (TUI app), show raw buffer.
+        if scr.alt_screen.is_some() {
+            return (scr.cells.clone(), scr.cursor_row, scr.cursor_col);
+        }
+
+        // Find the last row with content (non-space) or cursor row.
+        let mut last_active = scr.cursor_row;
+        for (r, row) in scr.cells.iter().enumerate() {
+            if row.iter().any(|c| c.ch != ' ') {
+                last_active = last_active.max(r);
+            }
+        }
+
+        let content_rows = last_active + 1;
+        if content_rows >= scr.rows {
+            // Content fills the screen — no adjustment needed.
+            return (scr.cells.clone(), scr.cursor_row, scr.cursor_col);
+        }
+
+        // Shift content down: pad with scrollback/blank lines at the top.
+        let pad = scr.rows - content_rows;
         let mut result = Vec::with_capacity(scr.rows);
 
-        // Pull lines from scrollback.
-        let sb_lines = scr.scrollback[start..].to_vec();
-        for line in &sb_lines {
-            if result.len() >= scr.rows {
-                break;
-            }
+        // Fill top padding from scrollback if available.
+        let from_scrollback = pad.min(scr.scrollback.len());
+        let blank_count = pad - from_scrollback;
+
+        for _ in 0..blank_count {
+            result.push(vec![TerminalCell::default(); scr.cols]);
+        }
+
+        let sb_start = scr.scrollback.len().saturating_sub(from_scrollback);
+        for line in &scr.scrollback[sb_start..] {
             let mut padded = line.clone();
             padded.resize(scr.cols, TerminalCell::default());
             result.push(padded);
         }
 
-        // Fill the rest from the top of the current screen.
-        let remaining = scr.rows.saturating_sub(result.len());
-        for r in 0..remaining {
-            if r < scr.cells.len() {
-                result.push(scr.cells[r].clone());
-            }
+        // Copy the active content rows.
+        for r in 0..content_rows {
+            result.push(scr.cells[r].clone());
         }
 
-        result
+        let adjusted_cursor_row = scr.cursor_row + pad;
+        (result, adjusted_cursor_row, scr.cursor_col)
     }
 
     /// Get the current cursor position (row, col) for rendering.
+    /// Note: prefer the cursor position returned by `snapshot()` as it
+    /// accounts for bottom-anchoring.
     pub fn cursor_position(&self) -> (usize, usize) {
         let scr = self.screen.lock().unwrap();
         (scr.cursor_row, scr.cursor_col)
