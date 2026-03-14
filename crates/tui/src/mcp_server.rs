@@ -79,6 +79,15 @@ pub enum McpAction {
     UnregisterAgent { name: String },
     /// Get buffer metadata (file path, language, line count, modified state).
     GetBufferInfo,
+    /// Log a conversation message from an external tool (e.g. Claude Code).
+    LogConversation {
+        agent_id: String,
+        message: String,
+        role: String,
+        context: Option<String>,
+        line_start: Option<usize>,
+        line_end: Option<usize>,
+    },
 }
 
 /// Response from the App event loop back to the MCP server thread.
@@ -504,6 +513,22 @@ fn handle_tools_list(request: &JsonRpcRequest) -> JsonRpcResponse {
                 "properties": {}
             }),
         },
+        ToolDefinition {
+            name: "log_conversation".to_string(),
+            description: "Log a conversation message into AURA's persistent conversation store. Use this to bridge external tool interactions (e.g. Claude Code reasoning, decisions) into the editor's history.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "agent_id": { "type": "string", "description": "Agent identifier (e.g. 'claude-code')" },
+                    "message": { "type": "string", "description": "The message content to log" },
+                    "role": { "type": "string", "enum": ["ai_response", "human_intent", "system"], "description": "Message role" },
+                    "context": { "type": "string", "description": "Optional context (e.g. what was being worked on)" },
+                    "line_start": { "type": "integer", "description": "Start line of relevant code range (0-indexed, optional)" },
+                    "line_end": { "type": "integer", "description": "End line of relevant code range (0-indexed, optional)" }
+                },
+                "required": ["agent_id", "message", "role"]
+            }),
+        },
     ];
 
     JsonRpcResponse {
@@ -628,6 +653,41 @@ fn handle_tools_call(
             McpAction::UnregisterAgent { name }
         }
         "list_agents" => McpAction::ListAgents,
+        "log_conversation" => {
+            let agent_id = arguments
+                .get("agent_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let message = arguments
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let role = arguments
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ai_response")
+                .to_string();
+            let context = arguments
+                .get("context")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let line_start = arguments
+                .get("line_start")
+                .and_then(|v| v.as_u64().map(|n| n as usize));
+            let line_end = arguments
+                .get("line_end")
+                .and_then(|v| v.as_u64().map(|n| n as usize));
+            McpAction::LogConversation {
+                agent_id,
+                message,
+                role,
+                context,
+                line_start,
+                line_end,
+            }
+        }
         _ => {
             return JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
@@ -950,7 +1010,7 @@ mod tests {
 
         let tools = response.result.unwrap();
         let tool_list = tools.get("tools").unwrap().as_array().unwrap();
-        assert_eq!(tool_list.len(), 11);
+        assert_eq!(tool_list.len(), 12);
     }
 
     #[test]
