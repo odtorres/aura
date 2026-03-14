@@ -10,15 +10,32 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// Terminal color — supports default, ANSI 256, and true color (RGB).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TermColor {
+    /// Default terminal color.
+    Default,
+    /// ANSI 256-color palette index (0–255).
+    Indexed(u8),
+    /// 24-bit true color.
+    Rgb(u8, u8, u8),
+}
+
+impl Default for TermColor {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
 /// A single cell in the terminal screen grid.
 #[derive(Debug, Clone, Copy)]
 pub struct TerminalCell {
     /// The character displayed in this cell.
     pub ch: char,
-    /// Foreground color index (0–255 for ANSI 256, or 0 for default).
-    pub fg: u8,
-    /// Background color index.
-    pub bg: u8,
+    /// Foreground color.
+    pub fg: TermColor,
+    /// Background color.
+    pub bg: TermColor,
     /// Whether the cell is bold.
     pub bold: bool,
 }
@@ -27,8 +44,8 @@ impl Default for TerminalCell {
     fn default() -> Self {
         Self {
             ch: ' ',
-            fg: 0,
-            bg: 0,
+            fg: TermColor::Default,
+            bg: TermColor::Default,
             bold: false,
         }
     }
@@ -47,9 +64,9 @@ pub struct TerminalScreen {
     /// Screen height in rows.
     pub rows: usize,
     /// Current SGR foreground color.
-    current_fg: u8,
+    current_fg: TermColor,
     /// Current SGR background color.
-    current_bg: u8,
+    current_bg: TermColor,
     /// Current SGR bold flag.
     current_bold: bool,
     /// Top of the scroll region (0-indexed).
@@ -74,8 +91,8 @@ impl TerminalScreen {
             cursor_col: 0,
             cols,
             rows,
-            current_fg: 0,
-            current_bg: 0,
+            current_fg: TermColor::Default,
+            current_bg: TermColor::Default,
             current_bold: false,
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
@@ -319,8 +336,8 @@ impl vte::Perform for Performer {
             // SGR — Select Graphic Rendition.
             'm' => {
                 if pv.is_empty() || (pv.len() == 1 && p0 == 0) {
-                    scr.current_fg = 0;
-                    scr.current_bg = 0;
+                    scr.current_fg = TermColor::Default;
+                    scr.current_bg = TermColor::Default;
                     scr.current_bold = false;
                     return;
                 }
@@ -328,35 +345,53 @@ impl vte::Perform for Performer {
                 while i < pv.len() {
                     match pv[i] {
                         0 => {
-                            scr.current_fg = 0;
-                            scr.current_bg = 0;
+                            scr.current_fg = TermColor::Default;
+                            scr.current_bg = TermColor::Default;
                             scr.current_bold = false;
                         }
                         1 => scr.current_bold = true,
                         22 => scr.current_bold = false,
                         // Standard foreground colors 30-37.
-                        30..=37 => scr.current_fg = (pv[i] - 30) as u8,
+                        30..=37 => scr.current_fg = TermColor::Indexed((pv[i] - 30) as u8),
                         // Default foreground.
-                        39 => scr.current_fg = 0,
+                        39 => scr.current_fg = TermColor::Default,
                         // Standard background colors 40-47.
-                        40..=47 => scr.current_bg = (pv[i] - 40) as u8,
+                        40..=47 => scr.current_bg = TermColor::Indexed((pv[i] - 40) as u8),
                         // Default background.
-                        49 => scr.current_bg = 0,
+                        49 => scr.current_bg = TermColor::Default,
                         // Bright foreground 90-97.
-                        90..=97 => scr.current_fg = (pv[i] - 90 + 8) as u8,
+                        90..=97 => {
+                            scr.current_fg = TermColor::Indexed((pv[i] - 90 + 8) as u8)
+                        }
                         // Bright background 100-107.
-                        100..=107 => scr.current_bg = (pv[i] - 100 + 8) as u8,
-                        // 256-color: 38;5;N or 48;5;N
+                        100..=107 => {
+                            scr.current_bg = TermColor::Indexed((pv[i] - 100 + 8) as u8)
+                        }
+                        // Extended color: 38;5;N (256-color) or 38;2;R;G;B (true color)
                         38 => {
                             if i + 2 < pv.len() && pv[i + 1] == 5 {
-                                scr.current_fg = pv[i + 2] as u8;
+                                scr.current_fg = TermColor::Indexed(pv[i + 2] as u8);
                                 i += 2;
+                            } else if i + 4 < pv.len() && pv[i + 1] == 2 {
+                                scr.current_fg = TermColor::Rgb(
+                                    pv[i + 2] as u8,
+                                    pv[i + 3] as u8,
+                                    pv[i + 4] as u8,
+                                );
+                                i += 4;
                             }
                         }
                         48 => {
                             if i + 2 < pv.len() && pv[i + 1] == 5 {
-                                scr.current_bg = pv[i + 2] as u8;
+                                scr.current_bg = TermColor::Indexed(pv[i + 2] as u8);
                                 i += 2;
+                            } else if i + 4 < pv.len() && pv[i + 1] == 2 {
+                                scr.current_bg = TermColor::Rgb(
+                                    pv[i + 2] as u8,
+                                    pv[i + 3] as u8,
+                                    pv[i + 4] as u8,
+                                );
+                                i += 4;
                             }
                         }
                         _ => {} // Ignore unsupported attributes.

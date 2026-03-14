@@ -136,26 +136,34 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-/// Convert an ANSI 256-color index to a ratatui `Color`.
-fn ansi_to_color(idx: u8) -> Color {
-    match idx {
-        0 => Color::Black,
-        1 => Color::Red,
-        2 => Color::Green,
-        3 => Color::Yellow,
-        4 => Color::Blue,
-        5 => Color::Magenta,
-        6 => Color::Cyan,
-        7 => Color::White,
-        8 => Color::DarkGray,
-        9 => Color::LightRed,
-        10 => Color::LightGreen,
-        11 => Color::LightYellow,
-        12 => Color::LightBlue,
-        13 => Color::LightMagenta,
-        14 => Color::LightCyan,
-        15 => Color::Gray,
-        n => Color::Indexed(n),
+/// Convert a `TermColor` to a ratatui `Color`, using `fallback` for Default.
+fn term_color_to_ratatui(
+    tc: crate::embedded_terminal::TermColor,
+    fallback: Color,
+) -> Color {
+    use crate::embedded_terminal::TermColor;
+    match tc {
+        TermColor::Default => fallback,
+        TermColor::Indexed(idx) => match idx {
+            0 => Color::Black,
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Yellow,
+            4 => Color::Blue,
+            5 => Color::Magenta,
+            6 => Color::Cyan,
+            7 => Color::White,
+            8 => Color::DarkGray,
+            9 => Color::LightRed,
+            10 => Color::LightGreen,
+            11 => Color::LightYellow,
+            12 => Color::LightBlue,
+            13 => Color::LightMagenta,
+            14 => Color::LightCyan,
+            15 => Color::Gray,
+            n => Color::Indexed(n),
+        },
+        TermColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }
 }
 
@@ -210,16 +218,8 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
         while col < max_col {
             // Group consecutive cells with the same style.
             let cell = &row[col];
-            let fg = if cell.fg == 0 {
-                Color::White
-            } else {
-                ansi_to_color(cell.fg)
-            };
-            let bg = if cell.bg == 0 {
-                Color::Reset
-            } else {
-                ansi_to_color(cell.bg)
-            };
+            let fg = term_color_to_ratatui(cell.fg, Color::White);
+            let bg = term_color_to_ratatui(cell.bg, Color::Reset);
             let bold = cell.bold;
 
             let mut text = String::new();
@@ -228,16 +228,8 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
             let mut next = col + 1;
             while next < max_col {
                 let nc = &row[next];
-                let nfg = if nc.fg == 0 {
-                    Color::White
-                } else {
-                    ansi_to_color(nc.fg)
-                };
-                let nbg = if nc.bg == 0 {
-                    Color::Reset
-                } else {
-                    ansi_to_color(nc.bg)
-                };
+                let nfg = term_color_to_ratatui(nc.fg, Color::White);
+                let nbg = term_color_to_ratatui(nc.bg, Color::Reset);
                 if nfg == fg && nbg == bg && nc.bold == bold {
                     text.push(nc.ch);
                     next += 1;
