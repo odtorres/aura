@@ -6,6 +6,7 @@ use crate::file_picker::FilePicker;
 use crate::file_tree::FileTree;
 use crate::git::{GitRepo, LineStatus};
 use crate::lsp::{Diagnostic, LspEvent};
+use crate::source_control::{SidebarView, SourceControlPanel};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::plugin::PluginManager;
@@ -133,7 +134,7 @@ pub struct App {
     /// Speculative execution engine for background AI analysis.
     speculative: Option<SpeculativeEngine>,
     /// Git repository handle (None if not in a git repo).
-    git_repo: Option<GitRepo>,
+    pub(crate) git_repo: Option<GitRepo>,
     /// Whether to show inline blame annotations.
     pub show_blame: bool,
     /// Loaded configuration from aura.toml.
@@ -164,6 +165,12 @@ pub struct App {
     pub file_picker: FilePicker,
     /// File tree sidebar.
     pub file_tree: FileTree,
+    /// Which sidebar view is active (Files or Git).
+    pub sidebar_view: SidebarView,
+    /// Source control panel state.
+    pub source_control: SourceControlPanel,
+    /// Whether the source control panel has keyboard focus.
+    pub source_control_focused: bool,
 }
 
 impl App {
@@ -204,8 +211,15 @@ impl App {
             }
         };
 
-        // Open git repository.
-        let git_repo = buffer.file_path().and_then(|p| GitRepo::discover(p).ok());
+        // Open git repository — try from file path first, then from current directory.
+        let git_repo = buffer
+            .file_path()
+            .and_then(|p| GitRepo::discover(p).ok())
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|cwd| GitRepo::discover(&cwd).ok())
+            });
 
         if let Some(ref repo) = git_repo {
             tracing::info!(
@@ -304,6 +318,9 @@ impl App {
             file_tree_focused: false,
             file_picker: FilePicker::new(terminal_cwd.clone()),
             file_tree: FileTree::new(terminal_cwd),
+            sidebar_view: SidebarView::Files,
+            source_control: SourceControlPanel::new(30),
+            source_control_focused: false,
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -2067,6 +2084,57 @@ impl App {
         self.show_blame = !self.show_blame;
         let state = if self.show_blame { "on" } else { "off" };
         self.set_status(format!("Inline blame: {state}"));
+    }
+
+    /// Toggle the sidebar between Files and Git views.
+    pub fn toggle_sidebar_view(&mut self) {
+        self.sidebar_view = match self.sidebar_view {
+            SidebarView::Files => {
+                // Switching to Git: refresh and transfer focus.
+                self.refresh_source_control();
+                self.file_tree_focused = false;
+                self.source_control_focused = self.file_tree.visible;
+                SidebarView::Git
+            }
+            SidebarView::Git => {
+                self.source_control_focused = false;
+                self.file_tree_focused = self.file_tree.visible;
+                SidebarView::Files
+            }
+        };
+    }
+
+    /// Refresh the source control panel from git status.
+    pub fn refresh_source_control(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            self.source_control.refresh(repo);
+        }
+    }
+
+    /// Stage the selected file in the source control panel.
+    pub fn sc_stage_selected(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            self.source_control.stage_selected(repo);
+        }
+    }
+
+    /// Unstage the selected file in the source control panel.
+    pub fn sc_unstage_selected(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            self.source_control.unstage_selected(repo);
+        }
+    }
+
+    /// Commit staged changes from the source control panel.
+    pub fn sc_commit(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            match self.source_control.commit(repo) {
+                Ok(hash) => self.set_status(format!("Committed: {hash}")),
+                Err(msg) => self.set_status(msg),
+            }
+        } else {
+            self.set_status("Not in a git repository");
+        }
     }
 
     /// Read the git aura log and display it in the conversation panel.

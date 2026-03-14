@@ -18,5 +18,6 @@ pub mod mcp_server;
 pub mod plugin;
 pub mod render;
 pub mod semantic_index;
+pub mod source_control;
 pub mod speculative;
 pub mod tab;

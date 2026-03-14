@@ -3,6 +3,7 @@
 use crate::app::{App, ConversationPanel, Mode};
 use crate::config::Theme;
 use crate::git::LineStatus;
+use crate::source_control::{GitFileStatus, GitPanelSection, SidebarView};
 use crate::speculative::GhostSuggestion;
 use aura_core::conversation::MessageRole;
 use aura_core::AuthorId;
@@ -70,13 +71,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         (None, editor_area_raw)
     };
 
-    // Draw file tree sidebar if visible.
+    // Draw sidebar if visible (file tree or source control).
     if let Some(tree_area) = file_tree_area {
-        draw_file_tree(frame, app, tree_area);
+        match app.sidebar_view {
+            SidebarView::Files => draw_file_tree(frame, app, tree_area),
+            SidebarView::Git => draw_source_control(frame, app, tree_area),
+        }
     }
 
     // Draw editor border with filename as title.
-    let border_color = if !app.terminal_focused && !app.file_tree_focused {
+    let border_color = if !app.terminal_focused && !app.file_tree_focused && !app.source_control_focused {
         Color::Cyan
     } else {
         Color::DarkGray
@@ -377,16 +381,38 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if inner.height == 0 || app.file_tree.entries.is_empty() {
+    if inner.height == 0 {
+        return;
+    }
+
+    // Tab header row: Files | Git
+    let files_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    let git_style = Style::default().fg(Color::DarkGray);
+    let tab_line = Line::from(vec![
+        Span::styled(" Files", files_style),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Git ", git_style),
+    ]);
+    frame.render_widget(
+        Paragraph::new(tab_line),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    // Adjust inner area below the tab header.
+    let tree_inner = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+
+    if tree_inner.height == 0 || app.file_tree.entries.is_empty() {
         let empty = Paragraph::new(Span::styled(
             " (empty)",
             Style::default().fg(Color::DarkGray),
         ));
-        frame.render_widget(empty, inner);
+        frame.render_widget(empty, tree_inner);
         return;
     }
 
-    let visible_height = inner.height as usize;
+    let visible_height = tree_inner.height as usize;
     let selected = app.file_tree.selected;
 
     // Compute scroll offset so the selected entry is always visible.
@@ -407,33 +433,334 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
     let file_style = Style::default().fg(Color::White);
 
     for (i, entry) in entries.enumerate() {
-        let y = inner.y + i as u16;
+        let y = tree_inner.y + i as u16;
         let abs_idx = scroll_offset + i;
+        let is_selected = abs_idx == selected;
 
         // Build display string: indentation + icon + name.
         let indent = "  ".repeat(entry.depth);
-        let icon = if entry.is_dir {
-            if entry.expanded {
-                "▾ "
-            } else {
-                "▸ "
-            }
+        if entry.is_dir {
+            let icon = if entry.expanded { "▾ " } else { "▸ " };
+            let display = format!("{}{}{}", indent, icon, entry.name);
+            let display: String = display.chars().take(tree_inner.width as usize).collect();
+            let style = if is_selected { selected_style } else { dir_style };
+            let line = Paragraph::new(Span::styled(display, style));
+            frame.render_widget(line, Rect::new(tree_inner.x, y, tree_inner.width, 1));
         } else {
-            "  "
+            let icon = file_icon(&entry.name);
+            let icon_color = file_icon_color(&entry.name);
+
+            if is_selected {
+                // When selected, render as one span with REVERSED style.
+                let display = format!("{}{}{}", indent, icon, entry.name);
+                let display: String = display.chars().take(tree_inner.width as usize).collect();
+                let line = Paragraph::new(Span::styled(display, selected_style));
+                frame.render_widget(line, Rect::new(tree_inner.x, y, tree_inner.width, 1));
+            } else {
+                // Render icon with its own color, name in white.
+                let spans = Line::from(vec![
+                    Span::raw(&indent),
+                    Span::styled(icon, Style::default().fg(icon_color)),
+                    Span::styled(&entry.name, file_style),
+                ]);
+                let line = Paragraph::new(spans);
+                frame.render_widget(line, Rect::new(tree_inner.x, y, tree_inner.width, 1));
+            }
+        }
+    }
+}
+
+/// Draw the source control sidebar panel.
+fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
+    let focused = app.source_control_focused;
+    let (title, border_color) = if focused {
+        (" Git [focused] ", Color::Yellow)
+    } else {
+        (" Git ", Color::Cyan)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(border_color));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let sc = &app.source_control;
+    let mut y = inner.y;
+    let max_y = inner.y + inner.height;
+
+    // --- Tab header row: Files | Git ---
+    if y < max_y {
+        let files_style = Style::default().fg(Color::DarkGray);
+        let git_style = Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+        let line = Line::from(vec![
+            Span::styled(" Files", files_style),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Git ", git_style),
+        ]);
+        frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+        y += 1;
+    }
+
+    // --- Commit message box ---
+    let msg_focused = sc.focused_section == GitPanelSection::CommitMessage;
+    if y < max_y {
+        let header_style = if msg_focused {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
         };
-        let display = format!("{}{}{}", indent, icon, entry.name);
+        let label = if sc.editing_commit_message {
+            " Commit Message (editing)"
+        } else {
+            " Commit Message"
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(label, header_style)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    // Show the commit message (up to 3 lines).
+    let msg_lines = if sc.commit_message.is_empty() {
+        vec!["  (type commit message)".to_string()]
+    } else {
+        sc.commit_message
+            .lines()
+            .take(3)
+            .map(|l| format!("  {l}"))
+            .collect::<Vec<_>>()
+    };
+    for line_text in &msg_lines {
+        if y >= max_y {
+            break;
+        }
+        let style = if sc.editing_commit_message && msg_focused {
+            Style::default().fg(Color::White)
+        } else if sc.commit_message.is_empty() {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let display: String = line_text.chars().take(inner.width as usize).collect();
+        frame.render_widget(
+            Paragraph::new(Span::styled(display, style)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    // Blank separator line.
+    if y < max_y {
+        y += 1;
+    }
+
+    // --- Staged changes ---
+    let staged_focused = sc.focused_section == GitPanelSection::StagedFiles;
+    if y < max_y {
+        let header_style = if staged_focused {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        let header = format!(" Staged Changes ({})", sc.staged.len());
+        frame.render_widget(
+            Paragraph::new(Span::styled(header, header_style)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    for (i, entry) in sc.staged.iter().enumerate() {
+        if y >= max_y {
+            break;
+        }
+        let is_selected = staged_focused && i == sc.selected;
+        let status_style = status_color(entry.status);
+        let display = format!("  {} {}", entry.status.label(), entry.rel_path);
         let display: String = display.chars().take(inner.width as usize).collect();
 
-        let style = if abs_idx == selected {
-            selected_style
-        } else if entry.is_dir {
-            dir_style
+        if is_selected {
+            let style = Style::default().add_modifier(Modifier::REVERSED);
+            frame.render_widget(
+                Paragraph::new(Span::styled(display, style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
         } else {
-            file_style
-        };
+            frame.render_widget(
+                Paragraph::new(Span::styled(display, status_style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        }
+        y += 1;
+    }
 
-        let line = Paragraph::new(Span::styled(display, style));
-        frame.render_widget(line, Rect::new(inner.x, y, inner.width, 1));
+    // Blank separator.
+    if y < max_y {
+        y += 1;
+    }
+
+    // --- Unstaged changes ---
+    let changed_focused = sc.focused_section == GitPanelSection::ChangedFiles;
+    if y < max_y {
+        let header_style = if changed_focused {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Red)
+        };
+        let header = format!(" Changes ({})", sc.changed.len());
+        frame.render_widget(
+            Paragraph::new(Span::styled(header, header_style)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    for (i, entry) in sc.changed.iter().enumerate() {
+        if y >= max_y {
+            break;
+        }
+        let is_selected = changed_focused && i == sc.selected;
+        let status_style = status_color(entry.status);
+        let display = format!("  {} {}", entry.status.label(), entry.rel_path);
+        let display: String = display.chars().take(inner.width as usize).collect();
+
+        if is_selected {
+            let style = Style::default().add_modifier(Modifier::REVERSED);
+            frame.render_widget(
+                Paragraph::new(Span::styled(display, style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(Span::styled(display, status_style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        }
+        y += 1;
+    }
+}
+
+/// Get the display color for a git file status.
+fn status_color(status: GitFileStatus) -> Style {
+    match status {
+        GitFileStatus::Modified => Style::default().fg(Color::Yellow),
+        GitFileStatus::Added => Style::default().fg(Color::Green),
+        GitFileStatus::Deleted => Style::default().fg(Color::Red),
+        GitFileStatus::Renamed => Style::default().fg(Color::Blue),
+        GitFileStatus::Untracked => Style::default().fg(Color::DarkGray),
+    }
+}
+
+/// Return a Nerd Font icon (+ trailing space) for a file based on its extension.
+fn file_icon(name: &str) -> &'static str {
+    let ext = match name.rsplit_once('.') {
+        Some((_, e)) => e,
+        None => "",
+    };
+    match ext {
+        // Rust
+        "rs" => "\u{e7a8} ",  //
+        // JavaScript / TypeScript
+        "js" | "mjs" | "cjs" => "\u{e781} ",  //
+        "ts" | "mts" | "cts" => "\u{e628} ",  //
+        "jsx" => "\u{e7ba} ",  //
+        "tsx" => "\u{e7ba} ",  //
+        // Web
+        "html" | "htm" => "\u{e736} ",  //
+        "css" => "\u{e749} ",  //
+        "scss" | "sass" => "\u{e749} ",
+        // Data / Config
+        "json" => "\u{e60b} ",  //
+        "yaml" | "yml" => "\u{e6a8} ",  //
+        "toml" => "\u{e6b2} ",  //
+        "xml" => "\u{e619} ",  //
+        // Elixir / Erlang
+        "ex" | "exs" => "\u{e62d} ",  //
+        "erl" | "hrl" => "\u{e7b1} ",  //
+        // Python
+        "py" | "pyi" => "\u{e73c} ",  //
+        // Go
+        "go" => "\u{e626} ",  //
+        // C / C++
+        "c" | "h" => "\u{e61e} ",  //
+        "cpp" | "cxx" | "cc" | "hpp" => "\u{e61d} ",  //
+        // Shell
+        "sh" | "bash" | "zsh" | "fish" => "\u{e795} ",  //
+        // Ruby
+        "rb" => "\u{e791} ",  //
+        // Java / Kotlin
+        "java" => "\u{e738} ",  //
+        "kt" | "kts" => "\u{e634} ",  //
+        // Markdown / Text
+        "md" | "mdx" => "\u{e73e} ",  //
+        "txt" => "\u{f0f6} ",  //
+        // Docker
+        "dockerfile" => "\u{e7b0} ",  //
+        // Git
+        "gitignore" | "gitmodules" | "gitattributes" => "\u{e702} ",  //
+        // Images
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" => "\u{f1c5} ",  //
+        // Lock files
+        "lock" => "\u{f023} ",  //
+        // Catch-all
+        _ => match name {
+            "Dockerfile" => "\u{e7b0} ",
+            "Makefile" | "CMakeLists.txt" => "\u{e779} ",
+            _ => "\u{f15b} ",  //  generic file
+        },
+    }
+}
+
+/// Return a color for a file icon based on its extension.
+fn file_icon_color(name: &str) -> Color {
+    let ext = match name.rsplit_once('.') {
+        Some((_, e)) => e,
+        None => "",
+    };
+    match ext {
+        "rs" => Color::Rgb(222, 165, 132),         // Rust orange
+        "js" | "mjs" | "cjs" => Color::Yellow,     // JS yellow
+        "ts" | "mts" | "cts" => Color::Rgb(49, 120, 198), // TS blue
+        "jsx" | "tsx" => Color::Rgb(97, 218, 251),  // React cyan
+        "html" | "htm" => Color::Rgb(227, 76, 38),  // HTML orange
+        "css" | "scss" | "sass" => Color::Rgb(86, 61, 124), // CSS purple
+        "json" => Color::Yellow,
+        "yaml" | "yml" => Color::Rgb(203, 23, 30),  // Red
+        "toml" => Color::Rgb(156, 154, 150),        // Gray
+        "xml" => Color::Rgb(227, 76, 38),
+        "ex" | "exs" => Color::Rgb(110, 74, 126),   // Elixir purple
+        "erl" | "hrl" => Color::Rgb(169, 36, 52),   // Erlang red
+        "py" | "pyi" => Color::Rgb(55, 118, 171),   // Python blue
+        "go" => Color::Rgb(0, 173, 216),             // Go cyan
+        "c" | "h" => Color::Rgb(85, 85, 255),       // C blue
+        "cpp" | "cxx" | "cc" | "hpp" => Color::Rgb(0, 89, 156),
+        "sh" | "bash" | "zsh" | "fish" => Color::Green,
+        "rb" => Color::Rgb(204, 52, 45),            // Ruby red
+        "java" => Color::Rgb(176, 114, 25),          // Java orange
+        "kt" | "kts" => Color::Rgb(169, 123, 255),  // Kotlin purple
+        "md" | "mdx" => Color::Rgb(66, 165, 245),   // Markdown blue
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" => Color::Magenta,
+        "lock" => Color::DarkGray,
+        _ => match name {
+            "Dockerfile" => Color::Rgb(56, 152, 236),
+            "Makefile" | "CMakeLists.txt" => Color::Rgb(111, 166, 58),
+            _ => Color::DarkGray,
+        },
     }
 }
 

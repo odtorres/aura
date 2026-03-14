@@ -54,6 +54,17 @@ pub struct AuraLogEntry {
     pub conversation_id: Option<String>,
 }
 
+/// Parsed entry from `git status --porcelain=v1`.
+#[derive(Debug, Clone)]
+pub struct GitStatusEntry {
+    /// Relative path to the file from the repo root.
+    pub rel_path: String,
+    /// X in XY — index (staged) status character.
+    pub index_status: char,
+    /// Y in XY — worktree (unstaged) status character.
+    pub worktree_status: char,
+}
+
 /// Git integration handle. Wraps a `gix::Repository`.
 pub struct GitRepo {
     /// The opened repository.
@@ -444,6 +455,103 @@ impl GitRepo {
         let output = std::process::Command::new("git")
             .args(["diff", "--cached", "--stat", "--"])
             .arg(file_path)
+            .current_dir(&self.workdir)
+            .output()?;
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Parse `git status --porcelain=v1` into structured entries.
+    pub fn file_status(&self) -> anyhow::Result<Vec<GitStatusEntry>> {
+        let output = std::process::Command::new("git")
+            .args(["status", "--porcelain=v1"])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git status failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut entries = Vec::new();
+
+        for line in stdout.lines() {
+            if line.len() < 4 {
+                continue;
+            }
+            let bytes = line.as_bytes();
+            let index_status = bytes[0] as char;
+            let worktree_status = bytes[1] as char;
+            // Skip the space at position 2.
+            let rel_path = line[3..].to_string();
+
+            entries.push(GitStatusEntry {
+                rel_path,
+                index_status,
+                worktree_status,
+            });
+        }
+
+        Ok(entries)
+    }
+
+    /// Stage a file by relative path.
+    pub fn stage_file(&self, rel_path: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["add", "--", rel_path])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git add failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    /// Unstage a file by relative path.
+    pub fn unstage_file(&self, rel_path: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["restore", "--staged", "--", rel_path])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git restore --staged failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    /// Commit staged changes with the given message. Returns the new commit short hash.
+    pub fn commit_staged(&self, message: &str) -> anyhow::Result<String> {
+        let output = std::process::Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git commit failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        self.head_short()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get commit hash"))
+    }
+
+    /// Get a stat summary of the staged diff.
+    pub fn staged_diff_summary(&self) -> anyhow::Result<String> {
+        let output = std::process::Command::new("git")
+            .args(["diff", "--cached", "--stat"])
             .current_dir(&self.workdir)
             .output()?;
 

@@ -1,6 +1,7 @@
 //! Keyboard input handling for each editing mode.
 
 use crate::app::{App, Mode};
+use crate::source_control::{GitPanelSection, SidebarView};
 use aura_core::AuthorId;
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -114,6 +115,89 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.file_tree_focused = false;
                 app.file_tree.toggle();
             }
+            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_sidebar_view();
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // When the source control panel is focused, route keys to it.
+    if app.source_control_focused {
+        // Handle commit message editing sub-mode.
+        if app.source_control.editing_commit_message {
+            match code {
+                KeyCode::Esc => {
+                    app.source_control.editing_commit_message = false;
+                }
+                KeyCode::Enter => {
+                    app.source_control.commit_message.push('\n');
+                }
+                KeyCode::Backspace => {
+                    app.source_control.commit_message.pop();
+                }
+                KeyCode::Char(c) => {
+                    app.source_control.commit_message.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.source_control.select_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.source_control.select_up();
+            }
+            KeyCode::Tab => {
+                app.source_control.next_section();
+            }
+            KeyCode::BackTab => {
+                app.source_control.prev_section();
+            }
+            KeyCode::Char('s') => {
+                app.sc_stage_selected();
+            }
+            KeyCode::Char('u') => {
+                app.sc_unstage_selected();
+            }
+            KeyCode::Char('c') => {
+                app.sc_commit();
+            }
+            KeyCode::Char('i') | KeyCode::Enter
+                if app.source_control.focused_section == GitPanelSection::CommitMessage =>
+            {
+                app.source_control.editing_commit_message = true;
+            }
+            KeyCode::Enter => {
+                // Open selected file in editor.
+                if let Some(rel_path) = app.source_control.selected_path().map(|s| s.to_string()) {
+                    let workdir = app
+                        .git_repo
+                        .as_ref()
+                        .map(|r| r.workdir().to_path_buf());
+                    if let Some(wd) = workdir {
+                        let full_path = wd.join(&rel_path);
+                        if let Err(e) = app.open_file(full_path) {
+                            app.set_status(e);
+                        }
+                        app.source_control_focused = false;
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                app.source_control_focused = false;
+            }
+            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.source_control_focused = false;
+                app.file_tree.toggle();
+            }
+            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_sidebar_view();
+            }
             _ => {}
         }
         return;
@@ -139,6 +223,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.terminal.visible = true;
             app.terminal_focused = true;
         }
+        return;
+    }
+
+    // Ctrl+g — switch sidebar to Git / toggle source control panel.
+    if code == KeyCode::Char('g') && modifiers.contains(KeyModifiers::CONTROL) {
+        if !app.file_tree.visible {
+            app.file_tree.toggle();
+        }
+        if app.sidebar_view != SidebarView::Git {
+            app.sidebar_view = SidebarView::Git;
+            app.refresh_source_control();
+        }
+        app.file_tree_focused = false;
+        app.source_control_focused = true;
         return;
     }
 
@@ -446,10 +544,16 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
             if app.file_tree.visible {
                 app.file_tree_focused = false;
+                app.source_control_focused = false;
                 app.file_tree.toggle();
             } else {
                 app.file_tree.toggle();
-                app.file_tree_focused = true;
+                if app.sidebar_view == SidebarView::Files {
+                    app.file_tree_focused = true;
+                } else {
+                    app.source_control_focused = true;
+                    app.refresh_source_control();
+                }
             }
             let state = if app.file_tree.visible { "on" } else { "off" };
             app.set_status(format!("File tree: {state}"));
@@ -884,7 +988,12 @@ pub fn handle_review(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
 fn execute_command(app: &mut App, cmd: &str) {
     match cmd.trim() {
         "w" => match app.tab_mut().buffer.save() {
-            Ok(_) => app.set_status("Written"),
+            Ok(_) => {
+                app.set_status("Written");
+                if app.sidebar_view == SidebarView::Git {
+                    app.refresh_source_control();
+                }
+            }
             Err(e) => app.set_status(format!("Error: {}", e)),
         },
         "q" => {
@@ -1088,6 +1197,16 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.file_tree.toggle();
             let state = if app.file_tree.visible { "on" } else { "off" };
             app.set_status(format!("File tree: {state}"));
+        }
+        // :git / :sc — open the source control panel.
+        "git" | "sc" => {
+            if !app.file_tree.visible {
+                app.file_tree.toggle();
+            }
+            app.sidebar_view = SidebarView::Git;
+            app.refresh_source_control();
+            app.file_tree_focused = false;
+            app.source_control_focused = true;
         }
         // :term-height <N> — set terminal pane height in rows.
         cmd if cmd.starts_with("term-height ") || cmd.starts_with("th ") => {
