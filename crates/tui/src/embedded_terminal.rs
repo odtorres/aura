@@ -79,6 +79,22 @@ pub struct TerminalScreen {
     max_scrollback: usize,
     /// Scrollback viewing offset (0 = live view, >0 = looking at history).
     pub scroll_offset: usize,
+    /// Saved cursor position (row, col) for ESC 7 / ESC 8 and CSI s / CSI u.
+    saved_cursor: (usize, usize),
+    /// Saved SGR state for cursor save/restore.
+    saved_fg: TermColor,
+    /// Saved SGR state for cursor save/restore.
+    saved_bg: TermColor,
+    /// Saved bold state for cursor save/restore.
+    saved_bold: bool,
+    /// Alternate screen buffer (saved when switching to alt screen).
+    alt_screen: Option<Vec<Vec<TerminalCell>>>,
+    /// Saved main-screen cursor for alt screen switch.
+    alt_saved_cursor: (usize, usize),
+    /// Whether auto-wrap is enabled (DECAWM).
+    auto_wrap: bool,
+    /// Whether we are pending a wrap (cursor is past last col).
+    wrap_pending: bool,
 }
 
 impl TerminalScreen {
@@ -99,6 +115,14 @@ impl TerminalScreen {
             scrollback: Vec::new(),
             max_scrollback: 5000,
             scroll_offset: 0,
+            saved_cursor: (0, 0),
+            saved_fg: TermColor::Default,
+            saved_bg: TermColor::Default,
+            saved_bold: false,
+            alt_screen: None,
+            alt_saved_cursor: (0, 0),
+            auto_wrap: true,
+            wrap_pending: false,
         }
     }
 
@@ -167,6 +191,53 @@ impl TerminalScreen {
             for cell in &mut self.cells[self.cursor_row] {
                 *cell = TerminalCell::default();
             }
+        }
+    }
+
+    /// Save cursor position and attributes.
+    fn save_cursor(&mut self) {
+        self.saved_cursor = (self.cursor_row, self.cursor_col);
+        self.saved_fg = self.current_fg;
+        self.saved_bg = self.current_bg;
+        self.saved_bold = self.current_bold;
+    }
+
+    /// Restore cursor position and attributes.
+    fn restore_cursor(&mut self) {
+        let (row, col) = self.saved_cursor;
+        self.cursor_row = row.min(self.rows.saturating_sub(1));
+        self.cursor_col = col.min(self.cols.saturating_sub(1));
+        self.current_fg = self.saved_fg;
+        self.current_bg = self.saved_bg;
+        self.current_bold = self.saved_bold;
+        self.wrap_pending = false;
+    }
+
+    /// Enter alternate screen buffer.
+    fn enter_alt_screen(&mut self) {
+        if self.alt_screen.is_some() {
+            return; // Already in alt screen.
+        }
+        self.alt_saved_cursor = (self.cursor_row, self.cursor_col);
+        self.alt_screen = Some(std::mem::replace(
+            &mut self.cells,
+            vec![vec![TerminalCell::default(); self.cols]; self.rows],
+        ));
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+        self.scroll_top = 0;
+        self.scroll_bottom = self.rows.saturating_sub(1);
+    }
+
+    /// Leave alternate screen buffer.
+    fn leave_alt_screen(&mut self) {
+        if let Some(saved) = self.alt_screen.take() {
+            self.cells = saved;
+            let (row, col) = self.alt_saved_cursor;
+            self.cursor_row = row.min(self.rows.saturating_sub(1));
+            self.cursor_col = col.min(self.cols.saturating_sub(1));
+            self.scroll_top = 0;
+            self.scroll_bottom = self.rows.saturating_sub(1);
         }
     }
 
@@ -267,6 +338,18 @@ struct Performer {
 impl vte::Perform for Performer {
     fn print(&mut self, c: char) {
         let mut scr = self.screen.lock().unwrap();
+
+        // If a wrap is pending (cursor was at the last column), wrap now.
+        if scr.wrap_pending {
+            scr.wrap_pending = false;
+            scr.cursor_col = 0;
+            if scr.cursor_row == scr.scroll_bottom {
+                scr.scroll_up();
+            } else if scr.cursor_row + 1 < scr.rows {
+                scr.cursor_row += 1;
+            }
+        }
+
         let row = scr.cursor_row;
         let col = scr.cursor_col;
         if row < scr.rows && col < scr.cols {
@@ -277,14 +360,14 @@ impl vte::Perform for Performer {
                 bold: scr.current_bold,
             };
             scr.cells[row][col] = cell;
-            scr.cursor_col += 1;
-            if scr.cursor_col >= scr.cols {
-                scr.cursor_col = 0;
-                if scr.cursor_row == scr.scroll_bottom {
-                    scr.scroll_up();
-                } else if scr.cursor_row + 1 < scr.rows {
-                    scr.cursor_row += 1;
+            if scr.cursor_col + 1 >= scr.cols {
+                if scr.auto_wrap {
+                    // Don't wrap yet — set pending so the next print wraps.
+                    scr.wrap_pending = true;
                 }
+                // cursor stays at last col until next print triggers wrap
+            } else {
+                scr.cursor_col += 1;
             }
         }
     }
@@ -333,7 +416,7 @@ impl vte::Perform for Performer {
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,
-        _intermediates: &[u8],
+        intermediates: &[u8],
         _ignore: bool,
         action: char,
     ) {
@@ -343,6 +426,45 @@ impl vte::Perform for Performer {
         let pv: Vec<u16> = params.iter().map(|sub| sub[0]).collect();
         let p0 = pv.first().copied().unwrap_or(0);
         let p1 = pv.get(1).copied().unwrap_or(0);
+
+        // Handle private mode sequences: CSI ? ... h/l
+        let is_private = intermediates.first() == Some(&b'?');
+        if is_private {
+            match action {
+                'h' => {
+                    // DECSET — enable private modes.
+                    for &p in &pv {
+                        match p {
+                            1 => {} // DECCKM — application cursor keys (handled by shell)
+                            7 => scr.auto_wrap = true,
+                            25 => {} // DECTCEM — show cursor (we always show)
+                            1049 => scr.enter_alt_screen(),
+                            2004 => {} // Bracketed paste mode — ignore
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
+                'l' => {
+                    // DECRST — disable private modes.
+                    for &p in &pv {
+                        match p {
+                            1 => {}
+                            7 => scr.auto_wrap = false,
+                            25 => {}
+                            1049 => scr.leave_alt_screen(),
+                            2004 => {}
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
+                _ => return,
+            }
+        }
+
+        // Clear wrap pending on any cursor movement.
+        scr.wrap_pending = false;
 
         match action {
             // CUU — Cursor Up.
@@ -552,19 +674,68 @@ impl vte::Perform for Performer {
                     }
                 }
             }
+            // CSI s — Save cursor position.
+            's' => {
+                scr.save_cursor();
+            }
+            // CSI u — Restore cursor position.
+            'u' => {
+                scr.restore_cursor();
+            }
+            // CSI n — Device Status Report (ignored — can't write back to PTY from here).
+            'n' => {}
             _ => {} // Ignore unsupported sequences.
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
-        // Handle RI (Reverse Index) = ESC M.
-        if _byte == b'M' {
-            let mut scr = self.screen.lock().unwrap();
-            if scr.cursor_row == scr.scroll_top {
-                scr.scroll_down_region();
-            } else {
-                scr.cursor_row = scr.cursor_row.saturating_sub(1);
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
+        let mut scr = self.screen.lock().unwrap();
+        match byte {
+            // RI (Reverse Index) = ESC M.
+            b'M' => {
+                if scr.cursor_row == scr.scroll_top {
+                    scr.scroll_down_region();
+                } else {
+                    scr.cursor_row = scr.cursor_row.saturating_sub(1);
+                }
             }
+            // DECSC — Save cursor = ESC 7.
+            b'7' => {
+                scr.save_cursor();
+            }
+            // DECRC — Restore cursor = ESC 8.
+            b'8' => {
+                scr.restore_cursor();
+            }
+            // ESC c — Full Reset (RIS).
+            b'c' => {
+                scr.clear();
+                scr.current_fg = TermColor::Default;
+                scr.current_bg = TermColor::Default;
+                scr.current_bold = false;
+                scr.auto_wrap = true;
+                scr.wrap_pending = false;
+                scr.scroll_top = 0;
+                scr.scroll_bottom = scr.rows.saturating_sub(1);
+            }
+            // ESC D — Index (move cursor down, scroll if at bottom).
+            b'D' => {
+                if scr.cursor_row == scr.scroll_bottom {
+                    scr.scroll_up();
+                } else if scr.cursor_row + 1 < scr.rows {
+                    scr.cursor_row += 1;
+                }
+            }
+            // ESC E — Next Line (CR + LF).
+            b'E' => {
+                scr.cursor_col = 0;
+                if scr.cursor_row == scr.scroll_bottom {
+                    scr.scroll_up();
+                } else if scr.cursor_row + 1 < scr.rows {
+                    scr.cursor_row += 1;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -981,13 +1152,18 @@ mod tests {
     fn test_screen_resize() {
         let mut scr = TerminalScreen::new(10, 5);
         scr.cells[0][0].ch = 'X';
+        scr.cells[3][0].ch = 'Y';
         scr.cursor_row = 4;
         scr.cursor_col = 9;
         scr.resize(20, 3);
         assert_eq!(scr.cols, 20);
         assert_eq!(scr.rows, 3);
-        assert_eq!(scr.cells[0][0].ch, 'X');
-        // Cursor should be clamped.
+        // Rows 0 and 1 pushed to scrollback to keep cursor at bottom.
+        assert_eq!(scr.scrollback.len(), 2);
+        assert_eq!(scr.scrollback[0][0].ch, 'X');
+        // Row 3 (with 'Y') is now at row 1 in the resized screen.
+        assert_eq!(scr.cells[1][0].ch, 'Y');
+        // Cursor stays relative: was row 4 of 5, now row 2 of 3.
         assert_eq!(scr.cursor_row, 2);
         assert_eq!(scr.cursor_col, 9);
     }
