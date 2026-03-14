@@ -5,6 +5,9 @@
 
 pub mod app;
 pub mod config;
+pub mod embedded_terminal;
+pub mod file_picker;
+pub mod file_tree;
 pub mod git;
 pub mod highlight;
 pub mod input;

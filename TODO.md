@@ -291,7 +291,7 @@ The AI thinks ahead. The human reviews when ready.
 ### 8.3 Plugin system (future)
 - [x] Lua or WASM plugin API (evaluate tradeoffs)
 - [x] Plugins can register new intents, modes, and UI panels
-- [ ] Ship with core plugins: file picker (fuzzy finder), file tree, terminal
+- [x] Ship with core plugins: file picker (fuzzy finder), file tree, terminal
 
 ### 8.4 Distribution
 - [x] `cargo install aura-editor`

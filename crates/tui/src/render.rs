@@ -2,46 +2,69 @@
 
 use crate::app::{App, ConversationPanel, Mode};
 use crate::config::Theme;
+use crate::embedded_terminal::EmbeddedTerminal;
 use crate::git::LineStatus;
 use crate::speculative::GhostSuggestion;
 use aura_core::conversation::MessageRole;
 use aura_core::AuthorId;
 use ratatui::prelude::*;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 /// Draw the full editor frame.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Layout: editor area + optional proposal + status bar + command bar.
+    // Layout: editor area + optional proposal + optional terminal + status bar + command bar.
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
+    let has_terminal = app.terminal.visible;
+    let terminal_height = if has_terminal { app.terminal.height } else { 0 };
 
     let chunks = if has_proposal {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(50), // Editor (original)
-                Constraint::Percentage(50), // Proposal (diff)
-                Constraint::Length(1),      // Status bar
-                Constraint::Length(1),      // Command bar
+                Constraint::Percentage(50),          // Editor (original)
+                Constraint::Percentage(50),          // Proposal (diff)
+                Constraint::Length(terminal_height), // Terminal pane (0 when hidden)
+                Constraint::Length(1),               // Status bar
+                Constraint::Length(1),               // Command bar
             ])
             .split(area)
     } else {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(1),    // Editor
-                Constraint::Length(0), // No proposal pane
-                Constraint::Length(1), // Status bar
-                Constraint::Length(1), // Command bar
+                Constraint::Min(1),                  // Editor
+                Constraint::Length(0),               // No proposal pane
+                Constraint::Length(terminal_height), // Terminal pane (0 when hidden)
+                Constraint::Length(1),               // Status bar
+                Constraint::Length(1),               // Command bar
             ])
             .split(area)
     };
 
-    let editor_area = chunks[0];
+    let editor_area_raw = chunks[0];
     let proposal_area = chunks[1];
-    let status_area = chunks[2];
-    let command_area = chunks[3];
+    let terminal_area = chunks[2];
+    let status_area = chunks[3];
+    let command_area = chunks[4];
+
+    // If the file tree is visible, split the editor area horizontally.
+    let (file_tree_area, editor_area) = if app.file_tree.visible {
+        let tree_width = app.file_tree.width;
+        let hsplit = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(tree_width), Constraint::Min(1)])
+            .split(editor_area_raw);
+        (Some(hsplit[0]), hsplit[1])
+    } else {
+        (None, editor_area_raw)
+    };
+
+    // Draw file tree sidebar if visible.
+    if let Some(tree_area) = file_tree_area {
+        draw_file_tree(frame, app, tree_area);
+    }
 
     // Adjust scroll so cursor is visible.
     app.scroll_to_cursor(editor_area.height as usize, editor_area.width as usize - 6);
@@ -65,6 +88,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_proposal(frame, app, proposal_area);
     }
 
+    if has_terminal {
+        draw_terminal(frame, app, terminal_area);
+    }
+
     draw_status_bar(frame, app, status_area);
     draw_command_bar(frame, app, command_area);
 
@@ -83,13 +110,232 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_conversation_panel(frame, editor_area, panel);
     }
 
-    // Position the terminal cursor (6 = gutter width).
-    if app.mode != Mode::Review {
+    // Render file picker overlay if visible.
+    if app.file_picker.visible {
+        draw_file_picker(frame, app, area);
+    }
+
+    // Position the terminal cursor.
+    if app.file_picker.visible {
+        // No editor cursor while the file picker is open.
+    } else if app.terminal_focused && has_terminal {
+        // Place cursor at the input line: last row of the terminal border inner area.
+        // The input prompt "$ <input>" sits on the last inner row.
+        let inner_x = terminal_area.x + 1; // inside left border
+        let inner_bottom = terminal_area.bottom().saturating_sub(2); // above bottom border
+        let prompt_prefix = format!("$ {}", app.terminal.input);
+        let cursor_x = (inner_x + prompt_prefix.len() as u16).min(terminal_area.right() - 1);
+        frame.set_cursor_position((cursor_x, inner_bottom));
+    } else if app.mode != Mode::Review {
+        // Editor cursor (6 = gutter width).
         let cursor_x = (app.cursor.col - app.scroll_col) as u16 + editor_area.x + 6;
         let cursor_y = (app.cursor.row - app.scroll_row) as u16 + editor_area.y;
         if cursor_x < editor_area.right() && cursor_y < editor_area.bottom() {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
+    }
+}
+
+/// Draw the embedded terminal pane.
+fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
+    let focused = app.terminal_focused;
+
+    let title = if focused {
+        " Terminal (focused) "
+    } else {
+        " Terminal "
+    };
+
+    let border_style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(border_style);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // The bottom row of inner is reserved for the input line; the rest shows output.
+    let output_height = inner.height.saturating_sub(1) as usize;
+    let input_y = inner.y + inner.height.saturating_sub(1);
+
+    // Render output lines with scroll offset.
+    let terminal: &EmbeddedTerminal = &app.terminal;
+    let visible_output: Vec<&crate::embedded_terminal::TerminalLine> = terminal
+        .output
+        .iter()
+        .skip(terminal.scroll)
+        .take(output_height)
+        .collect();
+
+    for (i, line) in visible_output.iter().enumerate() {
+        let y = inner.y + i as u16;
+        if y >= input_y {
+            break;
+        }
+        let style = if line.is_command {
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let display: String = line.content.chars().take(inner.width as usize).collect();
+        let line_widget = Paragraph::new(Span::styled(display, style));
+        frame.render_widget(line_widget, Rect::new(inner.x, y, inner.width, 1));
+    }
+
+    // Render input line.
+    let input_text = format!("$ {}", terminal.input);
+    let display_input: String = input_text.chars().take(inner.width as usize).collect();
+    let input_style = Style::default().fg(Color::Cyan);
+    let input_widget = Paragraph::new(Span::styled(display_input, input_style));
+    frame.render_widget(input_widget, Rect::new(inner.x, input_y, inner.width, 1));
+}
+
+/// Draw the file tree sidebar.
+fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Files ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || app.file_tree.entries.is_empty() {
+        let empty = Paragraph::new(Span::styled(
+            " (empty)",
+            Style::default().fg(Color::DarkGray),
+        ));
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    let visible_height = inner.height as usize;
+    let selected = app.file_tree.selected;
+
+    // Compute scroll offset so the selected entry is always visible.
+    let scroll_offset = if selected >= visible_height {
+        selected.saturating_sub(visible_height - 1)
+    } else {
+        0
+    };
+
+    let entries = app
+        .file_tree
+        .entries
+        .iter()
+        .skip(scroll_offset)
+        .take(visible_height);
+    let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+    let dir_style = Style::default().fg(Color::Cyan);
+    let file_style = Style::default().fg(Color::White);
+
+    for (i, entry) in entries.enumerate() {
+        let y = inner.y + i as u16;
+        let abs_idx = scroll_offset + i;
+
+        // Build display string: indentation + icon + name.
+        let indent = "  ".repeat(entry.depth);
+        let icon = if entry.is_dir {
+            if entry.expanded {
+                "▾ "
+            } else {
+                "▸ "
+            }
+        } else {
+            "  "
+        };
+        let display = format!("{}{}{}", indent, icon, entry.name);
+        let display: String = display.chars().take(inner.width as usize).collect();
+
+        let style = if abs_idx == selected {
+            selected_style
+        } else if entry.is_dir {
+            dir_style
+        } else {
+            file_style
+        };
+
+        let line = Paragraph::new(Span::styled(display, style));
+        frame.render_widget(line, Rect::new(inner.x, y, inner.width, 1));
+    }
+}
+
+/// Draw the fuzzy file picker overlay centered in the given area.
+fn draw_file_picker(frame: &mut Frame, app: &App, area: Rect) {
+    let width = area.width.min(80);
+    let height = area.height.min(20);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Open file ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // First inner row: search query.
+    let query_line = format!("> {}", app.file_picker.query);
+    let query_display: String = query_line.chars().take(inner.width as usize).collect();
+    let query_widget = Paragraph::new(Span::styled(
+        query_display,
+        Style::default().fg(Color::Yellow),
+    ));
+    frame.render_widget(query_widget, Rect::new(inner.x, inner.y, inner.width, 1));
+
+    // Remaining rows: filtered results list.
+    let list_area_y = inner.y + 1;
+    let list_height = inner.height.saturating_sub(1) as usize;
+    let selected = app.file_picker.selected;
+
+    // Scroll the list so the selected item is always visible.
+    let scroll_start = if selected >= list_height {
+        selected - list_height + 1
+    } else {
+        0
+    };
+
+    for (i, entry) in app
+        .file_picker
+        .filtered
+        .iter()
+        .enumerate()
+        .skip(scroll_start)
+        .take(list_height)
+    {
+        let row_y = list_area_y + (i - scroll_start) as u16;
+        let is_selected = i == selected;
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let display: String = entry.chars().take(inner.width as usize).collect();
+        let line_widget = Paragraph::new(Span::styled(display, style));
+        frame.render_widget(line_widget, Rect::new(inner.x, row_y, inner.width, 1));
     }
 }
 
@@ -246,8 +492,6 @@ fn draw_editor(
 
 /// Draw the AI proposal pane with diff highlighting.
 fn draw_proposal(frame: &mut Frame, app: &App, area: Rect) {
-    use ratatui::widgets::{Block, Borders};
-
     let proposal = match &app.proposal {
         Some(p) => p,
         None => return,
@@ -443,8 +687,6 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw a hover information popup near the cursor.
 fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str) {
-    use ratatui::widgets::{Block, Borders, Clear};
-
     let lines: Vec<&str> = text.lines().take(10).collect();
     let height = (lines.len() as u16 + 2).min(editor_area.height / 2);
     let max_width = lines
@@ -486,8 +728,6 @@ fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str)
 
 /// Draw the conversation history panel as a right-side split.
 fn draw_conversation_panel(frame: &mut Frame, editor_area: Rect, panel: &ConversationPanel) {
-    use ratatui::widgets::{Block, Borders, Clear};
-
     // Take right 40% of the editor area.
     let width = editor_area.width * 2 / 5;
     let panel_area = Rect::new(

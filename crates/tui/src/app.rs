@@ -1,6 +1,9 @@
 //! Application state and main event loop.
 
 use crate::config::{AuraConfig, Theme};
+use crate::embedded_terminal::EmbeddedTerminal;
+use crate::file_picker::FilePicker;
+use crate::file_tree::FileTree;
 use crate::git::{GitRepo, LineStatus};
 use crate::highlight::{HighlightedLine, Language, SyntaxHighlighter};
 use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
@@ -168,6 +171,15 @@ pub struct App {
     pub experimental_mode: bool,
     /// Plugin system — holds all registered plugins and routes events to them.
     pub plugin_manager: PluginManager,
+    /// Embedded terminal / command runner pane.
+    pub terminal: EmbeddedTerminal,
+    /// When `true`, keystrokes are routed to the terminal input instead of the
+    /// editor.
+    pub terminal_focused: bool,
+    /// Fuzzy file picker overlay.
+    pub file_picker: FilePicker,
+    /// File tree sidebar.
+    pub file_tree: FileTree,
 }
 
 impl App {
@@ -277,6 +289,15 @@ impl App {
             })
             .unwrap_or_default();
 
+        // Determine the working directory for the embedded terminal.
+        let terminal_cwd = buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+
         let mut app = Self {
             buffer,
             cursor: Cursor::origin(),
@@ -325,6 +346,10 @@ impl App {
             revising_proposal: false,
             experimental_mode: false,
             plugin_manager: PluginManager::new(),
+            terminal: EmbeddedTerminal::new(terminal_cwd.clone()),
+            terminal_focused: false,
+            file_picker: FilePicker::new(terminal_cwd.clone()),
+            file_tree: FileTree::new(terminal_cwd),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -1989,6 +2014,51 @@ impl App {
                 "[EXPERIMENT] '{}' started (no git repo — branch not created) — AI suggestions will be auto-accepted",
                 name
             ));
+        }
+    }
+
+    /// Open the fuzzy file picker overlay.
+    pub fn open_file_picker(&mut self) {
+        self.file_picker.open();
+    }
+
+    /// Load the file currently selected in the file picker into the buffer,
+    /// then close the picker. If no file is selected, or loading fails, a
+    /// status message is shown instead.
+    pub fn open_selected_file(&mut self) {
+        let path = match self.file_picker.selected_path() {
+            Some(p) => p,
+            None => {
+                self.set_status("No file selected");
+                return;
+            }
+        };
+        self.file_picker.close();
+        match Buffer::from_file(&path) {
+            Ok(buf) => {
+                self.buffer = buf;
+                self.cursor = Cursor::origin();
+                self.scroll_row = 0;
+                self.scroll_col = 0;
+                self.hover_info = None;
+                self.diagnostics = Vec::new();
+                // Re-detect language and reset highlighter.
+                self.language = self
+                    .buffer
+                    .file_path()
+                    .and_then(|p| p.extension())
+                    .and_then(|ext| ext.to_str())
+                    .and_then(crate::highlight::Language::from_extension);
+                self.highlighter = self
+                    .language
+                    .and_then(crate::highlight::SyntaxHighlighter::new);
+                self.highlight_lines = Vec::new();
+                self.mark_highlights_dirty();
+                self.set_status(format!("Opened {}", path.display()));
+            }
+            Err(e) => {
+                self.set_status(format!("Error opening file: {}", e));
+            }
         }
     }
 

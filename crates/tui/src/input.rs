@@ -6,6 +6,75 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 /// Handle keys in Normal mode.
 pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // When the terminal pane is focused, route all keystrokes to it.
+    if app.terminal_focused {
+        match code {
+            // Ctrl+L — clear terminal output.
+            KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal.clear();
+            }
+            // Esc — unfocus terminal (return focus to editor).
+            KeyCode::Esc => {
+                app.terminal_focused = false;
+            }
+            KeyCode::Enter => {
+                app.terminal.execute();
+            }
+            KeyCode::Backspace => {
+                app.terminal.backspace();
+            }
+            KeyCode::Up => {
+                app.terminal.scroll_up();
+            }
+            KeyCode::Down => {
+                app.terminal.scroll_down();
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal.type_char(c);
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // Ctrl+` — toggle terminal visibility and focus.
+    if code == KeyCode::Char('`') && modifiers.contains(KeyModifiers::CONTROL) {
+        if app.terminal.visible {
+            // Toggle focus: if already focused, unfocus; otherwise focus.
+            app.terminal_focused = !app.terminal_focused;
+        } else {
+            app.terminal.visible = true;
+            app.terminal_focused = true;
+        }
+        return;
+    }
+
+    // Route keys to the file picker when it is visible.
+    if app.file_picker.visible {
+        match code {
+            KeyCode::Esc => {
+                app.file_picker.close();
+            }
+            KeyCode::Enter => {
+                app.open_selected_file();
+            }
+            KeyCode::Backspace => {
+                app.file_picker.backspace();
+            }
+            KeyCode::Up | KeyCode::Char('k') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.file_picker.select_up();
+            }
+            KeyCode::Down | KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.file_picker.select_down();
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.file_picker.type_char(c);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Close conversation panel if open.
     if app.conversation_panel.is_some() {
         if code == KeyCode::Esc || code == KeyCode::Char('q') {
@@ -257,6 +326,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
 
+        // Ctrl+n — toggle file tree sidebar
+        KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.file_tree.toggle();
+            let state = if app.file_tree.visible { "on" } else { "off" };
+            app.set_status(format!("File tree: {state}"));
+        }
+
         _ => {}
     }
 }
@@ -500,6 +576,10 @@ fn handle_leader(app: &mut App, code: KeyCode) {
             } else {
                 app.set_status("No semantic info at cursor");
             }
+        }
+        // <leader>p — open fuzzy file picker
+        KeyCode::Char('p') => {
+            app.open_file_picker();
         }
         _ => {
             app.set_status("Unknown leader command");
@@ -751,6 +831,27 @@ fn execute_command(app: &mut App, cmd: &str) {
             } else {
                 app.set_status(format!("Plugins: {}", names.join(", ")));
             }
+        }
+        // :files / :fp — open fuzzy file picker.
+        "files" | "fp" => {
+            app.open_file_picker();
+        }
+        // :term / :terminal — toggle terminal pane and give it focus.
+        "term" | "terminal" => {
+            if app.terminal.visible && app.terminal_focused {
+                // Already visible and focused: hide it and release focus.
+                app.terminal.visible = false;
+                app.terminal_focused = false;
+            } else {
+                app.terminal.visible = true;
+                app.terminal_focused = true;
+            }
+        }
+        // :tree — toggle the file tree sidebar.
+        "tree" => {
+            app.file_tree.toggle();
+            let state = if app.file_tree.visible { "on" } else { "off" };
+            app.set_status(format!("File tree: {state}"));
         }
         other => {
             app.set_status(format!("Unknown command: {}", other));
