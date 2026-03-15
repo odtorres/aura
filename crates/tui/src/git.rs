@@ -548,6 +548,32 @@ impl GitRepo {
             .ok_or_else(|| anyhow::anyhow!("Failed to get commit hash"))
     }
 
+    /// Get the number of commits ahead of and behind the upstream branch.
+    ///
+    /// Returns `(ahead, behind)`. Returns `(0, 0)` if there is no upstream
+    /// tracking branch configured.
+    pub fn ahead_behind(&self) -> (usize, usize) {
+        let output = std::process::Command::new("git")
+            .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+            .current_dir(&self.workdir)
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                let text = String::from_utf8_lossy(&o.stdout);
+                let parts: Vec<&str> = text.trim().split('\t').collect();
+                if parts.len() == 2 {
+                    let ahead = parts[0].parse().unwrap_or(0);
+                    let behind = parts[1].parse().unwrap_or(0);
+                    (ahead, behind)
+                } else {
+                    (0, 0)
+                }
+            }
+            _ => (0, 0),
+        }
+    }
+
     /// Get a stat summary of the staged diff.
     pub fn staged_diff_summary(&self) -> anyhow::Result<String> {
         let output = std::process::Command::new("git")

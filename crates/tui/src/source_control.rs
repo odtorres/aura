@@ -77,6 +77,12 @@ pub struct SourceControlPanel {
     pub width: u16,
     /// Whether the user is actively editing the commit message.
     pub editing_commit_message: bool,
+    /// Current branch name.
+    pub branch: Option<String>,
+    /// Number of commits ahead of upstream.
+    pub ahead: usize,
+    /// Number of commits behind upstream.
+    pub behind: usize,
 }
 
 impl SourceControlPanel {
@@ -90,11 +96,19 @@ impl SourceControlPanel {
             selected: 0,
             width,
             editing_commit_message: false,
+            branch: None,
+            ahead: 0,
+            behind: 0,
         }
     }
 
-    /// Refresh the panel's file lists from git status.
+    /// Refresh the panel's file lists, branch name, and sync status from git.
     pub fn refresh(&mut self, git_repo: &GitRepo) {
+        self.branch = git_repo.current_branch();
+        let (ahead, behind) = git_repo.ahead_behind();
+        self.ahead = ahead;
+        self.behind = behind;
+
         self.changed.clear();
         self.staged.clear();
 

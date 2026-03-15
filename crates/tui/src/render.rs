@@ -509,6 +509,40 @@ fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
         y += 1;
     }
 
+    // --- Branch and sync status ---
+    if y < max_y {
+        let branch_name = sc.branch.as_deref().unwrap_or("detached");
+        let mut spans = vec![
+            Span::styled(" \u{e0a0} ", Style::default().fg(Color::Cyan)),
+            Span::styled(branch_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ];
+
+        if sc.ahead > 0 || sc.behind > 0 {
+            let mut sync_parts = String::from("  ");
+            if sc.behind > 0 {
+                sync_parts.push_str(&format!("{}↓", sc.behind));
+            }
+            if sc.ahead > 0 {
+                if sc.behind > 0 {
+                    sync_parts.push(' ');
+                }
+                sync_parts.push_str(&format!("{}↑", sc.ahead));
+            }
+            spans.push(Span::styled(sync_parts, Style::default().fg(Color::Yellow)));
+        }
+
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    // Blank separator.
+    if y < max_y {
+        y += 1;
+    }
+
     // --- Commit message box ---
     let msg_focused = sc.focused_section == GitPanelSection::CommitMessage;
     if y < max_y {
