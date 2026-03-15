@@ -1,6 +1,7 @@
 //! Application state and main event loop.
 
 use crate::config::{AuraConfig, Theme};
+use crate::diff_view::DiffView;
 use crate::embedded_terminal::EmbeddedTerminal;
 use crate::file_picker::FilePicker;
 use crate::file_tree::FileTree;
@@ -48,6 +49,8 @@ pub enum Mode {
     Intent,
     /// Reviewing an AI-proposed change.
     Review,
+    /// Viewing a side-by-side git diff (read-only).
+    Diff,
 }
 
 impl Mode {
@@ -61,6 +64,7 @@ impl Mode {
             Mode::VisualLine => "V-LINE",
             Mode::Intent => "INTENT",
             Mode::Review => "REVIEW",
+            Mode::Diff => "DIFF",
         }
     }
 }
@@ -171,6 +175,8 @@ pub struct App {
     pub source_control: SourceControlPanel,
     /// Whether the source control panel has keyboard focus.
     pub source_control_focused: bool,
+    /// Side-by-side diff view (None when not active).
+    pub diff_view: Option<DiffView>,
 }
 
 impl App {
@@ -321,6 +327,7 @@ impl App {
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
             source_control_focused: false,
+            diff_view: None,
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -440,6 +447,7 @@ impl App {
             Mode::Visual | Mode::VisualLine => crate::input::handle_visual(self, code, modifiers),
             Mode::Intent => crate::input::handle_intent(self, code, modifiers),
             Mode::Review => crate::input::handle_review(self, code, modifiers),
+            Mode::Diff => crate::input::handle_diff(self, code, modifiers),
         }
     }
 
@@ -2125,6 +2133,13 @@ impl App {
         }
     }
 
+    /// Discard changes for the selected file in the source control panel.
+    pub fn sc_discard_selected(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            self.source_control.discard_selected(repo);
+        }
+    }
+
     /// Commit staged changes from the source control panel.
     pub fn sc_commit(&mut self) {
         if let Some(repo) = &self.git_repo {
@@ -2250,6 +2265,41 @@ impl App {
             self.set_status(format!("Switched to {}", path.display()));
         }
         Ok(())
+    }
+
+    /// Open a side-by-side diff view for the given file (relative to repo root).
+    ///
+    /// Compares the HEAD version against the working tree version.
+    pub fn open_diff_view(&mut self, rel_path: &str) {
+        let workdir = match self.git_repo.as_ref().map(|r| r.workdir().to_path_buf()) {
+            Some(wd) => wd,
+            None => {
+                self.set_status("No git repository");
+                return;
+            }
+        };
+
+        let rel = std::path::Path::new(rel_path);
+        let full_path = workdir.join(rel);
+
+        // Read working tree content.
+        let new_content = match std::fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_status(format!("Cannot read file: {}", e));
+                return;
+            }
+        };
+
+        // Read HEAD content.
+        let old_content = match self.git_repo.as_ref().and_then(|r| r.head_file_content(rel).ok()) {
+            Some(Some(c)) => c,
+            _ => String::new(), // New file — empty old side.
+        };
+
+        let lines = crate::git::aligned_diff_lines(&old_content, &new_content);
+        self.diff_view = Some(DiffView::new(rel_path.to_string(), lines));
+        self.mode = Mode::Diff;
     }
 
     /// Load the file currently selected in the file picker into a tab,

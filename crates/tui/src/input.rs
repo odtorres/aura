@@ -145,6 +145,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             return;
         }
 
+        // Handle pending discard confirmation.
+        if app.source_control.pending_discard.is_some() {
+            match code {
+                KeyCode::Char('y') => {
+                    app.sc_discard_selected();
+                    app.set_status("Changes discarded");
+                }
+                _ => {
+                    app.source_control.pending_discard = None;
+                    app.set_status("Discard cancelled");
+                }
+            }
+            return;
+        }
+
         match code {
             KeyCode::Char('j') | KeyCode::Down => {
                 app.source_control.select_down();
@@ -164,6 +179,15 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Char('u') => {
                 app.sc_unstage_selected();
             }
+            KeyCode::Char('d') => {
+                if app.source_control.focused_section == GitPanelSection::ChangedFiles {
+                    if let Some(entry) = app.source_control.changed.get(app.source_control.selected) {
+                        let path = entry.rel_path.clone();
+                        app.set_status(format!("Discard changes to {}? (y to confirm)", path));
+                        app.source_control.pending_discard = Some(path);
+                    }
+                }
+            }
             KeyCode::Char('c') => {
                 app.sc_commit();
             }
@@ -173,19 +197,9 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.source_control.editing_commit_message = true;
             }
             KeyCode::Enter => {
-                // Open selected file in editor.
+                // Open side-by-side diff view for the selected file.
                 if let Some(rel_path) = app.source_control.selected_path().map(|s| s.to_string()) {
-                    let workdir = app
-                        .git_repo
-                        .as_ref()
-                        .map(|r| r.workdir().to_path_buf());
-                    if let Some(wd) = workdir {
-                        let full_path = wd.join(&rel_path);
-                        if let Err(e) = app.open_file(full_path) {
-                            app.set_status(e);
-                        }
-                        app.source_control_focused = false;
-                    }
+                    app.open_diff_view(&rel_path);
                 }
             }
             KeyCode::Esc => {
@@ -1228,5 +1242,67 @@ fn execute_command(app: &mut App, cmd: &str) {
         other => {
             app.set_status(format!("Unknown command: {}", other));
         }
+    }
+}
+
+/// Handle keys in Diff (side-by-side diff view) mode.
+pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            // Close diff view, return to source control panel.
+            app.diff_view = None;
+            app.mode = Mode::Normal;
+            app.source_control_focused = true;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if let Some(dv) = &mut app.diff_view {
+                dv.scroll_down(1, 20); // viewport height updated at render time
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if let Some(dv) = &mut app.diff_view {
+                dv.scroll_up(1);
+            }
+        }
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(dv) = &mut app.diff_view {
+                dv.scroll_down(10, 20);
+            }
+        }
+        KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(dv) = &mut app.diff_view {
+                dv.scroll_up(10);
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(dv) = &mut app.diff_view {
+                dv.scroll_to_bottom(20);
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(dv) = &mut app.diff_view {
+                dv.scroll_to_top();
+            }
+        }
+        KeyCode::Enter | KeyCode::Char('o') => {
+            // Open the file for editing.
+            let rel_path = app.diff_view.as_ref().map(|dv| dv.file_path.clone());
+            app.diff_view = None;
+            app.mode = Mode::Normal;
+            app.source_control_focused = false;
+            if let Some(rel_path) = rel_path {
+                let workdir = app
+                    .git_repo
+                    .as_ref()
+                    .map(|r| r.workdir().to_path_buf());
+                if let Some(wd) = workdir {
+                    let full_path = wd.join(&rel_path);
+                    if let Err(e) = app.open_file(full_path) {
+                        app.set_status(e);
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }

@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod config;
+pub mod diff_view;
 pub mod embedded_terminal;
 pub mod file_picker;
 pub mod file_tree;

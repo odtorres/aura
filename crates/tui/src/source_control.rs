@@ -77,6 +77,9 @@ pub struct SourceControlPanel {
     pub width: u16,
     /// Whether the user is actively editing the commit message.
     pub editing_commit_message: bool,
+    /// When `Some`, the user pressed `d` and we're waiting for confirmation.
+    /// Holds the relative path of the file to discard.
+    pub pending_discard: Option<String>,
     /// Current branch name.
     pub branch: Option<String>,
     /// Number of commits ahead of upstream.
@@ -96,6 +99,7 @@ impl SourceControlPanel {
             selected: 0,
             width,
             editing_commit_message: false,
+            pending_discard: None,
             branch: None,
             ahead: 0,
             behind: 0,
@@ -238,6 +242,17 @@ impl SourceControlPanel {
                 Ok(hash)
             }
             Err(e) => Err(format!("Commit failed: {}", e)),
+        }
+    }
+
+    /// Discard changes for the currently selected unstaged file.
+    pub fn discard_selected(&mut self, git_repo: &GitRepo) {
+        if let Some(path) = self.pending_discard.take() {
+            if let Err(e) = git_repo.discard_file(&path) {
+                tracing::warn!("Failed to discard {}: {}", path, e);
+                return;
+            }
+            self.refresh(git_repo);
         }
     }
 

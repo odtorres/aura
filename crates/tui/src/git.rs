@@ -65,6 +65,97 @@ pub struct GitStatusEntry {
     pub worktree_status: char,
 }
 
+/// Aligned diff line for side-by-side diff view.
+#[derive(Debug, Clone)]
+pub enum DiffLine {
+    /// Line present in both old and new (matched by LCS).
+    Both(String, String),
+    /// Line only in old (deletion) — shown on left, blank on right.
+    LeftOnly(String),
+    /// Line only in new (addition) — blank on left, shown on right.
+    RightOnly(String),
+}
+
+/// Produce aligned side-by-side diff lines from two text blocks.
+///
+/// Reuses the LCS algorithm from `diff_lines()` to find matched lines,
+/// then interleaves deletions and additions in order.
+pub fn aligned_diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let old_len = old_lines.len();
+    let new_len = new_lines.len();
+
+    if old_len > 5000 || new_len > 5000 {
+        return aligned_diff_simple(&old_lines, &new_lines);
+    }
+
+    // Build LCS table.
+    let mut lcs = vec![vec![0u32; new_len + 1]; old_len + 1];
+    for i in 1..=old_len {
+        for j in 1..=new_len {
+            if old_lines[i - 1] == new_lines[j - 1] {
+                lcs[i][j] = lcs[i - 1][j - 1] + 1;
+            } else {
+                lcs[i][j] = lcs[i - 1][j].max(lcs[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack to collect the diff sequence.
+    let mut result = Vec::new();
+    let mut i = old_len;
+    let mut j = new_len;
+
+    // We collect in reverse, then reverse at the end.
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && old_lines[i - 1] == new_lines[j - 1] {
+            result.push(DiffLine::Both(
+                old_lines[i - 1].to_string(),
+                new_lines[j - 1].to_string(),
+            ));
+            i -= 1;
+            j -= 1;
+        } else if j > 0 && (i == 0 || lcs[i][j - 1] >= lcs[i - 1][j]) {
+            result.push(DiffLine::RightOnly(new_lines[j - 1].to_string()));
+            j -= 1;
+        } else {
+            result.push(DiffLine::LeftOnly(old_lines[i - 1].to_string()));
+            i -= 1;
+        }
+    }
+
+    result.reverse();
+    result
+}
+
+/// Simple aligned diff for large files — line-by-line comparison.
+fn aligned_diff_simple(old_lines: &[&str], new_lines: &[&str]) -> Vec<DiffLine> {
+    let mut result = Vec::new();
+    let max_common = old_lines.len().min(new_lines.len());
+
+    for i in 0..max_common {
+        if old_lines[i] == new_lines[i] {
+            result.push(DiffLine::Both(
+                old_lines[i].to_string(),
+                new_lines[i].to_string(),
+            ));
+        } else {
+            result.push(DiffLine::LeftOnly(old_lines[i].to_string()));
+            result.push(DiffLine::RightOnly(new_lines[i].to_string()));
+        }
+    }
+
+    for line in old_lines.iter().skip(max_common) {
+        result.push(DiffLine::LeftOnly(line.to_string()));
+    }
+    for line in new_lines.iter().skip(max_common) {
+        result.push(DiffLine::RightOnly(line.to_string()));
+    }
+
+    result
+}
+
 /// Git integration handle. Wraps a `gix::Repository`.
 pub struct GitRepo {
     /// The opened repository.
@@ -160,6 +251,27 @@ impl GitRepo {
         }
 
         Ok(())
+    }
+
+    /// Read the HEAD version of a file. Returns `None` if the file is new
+    /// (not in HEAD) or the repo has no commits.
+    pub fn head_file_content(&self, rel_path: &Path) -> anyhow::Result<Option<String>> {
+        let head_commit = match self.repo.head_commit() {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+        let head_tree = head_commit.tree()?;
+        let entry = head_tree.lookup_entry_by_path(rel_path)?;
+        match entry {
+            None => Ok(None),
+            Some(entry) => {
+                let object = entry.object()?;
+                let text = std::str::from_utf8(object.data.as_ref())
+                    .unwrap_or("")
+                    .to_string();
+                Ok(Some(text))
+            }
+        }
     }
 
     /// Invalidate cached diff status (call after buffer edits).
@@ -530,6 +642,22 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Discard unstaged changes for a file by relative path (git restore).
+    pub fn discard_file(&self, rel_path: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["restore", "--", rel_path])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git restore failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
     /// Commit staged changes with the given message. Returns the new commit short hash.
     pub fn commit_staged(&self, message: &str) -> anyhow::Result<String> {
         let output = std::process::Command::new("git")
@@ -778,5 +906,40 @@ mod tests {
         };
         assert!(branch.is_current);
         assert_eq!(branch.name, "feature/test");
+    }
+
+    #[test]
+    fn test_aligned_diff_no_changes() {
+        let lines = aligned_diff_lines("a\nb\nc\n", "a\nb\nc\n");
+        assert_eq!(lines.len(), 3);
+        assert!(matches!(&lines[0], DiffLine::Both(l, _) if l == "a"));
+        assert!(matches!(&lines[1], DiffLine::Both(l, _) if l == "b"));
+        assert!(matches!(&lines[2], DiffLine::Both(l, _) if l == "c"));
+    }
+
+    #[test]
+    fn test_aligned_diff_addition() {
+        let lines = aligned_diff_lines("a\nc\n", "a\nb\nc\n");
+        assert_eq!(lines.len(), 3);
+        assert!(matches!(&lines[0], DiffLine::Both(l, _) if l == "a"));
+        assert!(matches!(&lines[1], DiffLine::RightOnly(r) if r == "b"));
+        assert!(matches!(&lines[2], DiffLine::Both(l, _) if l == "c"));
+    }
+
+    #[test]
+    fn test_aligned_diff_deletion() {
+        let lines = aligned_diff_lines("a\nb\nc\n", "a\nc\n");
+        assert_eq!(lines.len(), 3);
+        assert!(matches!(&lines[0], DiffLine::Both(l, _) if l == "a"));
+        assert!(matches!(&lines[1], DiffLine::LeftOnly(l) if l == "b"));
+        assert!(matches!(&lines[2], DiffLine::Both(l, _) if l == "c"));
+    }
+
+    #[test]
+    fn test_aligned_diff_empty_old() {
+        let lines = aligned_diff_lines("", "a\nb\n");
+        assert_eq!(lines.len(), 2);
+        assert!(matches!(&lines[0], DiffLine::RightOnly(r) if r == "a"));
+        assert!(matches!(&lines[1], DiffLine::RightOnly(r) if r == "b"));
     }
 }

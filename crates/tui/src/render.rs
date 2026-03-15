@@ -2,6 +2,7 @@
 
 use crate::app::{App, ConversationPanel, Mode};
 use crate::config::Theme;
+use crate::diff_view::DiffLine;
 use crate::git::LineStatus;
 use crate::source_control::{GitFileStatus, GitPanelSection, SidebarView};
 use crate::speculative::GhostSuggestion;
@@ -79,91 +80,270 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    // Draw editor border with filename as title.
-    let border_color = if !app.terminal_focused && !app.file_tree_focused && !app.source_control_focused {
-        Color::Cyan
+    // If diff view is active, render it instead of the normal editor.
+    if app.diff_view.is_some() {
+        draw_diff_view(frame, app, editor_area_outer);
+
+        if has_terminal {
+            let inner_h = terminal_area.height.saturating_sub(2);
+            let inner_w = terminal_area.width.saturating_sub(2);
+            if inner_h > 0 && inner_w > 0 {
+                app.terminal.resize(inner_w, inner_h);
+            }
+            draw_terminal(frame, app, terminal_area);
+        }
+
+        draw_status_bar(frame, app, status_area);
+        draw_command_bar(frame, app, command_area);
     } else {
-        Color::DarkGray
-    };
-    let editor_title = format!(" {} ", app.tab().title());
-    let editor_block = Block::default()
-        .borders(Borders::ALL)
-        .title(editor_title)
-        .border_style(Style::default().fg(border_color));
-    let editor_inner = editor_block.inner(editor_area_outer);
-    frame.render_widget(editor_block, editor_area_outer);
+        // Draw editor border with filename as title.
+        let border_color = if !app.terminal_focused && !app.file_tree_focused && !app.source_control_focused {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        };
+        let editor_title = format!(" {} ", app.tab().title());
+        let editor_block = Block::default()
+            .borders(Borders::ALL)
+            .title(editor_title)
+            .border_style(Style::default().fg(border_color));
+        let editor_inner = editor_block.inner(editor_area_outer);
+        frame.render_widget(editor_block, editor_area_outer);
 
-    // Adjust scroll so cursor is visible (using inner dimensions).
-    let gutter_width_usize = 6;
-    let viewport_h = editor_inner.height as usize;
-    let viewport_w = editor_inner.width.saturating_sub(gutter_width_usize as u16) as usize;
-    app.scroll_to_cursor(viewport_h, viewport_w);
+        // Adjust scroll so cursor is visible (using inner dimensions).
+        let gutter_width_usize = 6;
+        let viewport_h = editor_inner.height as usize;
+        let viewport_w = editor_inner.width.saturating_sub(gutter_width_usize as u16) as usize;
+        app.scroll_to_cursor(viewport_h, viewport_w);
 
-    // Pre-compute git line status for visible lines.
-    let git_status: std::collections::HashMap<usize, LineStatus> = {
-        let visible_lines = viewport_h;
-        let mut status = std::collections::HashMap::new();
-        for i in 0..visible_lines {
-            let line_idx = app.tab().scroll_row + i;
-            if let Some(s) = app.git_line_status(line_idx) {
-                status.insert(line_idx, s);
+        // Pre-compute git line status for visible lines.
+        let git_status: std::collections::HashMap<usize, LineStatus> = {
+            let visible_lines = viewport_h;
+            let mut status = std::collections::HashMap::new();
+            for i in 0..visible_lines {
+                let line_idx = app.tab().scroll_row + i;
+                if let Some(s) = app.git_line_status(line_idx) {
+                    status.insert(line_idx, s);
+                }
+            }
+            status
+        };
+
+        draw_editor(frame, app, editor_inner, &git_status);
+
+        if has_proposal {
+            draw_proposal(frame, app, proposal_area);
+        }
+
+        if has_terminal {
+            // Sync the PTY screen size with the actual rendered inner area.
+            let inner_h = terminal_area.height.saturating_sub(2); // borders
+            let inner_w = terminal_area.width.saturating_sub(2);
+            if inner_h > 0 && inner_w > 0 {
+                app.terminal.resize(inner_w, inner_h);
+            }
+            draw_terminal(frame, app, terminal_area);
+        }
+
+        draw_status_bar(frame, app, status_area);
+        draw_command_bar(frame, app, command_area);
+
+        // Render ghost suggestion if present.
+        if let Some(suggestion) = app.current_ghost_suggestion() {
+            draw_ghost_text(frame, app, editor_inner, suggestion);
+        }
+
+        // Render hover popup if present.
+        if let Some(hover_text) = app.tab().hover_info.clone() {
+            draw_hover_popup(frame, app, editor_inner, &hover_text);
+        }
+
+        // Render conversation panel if present.
+        if let Some(panel) = &app.conversation_panel {
+            draw_conversation_panel(frame, editor_inner, panel);
+        }
+
+        // Render file picker overlay if visible.
+        if app.file_picker.visible {
+            draw_file_picker(frame, app, area);
+        }
+
+        // Position the terminal cursor.
+        if app.file_picker.visible {
+            // No editor cursor while the file picker is open.
+        } else if app.terminal_focused && has_terminal {
+            // The PTY manages its own cursor — we render it as reversed text
+            // in draw_terminal, so don't set a hardware cursor here.
+        } else if app.mode != Mode::Review {
+            // Editor cursor (6 = gutter width), positioned inside the border.
+            let tab = app.tab();
+            let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_inner.x + 6;
+            let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_inner.y;
+            if cursor_x < editor_inner.right() && cursor_y < editor_inner.bottom() {
+                frame.set_cursor_position((cursor_x, cursor_y));
             }
         }
-        status
+    }
+}
+
+/// Draw the side-by-side diff view.
+fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
+    let dv = match &app.diff_view {
+        Some(dv) => dv,
+        None => return,
     };
 
-    draw_editor(frame, app, editor_inner, &git_status);
+    // Split horizontally 50/50.
+    let hsplit = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
 
-    if has_proposal {
-        draw_proposal(frame, app, proposal_area);
-    }
+    let left_title = format!(" HEAD: {} ", dv.file_path);
+    let right_title = format!(" Working: {} ", dv.file_path);
 
-    if has_terminal {
-        // Sync the PTY screen size with the actual rendered inner area.
-        let inner_h = terminal_area.height.saturating_sub(2); // borders
-        let inner_w = terminal_area.width.saturating_sub(2);
-        if inner_h > 0 && inner_w > 0 {
-            app.terminal.resize(inner_w, inner_h);
+    let left_block = Block::default()
+        .borders(Borders::ALL)
+        .title(left_title)
+        .border_style(Style::default().fg(Color::Red));
+    let right_block = Block::default()
+        .borders(Borders::ALL)
+        .title(right_title)
+        .border_style(Style::default().fg(Color::Green));
+
+    let left_inner = left_block.inner(hsplit[0]);
+    let right_inner = right_block.inner(hsplit[1]);
+
+    frame.render_widget(left_block, hsplit[0]);
+    frame.render_widget(right_block, hsplit[1]);
+
+    let viewport_height = left_inner.height as usize;
+
+    // Update the diff view's scroll clamp with actual viewport height.
+    if let Some(dv) = &mut app.diff_view {
+        let max_scroll = dv.lines.len().saturating_sub(viewport_height);
+        if dv.scroll > max_scroll {
+            dv.scroll = max_scroll;
         }
-        draw_terminal(frame, app, terminal_area);
     }
 
-    draw_status_bar(frame, app, status_area);
-    draw_command_bar(frame, app, command_area);
+    let dv = match &app.diff_view {
+        Some(dv) => dv,
+        None => return,
+    };
 
-    // Render ghost suggestion if present.
-    if let Some(suggestion) = app.current_ghost_suggestion() {
-        draw_ghost_text(frame, app, editor_inner, suggestion);
+    let scroll = dv.scroll;
+    let mut old_line_no: usize = 0;
+    let mut new_line_no: usize = 0;
+
+    // Count line numbers up to scroll offset.
+    for line in dv.lines.iter().take(scroll) {
+        match line {
+            DiffLine::Both(_, _) => {
+                old_line_no += 1;
+                new_line_no += 1;
+            }
+            DiffLine::LeftOnly(_) => {
+                old_line_no += 1;
+            }
+            DiffLine::RightOnly(_) => {
+                new_line_no += 1;
+            }
+        }
     }
 
-    // Render hover popup if present.
-    if let Some(hover_text) = app.tab().hover_info.clone() {
-        draw_hover_popup(frame, app, editor_inner, &hover_text);
-    }
+    let gutter_width: u16 = 5;
 
-    // Render conversation panel if present.
-    if let Some(panel) = &app.conversation_panel {
-        draw_conversation_panel(frame, editor_inner, panel);
-    }
+    for (i, diff_line) in dv.lines.iter().skip(scroll).take(viewport_height).enumerate() {
+        let y = left_inner.y + i as u16;
+        let left_content_x = left_inner.x + gutter_width;
+        let left_content_w = left_inner.width.saturating_sub(gutter_width) as usize;
+        let right_content_x = right_inner.x + gutter_width;
+        let right_content_w = right_inner.width.saturating_sub(gutter_width) as usize;
 
-    // Render file picker overlay if visible.
-    if app.file_picker.visible {
-        draw_file_picker(frame, app, area);
-    }
+        match diff_line {
+            DiffLine::Both(l, _r) => {
+                old_line_no += 1;
+                new_line_no += 1;
 
-    // Position the terminal cursor.
-    if app.file_picker.visible {
-        // No editor cursor while the file picker is open.
-    } else if app.terminal_focused && has_terminal {
-        // The PTY manages its own cursor — we render it as reversed text
-        // in draw_terminal, so don't set a hardware cursor here.
-    } else if app.mode != Mode::Review {
-        // Editor cursor (6 = gutter width), positioned inside the border.
-        let tab = app.tab();
-        let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_inner.x + 6;
-        let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_inner.y;
-        if cursor_x < editor_inner.right() && cursor_y < editor_inner.bottom() {
-            frame.set_cursor_position((cursor_x, cursor_y));
+                // Left gutter.
+                let left_gutter = format!("{:>4} ", old_line_no);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(left_gutter, Style::default().fg(Color::DarkGray))),
+                    Rect::new(left_inner.x, y, gutter_width, 1),
+                );
+                // Left content.
+                let left_text: String = l.chars().take(left_content_w).collect();
+                frame.render_widget(
+                    Paragraph::new(Span::raw(left_text)),
+                    Rect::new(left_content_x, y, left_inner.width.saturating_sub(gutter_width), 1),
+                );
+
+                // Right gutter.
+                let right_gutter = format!("{:>4} ", new_line_no);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(right_gutter, Style::default().fg(Color::DarkGray))),
+                    Rect::new(right_inner.x, y, gutter_width, 1),
+                );
+                // Right content.
+                let right_text: String = l.chars().take(right_content_w).collect();
+                frame.render_widget(
+                    Paragraph::new(Span::raw(right_text)),
+                    Rect::new(right_content_x, y, right_inner.width.saturating_sub(gutter_width), 1),
+                );
+            }
+            DiffLine::LeftOnly(l) => {
+                old_line_no += 1;
+
+                let del_style = Style::default().fg(Color::White).bg(Color::Red);
+
+                // Left gutter.
+                let left_gutter = format!("{:>4} ", old_line_no);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(left_gutter, Style::default().fg(Color::DarkGray).bg(Color::Red))),
+                    Rect::new(left_inner.x, y, gutter_width, 1),
+                );
+                // Left content — red background, fill full width.
+                let left_text: String = l.chars().take(left_content_w).collect();
+                let padded = format!("{:<width$}", left_text, width = left_content_w);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(padded, del_style)),
+                    Rect::new(left_content_x, y, left_inner.width.saturating_sub(gutter_width), 1),
+                );
+
+                // Right side: empty.
+                let empty = " ".repeat(right_inner.width as usize);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(empty, Style::default().fg(Color::DarkGray))),
+                    Rect::new(right_inner.x, y, right_inner.width, 1),
+                );
+            }
+            DiffLine::RightOnly(r) => {
+                new_line_no += 1;
+
+                let add_style = Style::default().fg(Color::White).bg(Color::Green);
+
+                // Left side: empty.
+                let empty = " ".repeat(left_inner.width as usize);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(empty, Style::default().fg(Color::DarkGray))),
+                    Rect::new(left_inner.x, y, left_inner.width, 1),
+                );
+
+                // Right gutter.
+                let right_gutter = format!("{:>4} ", new_line_no);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(right_gutter, Style::default().fg(Color::DarkGray).bg(Color::Green))),
+                    Rect::new(right_inner.x, y, gutter_width, 1),
+                );
+                // Right content — green background, fill full width.
+                let right_text: String = r.chars().take(right_content_w).collect();
+                let padded = format!("{:<width$}", right_text, width = right_content_w);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(padded, add_style)),
+                    Rect::new(right_content_x, y, right_inner.width.saturating_sub(gutter_width), 1),
+                );
+            }
         }
     }
 }
@@ -1061,6 +1241,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Visual | Mode::VisualLine => Style::default().fg(Color::Black).bg(theme.mode_visual),
         Mode::Intent => Style::default().fg(Color::Black).bg(theme.mode_intent),
         Mode::Review => Style::default().fg(Color::Black).bg(theme.mode_review),
+        Mode::Diff => Style::default().fg(Color::Black).bg(Color::Cyan),
     };
 
     let file_name = app
