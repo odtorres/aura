@@ -27,13 +27,21 @@ fn main() -> anyhow::Result<()> {
 
     // Set up the terminal.
     let mut terminal = ratatui::init();
-    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
 
     // Run the editor.
     let mut app = App::new(buffer);
     let result = app.run(&mut terminal);
 
     // Restore the terminal.
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::event::DisableMouseCapture
+    )?;
     ratatui::restore();
 
     result

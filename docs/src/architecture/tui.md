@@ -21,6 +21,10 @@ The TUI crate handles everything the user sees and interacts with: rendering, in
 | `plugin` | Plugin trait and `PluginManager` |
 | `speculative` | Background AI analysis and ghost suggestions |
 | `semantic_index` | Semantic indexer for dependency graph updates |
+| `tab` | Tab/multi-buffer management |
+| `diff_view` | Side-by-side diff rendering for AI proposals |
+| `conversation_history` | Conversation history panel |
+| `source_control` | Source control sidebar (git staging, commits) |
 
 ## App State Machine
 
@@ -33,6 +37,15 @@ The `App` struct is the central state container. Key fields:
 - `terminal: EmbeddedTerminal` — PTY terminal state
 - `file_tree: FileTree` — sidebar state
 - `file_picker: FilePicker` — fuzzy finder state
+- `tab_manager: TabManager` — multi-buffer tab management
+- `source_control: SourceControlPanel` — git staging panel
+- `conversation_history: ConversationHistoryPanel` — history panel
+- `ai_client` / `conversation_store` — AI integration and history
+- `mcp_server` / `mcp_client` — MCP server and client instances
+- `speculative_engine` — background AI analysis engine
+- `git_repo` — gitoxide repository handle
+- `plugin_manager` — plugin lifecycle management
+- `config` / `theme` — configuration and theme state
 
 ### Mode Enum
 

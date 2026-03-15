@@ -6,7 +6,8 @@ AURA is organized as a Cargo workspace with four crates, each with a clear respo
 
 ```
 editor → tui → core
-           ↘ ai → core
+          ↓
+          ai → core
 ```
 
 - **`core`** has no dependency on any other workspace crate

@@ -74,10 +74,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Draw sidebar if visible (file tree or source control).
     if let Some(tree_area) = file_tree_area {
+        app.file_tree_rect = tree_area;
         match app.sidebar_view {
             SidebarView::Files => draw_file_tree(frame, app, tree_area),
             SidebarView::Git => draw_source_control(frame, app, tree_area),
         }
+    } else {
+        app.file_tree_rect = Rect::default();
     }
 
     // If the conversation history panel is visible, split off the right side.
@@ -96,7 +99,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Draw conversation history panel if visible.
     if let Some(area) = conv_history_area {
+        app.conv_history_rect = area;
         draw_conversation_history(frame, app, area);
+    } else {
+        app.conv_history_rect = Rect::default();
+    }
+
+    // Save panel rects for mouse click-to-focus.
+    app.editor_rect = editor_area;
+    if has_terminal {
+        app.terminal_rect = terminal_area;
+    } else {
+        app.terminal_rect = Rect::default();
     }
 
     // If diff view is active, render it instead of the normal editor.

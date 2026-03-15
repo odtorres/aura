@@ -19,7 +19,8 @@ use aura_core::conversation::{
     ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
 };
 use aura_core::{AuthorId, Buffer, Cursor};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::layout::Rect;
 use ratatui::DefaultTerminal;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -193,6 +194,14 @@ pub struct App {
     pub conversation_history: ConversationHistoryPanel,
     /// Whether the conversation history panel has keyboard focus.
     pub conversation_history_focused: bool,
+    /// Cached panel rects from the last render frame (used for mouse click-to-focus).
+    pub editor_rect: Rect,
+    /// Cached terminal panel rect from the last render frame.
+    pub terminal_rect: Rect,
+    /// Cached file tree / source control sidebar rect from the last render frame.
+    pub file_tree_rect: Rect,
+    /// Cached conversation history panel rect from the last render frame.
+    pub conv_history_rect: Rect,
 }
 
 impl App {
@@ -365,6 +374,10 @@ impl App {
             last_sc_refresh: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
+            editor_rect: Rect::default(),
+            terminal_rect: Rect::default(),
+            file_tree_rect: Rect::default(),
+            conv_history_rect: Rect::default(),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -455,6 +468,11 @@ impl App {
             if event::poll(Duration::from_millis(50))? {
                 match event::read()? {
                     Event::Key(key) => self.handle_key(key.code, key.modifiers),
+                    Event::Mouse(mouse) => {
+                        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                            self.handle_mouse_click(mouse.column, mouse.row);
+                        }
+                    }
                     Event::Resize(_, _) => {}
                     _ => {}
                 }
@@ -2234,6 +2252,42 @@ impl App {
             self.file_tree_focused = false;
             self.source_control_focused = false;
             self.terminal_focused = false;
+        }
+    }
+
+    /// Handle a mouse click by focusing the panel under the cursor.
+    fn handle_mouse_click(&mut self, col: u16, row: u16) {
+        let point_in = |r: Rect| {
+            r.width > 0 && r.height > 0
+                && col >= r.x && col < r.x + r.width
+                && row >= r.y && row < r.y + r.height
+        };
+
+        if self.terminal.visible && point_in(self.terminal_rect) {
+            self.terminal_focused = true;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+            self.conversation_history_focused = false;
+        } else if self.file_tree.visible && point_in(self.file_tree_rect) {
+            self.terminal_focused = false;
+            self.conversation_history_focused = false;
+            if self.sidebar_view == SidebarView::Git {
+                self.source_control_focused = true;
+                self.file_tree_focused = false;
+            } else {
+                self.file_tree_focused = true;
+                self.source_control_focused = false;
+            }
+        } else if self.conversation_history.visible && point_in(self.conv_history_rect) {
+            self.conversation_history_focused = true;
+            self.terminal_focused = false;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+        } else if point_in(self.editor_rect) {
+            self.terminal_focused = false;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+            self.conversation_history_focused = false;
         }
     }
 
