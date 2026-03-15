@@ -186,6 +186,8 @@ pub struct App {
     pub source_control_focused: bool,
     /// Side-by-side diff view (None when not active).
     pub diff_view: Option<DiffView>,
+    /// Last time the source control panel was refreshed.
+    last_sc_refresh: std::time::Instant,
 }
 
 impl App {
@@ -337,6 +339,7 @@ impl App {
             source_control: SourceControlPanel::new(30),
             source_control_focused: false,
             diff_view: None,
+            last_sc_refresh: std::time::Instant::now(),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -414,6 +417,13 @@ impl App {
                 if self.tab().semantic_dirty {
                     self.refresh_semantic_index();
                 }
+            }
+
+            // Auto-refresh source control panel every 2 seconds when visible.
+            if self.sidebar_view == SidebarView::Git
+                && self.last_sc_refresh.elapsed() > Duration::from_secs(2)
+            {
+                self.refresh_source_control();
             }
 
             // Poll for terminal events with a small timeout.
@@ -2126,6 +2136,7 @@ impl App {
         if let Some(repo) = &self.git_repo {
             self.source_control.refresh(repo);
         }
+        self.last_sc_refresh = std::time::Instant::now();
     }
 
     /// Stage the selected file in the source control panel.
