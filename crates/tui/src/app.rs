@@ -7,6 +7,7 @@ use crate::file_picker::FilePicker;
 use crate::file_tree::FileTree;
 use crate::git::{GitRepo, LineStatus};
 use crate::lsp::{Diagnostic, LspEvent};
+use crate::conversation_history::ConversationHistoryPanel;
 use crate::source_control::{SidebarView, SourceControlPanel};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
@@ -188,6 +189,10 @@ pub struct App {
     pub diff_view: Option<DiffView>,
     /// Last time the source control panel was refreshed.
     last_sc_refresh: std::time::Instant,
+    /// Right-side AI conversation history panel.
+    pub conversation_history: ConversationHistoryPanel,
+    /// Whether the conversation history panel has keyboard focus.
+    pub conversation_history_focused: bool,
 }
 
 impl App {
@@ -340,6 +345,8 @@ impl App {
             source_control_focused: false,
             diff_view: None,
             last_sc_refresh: std::time::Instant::now(),
+            conversation_history: ConversationHistoryPanel::new(30),
+            conversation_history_focused: false,
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -2169,6 +2176,45 @@ impl App {
             }
         } else {
             self.set_status("Not in a git repository");
+        }
+    }
+
+    /// Toggle the AI conversation history panel.
+    ///
+    /// If visible and focused → close. If visible but unfocused → focus.
+    /// If hidden → open, refresh, and focus.
+    pub fn toggle_conversation_history(&mut self) {
+        if self.conversation_history.visible {
+            if self.conversation_history_focused {
+                self.conversation_history.visible = false;
+                self.conversation_history_focused = false;
+            } else {
+                self.conversation_history_focused = true;
+                self.file_tree_focused = false;
+                self.source_control_focused = false;
+                self.terminal_focused = false;
+            }
+        } else {
+            self.conversation_history.visible = true;
+            self.refresh_conversation_history();
+            self.conversation_history_focused = true;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+            self.terminal_focused = false;
+        }
+    }
+
+    /// Refresh the conversation history panel from the database.
+    pub fn refresh_conversation_history(&mut self) {
+        if let Some(store) = &self.conversation_store {
+            self.conversation_history.refresh(store);
+        }
+    }
+
+    /// Toggle-expand the selected conversation in the history panel.
+    pub fn conversation_history_toggle_expand(&mut self) {
+        if let Some(store) = &self.conversation_store {
+            self.conversation_history.toggle_expand(store);
         }
     }
 

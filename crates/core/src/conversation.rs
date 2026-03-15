@@ -601,6 +601,48 @@ impl ConversationStore {
         Ok(None)
     }
 
+    /// Retrieve all conversations ordered by most recently updated, with stats.
+    ///
+    /// Returns `(conversation, files_changed_count, message_count)` tuples.
+    pub fn all_conversations_with_stats(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(Conversation, usize, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.file_path, c.start_line, c.end_line, c.git_commit,
+                    c.created_at, c.updated_at, c.summary,
+                    COALESCE(d.file_count, 0) AS files_changed,
+                    COALESCE(m.msg_count, 0) AS message_count
+             FROM conversations c
+             LEFT JOIN (
+                 SELECT conversation_id, COUNT(DISTINCT file_path) AS file_count
+                 FROM edit_decisions GROUP BY conversation_id
+             ) d ON d.conversation_id = c.id
+             LEFT JOIN (
+                 SELECT conversation_id, COUNT(*) AS msg_count
+                 FROM messages GROUP BY conversation_id
+             ) m ON m.conversation_id = c.id
+             ORDER BY c.updated_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            let conv = Conversation {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                start_line: row.get::<_, i64>(2)? as usize,
+                end_line: row.get::<_, i64>(3)? as usize,
+                git_commit: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                summary: row.get(7)?,
+            };
+            let files_changed = row.get::<_, i64>(8)? as usize;
+            let message_count = row.get::<_, i64>(9)? as usize;
+            Ok((conv, files_changed, message_count))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Get lines that have conversation history (for gutter markers).
     pub fn lines_with_conversations(&self, file_path: &str) -> Result<Vec<(usize, usize)>> {
         let mut stmt = self.conn.prepare(
@@ -819,6 +861,45 @@ mod tests {
 
         let lines = store.lines_with_conversations("test.rs").unwrap();
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn test_all_conversations_with_stats() {
+        let store = ConversationStore::in_memory().unwrap();
+
+        // Create two conversations.
+        let conv1 = store.create_conversation("foo.rs", 0, 10, None).unwrap();
+        let conv2 = store.create_conversation("bar.rs", 5, 20, None).unwrap();
+
+        // Add messages to conv1.
+        store
+            .add_message(&conv1.id, MessageRole::HumanIntent, "hello", None)
+            .unwrap();
+        store
+            .add_message(&conv1.id, MessageRole::AiResponse, "hi", Some("claude"))
+            .unwrap();
+
+        // Add a decision to conv1 (file_path = "foo.rs").
+        store
+            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "foo.rs", 0, 5)
+            .unwrap();
+        // Add another decision to conv1 with a different file path.
+        store
+            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "baz.rs", 0, 3)
+            .unwrap();
+
+        let results = store.all_conversations_with_stats(10).unwrap();
+        assert_eq!(results.len(), 2);
+
+        // conv1 was updated more recently (because add_message touches updated_at).
+        // Find conv1 in results.
+        let c1 = results.iter().find(|(c, _, _)| c.id == conv1.id).unwrap();
+        assert_eq!(c1.1, 2); // 2 distinct file paths in edit_decisions
+        assert_eq!(c1.2, 2); // 2 messages
+
+        let c2 = results.iter().find(|(c, _, _)| c.id == conv2.id).unwrap();
+        assert_eq!(c2.1, 0); // no decisions
+        assert_eq!(c2.2, 0); // no messages
     }
 
     #[test]

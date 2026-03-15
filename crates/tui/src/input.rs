@@ -217,6 +217,43 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // When the conversation history panel is focused, route keys to it.
+    if app.conversation_history_focused {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.conversation_history.select_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.conversation_history.select_up();
+            }
+            KeyCode::Enter => {
+                app.conversation_history_toggle_expand();
+            }
+            KeyCode::Char('u') => {
+                app.conversation_history.scroll_messages_up();
+            }
+            KeyCode::Char('d') => {
+                app.conversation_history.scroll_messages_down();
+            }
+            KeyCode::Esc => {
+                app.conversation_history_focused = false;
+            }
+            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.conversation_history_focused = false;
+                app.file_tree.toggle();
+            }
+            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.conversation_history_focused = false;
+                app.toggle_sidebar_view();
+            }
+            KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_conversation_history();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Ctrl+t — toggle terminal visibility and focus.
     if code == KeyCode::Char('t') && modifiers.contains(KeyModifiers::CONTROL) {
         if app.terminal.visible {
@@ -251,6 +288,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         app.file_tree_focused = false;
         app.source_control_focused = true;
+        app.conversation_history_focused = false;
+        return;
+    }
+
+    // Ctrl+h — toggle AI conversation history panel.
+    if code == KeyCode::Char('h') && modifiers.contains(KeyModifiers::CONTROL) {
+        app.toggle_conversation_history();
         return;
     }
 
@@ -558,6 +602,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         // If the sidebar is open but the editor has focus, move focus to the
         // sidebar first instead of closing it.
         KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.conversation_history_focused = false;
             if app.file_tree.visible {
                 let sidebar_focused = app.file_tree_focused || app.source_control_focused;
                 if sidebar_focused {

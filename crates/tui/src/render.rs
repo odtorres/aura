@@ -80,9 +80,28 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
+    // If the conversation history panel is visible, split off the right side.
+    let (editor_area, conv_history_area) = if app.conversation_history.visible {
+        let hsplit = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(app.conversation_history.width),
+            ])
+            .split(editor_area_outer);
+        (hsplit[0], Some(hsplit[1]))
+    } else {
+        (editor_area_outer, None)
+    };
+
+    // Draw conversation history panel if visible.
+    if let Some(area) = conv_history_area {
+        draw_conversation_history(frame, app, area);
+    }
+
     // If diff view is active, render it instead of the normal editor.
     if app.diff_view.is_some() {
-        draw_diff_view(frame, app, editor_area_outer);
+        draw_diff_view(frame, app, editor_area);
 
         if has_terminal {
             let inner_h = terminal_area.height.saturating_sub(2);
@@ -97,7 +116,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_command_bar(frame, app, command_area);
     } else {
         // Draw editor border with filename as title.
-        let border_color = if !app.terminal_focused && !app.file_tree_focused && !app.source_control_focused {
+        let border_color = if !app.terminal_focused && !app.file_tree_focused && !app.source_control_focused && !app.conversation_history_focused {
             Color::Cyan
         } else {
             Color::DarkGray
@@ -107,8 +126,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .borders(Borders::ALL)
             .title(editor_title)
             .border_style(Style::default().fg(border_color));
-        let editor_inner = editor_block.inner(editor_area_outer);
-        frame.render_widget(editor_block, editor_area_outer);
+        let editor_inner = editor_block.inner(editor_area);
+        frame.render_widget(editor_block, editor_area);
 
         // Carve out 1 column on the right for the minimap scrollbar.
         let (editor_content_area, minimap_area) = {
@@ -799,6 +818,129 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw the source control sidebar panel.
+fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
+    let focused = app.conversation_history_focused;
+    let (title, border_color) = if focused {
+        (" AI History [focused] ", Color::Yellow)
+    } else {
+        (" AI History ", Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let panel = &app.conversation_history;
+    let max_width = inner.width as usize;
+    let mut y = inner.y;
+    let end_y = inner.y + inner.height;
+
+    if panel.conversations.is_empty() {
+        let msg = Paragraph::new("No conversations")
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(
+            msg,
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        return;
+    }
+
+    let visible_start = panel.scroll;
+    for (i, entry) in panel.conversations.iter().enumerate().skip(visible_start) {
+        if y >= end_y {
+            break;
+        }
+
+        let is_selected = i == panel.selected;
+        let is_expanded = panel.expanded == Some(i);
+
+        // Conversation header line: summary or file path + badge.
+        let label = entry
+            .summary
+            .as_deref()
+            .unwrap_or(&entry.file_path);
+        let badge = format!(" {}f {}m", entry.files_changed, entry.message_count);
+        let avail = max_width.saturating_sub(badge.len());
+        let truncated: String = label.chars().take(avail).collect();
+        let line = format!("{truncated}{badge}");
+
+        let style = if is_selected && focused {
+            Style::default().fg(Color::Black).bg(Color::Yellow)
+        } else if is_selected {
+            Style::default().fg(Color::Black).bg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let prefix = if is_expanded { "v " } else { "> " };
+        let display: String = format!("{prefix}{line}").chars().take(max_width).collect();
+
+        frame.render_widget(
+            Paragraph::new(display).style(style),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+
+        // Timestamp line.
+        if y < end_y {
+            let ts: String = entry
+                .updated_at
+                .chars()
+                .take(max_width.saturating_sub(2))
+                .collect();
+            let ts_line = format!("  {ts}");
+            frame.render_widget(
+                Paragraph::new(ts_line).style(Style::default().fg(Color::DarkGray)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+
+        // If expanded, show messages.
+        if is_expanded {
+            let msgs = &panel.expanded_messages;
+            for (mi, msg) in msgs.iter().enumerate().skip(panel.message_scroll) {
+                if y >= end_y {
+                    break;
+                }
+                let _ = mi;
+                let role_color = match msg.role {
+                    MessageRole::HumanIntent => Color::Green,
+                    MessageRole::AiResponse => Color::Cyan,
+                    MessageRole::System => Color::DarkGray,
+                };
+                let role_label = format!("  {}: ", msg.role);
+                let content_avail = max_width.saturating_sub(role_label.len());
+                let content: String = msg.content.chars().take(content_avail).collect();
+                let line = format!("{role_label}{content}");
+                let display: String = line.chars().take(max_width).collect();
+
+                frame.render_widget(
+                    Paragraph::new(display).style(Style::default().fg(role_color)),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+                y += 1;
+            }
+            // Separator after messages.
+            if y < end_y {
+                let sep: String = "─".repeat(max_width);
+                frame.render_widget(
+                    Paragraph::new(sep).style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+                y += 1;
+            }
+        }
+    }
+}
+
 fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.source_control_focused;
     let (title, border_color) = if focused {
