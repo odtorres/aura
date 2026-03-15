@@ -309,8 +309,8 @@ The AI thinks ahead. The human reviews when ready.
   - [ ] Verify `brew install aura-editor/tap/aura` works after tap repo is set up
 - [ ] Publish to crates.io: `cargo publish -p aura`
 - [ ] Verify `cargo install aura` works after crates.io publish
+- [ ] detect in the app a new version and show there is a new version available 
 
----
 
 ## Phase 9: UX Improvements & Claude Code Integration (Post-launch)
 
