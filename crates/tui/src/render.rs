@@ -110,10 +110,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let editor_inner = editor_block.inner(editor_area_outer);
         frame.render_widget(editor_block, editor_area_outer);
 
+        // Carve out 1 column on the right for the minimap scrollbar.
+        let (editor_content_area, minimap_area) = {
+            let hsplit = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(editor_inner);
+            (hsplit[0], hsplit[1])
+        };
+
         // Adjust scroll so cursor is visible (using inner dimensions).
         let gutter_width_usize = 6;
-        let viewport_h = editor_inner.height as usize;
-        let viewport_w = editor_inner.width.saturating_sub(gutter_width_usize as u16) as usize;
+        let viewport_h = editor_content_area.height as usize;
+        let viewport_w = editor_content_area.width.saturating_sub(gutter_width_usize as u16) as usize;
         app.scroll_to_cursor(viewport_h, viewport_w);
 
         // Pre-compute git line status for visible lines.
@@ -129,7 +138,48 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             status
         };
 
-        draw_editor(frame, app, editor_inner, &git_status);
+        draw_editor(frame, app, editor_content_area, &git_status);
+
+        // Draw minimap with diagnostic markers.
+        {
+            let theme = &app.theme;
+            let total_lines = app.buffer().line_count();
+            let scroll_row = app.tab().scroll_row;
+
+            // Collect diagnostic markers sorted by priority (info < warning < error).
+            let mut markers: Vec<(usize, Color)> = Vec::new();
+            for d in &app.tab().diagnostics {
+                let color = if d.is_error() {
+                    theme.error
+                } else if d.is_warning() {
+                    theme.warning
+                } else {
+                    theme.info
+                };
+                let priority = if d.is_error() {
+                    2
+                } else if d.is_warning() {
+                    1
+                } else {
+                    0
+                };
+                markers.push((d.range.start.line as usize, color));
+                // Store priority for sorting — we use a stable sort so same-line
+                // markers with higher priority end up last (overwriting lower).
+                let _ = priority; // used implicitly by insertion order below
+            }
+            // Sort: info first, then warnings, then errors so errors overwrite.
+            markers.sort_by_key(|&(line, color)| {
+                let prio = match color {
+                    c if c == theme.error => 2u8,
+                    c if c == theme.warning => 1,
+                    _ => 0,
+                };
+                (prio, line)
+            });
+
+            draw_minimap(frame, minimap_area, &markers, total_lines, scroll_row, viewport_h);
+        }
 
         if has_proposal {
             draw_proposal(frame, app, proposal_area);
@@ -150,17 +200,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
         // Render ghost suggestion if present.
         if let Some(suggestion) = app.current_ghost_suggestion() {
-            draw_ghost_text(frame, app, editor_inner, suggestion);
+            draw_ghost_text(frame, app, editor_content_area, suggestion);
         }
 
         // Render hover popup if present.
         if let Some(hover_text) = app.tab().hover_info.clone() {
-            draw_hover_popup(frame, app, editor_inner, &hover_text);
+            draw_hover_popup(frame, app, editor_content_area, &hover_text);
         }
 
         // Render conversation panel if present.
         if let Some(panel) = &app.conversation_panel {
-            draw_conversation_panel(frame, editor_inner, panel);
+            draw_conversation_panel(frame, editor_content_area, panel);
         }
 
         // Render file picker overlay if visible.
@@ -177,12 +227,85 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         } else if app.mode != Mode::Review {
             // Editor cursor (6 = gutter width), positioned inside the border.
             let tab = app.tab();
-            let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_inner.x + 6;
-            let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_inner.y;
-            if cursor_x < editor_inner.right() && cursor_y < editor_inner.bottom() {
+            let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_content_area.x + 6;
+            let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_content_area.y;
+            if cursor_x < editor_content_area.right() && cursor_y < editor_content_area.bottom() {
                 frame.set_cursor_position((cursor_x, cursor_y));
             }
         }
+    }
+}
+
+/// Map a file line number to a minimap row index.
+///
+/// Returns the row in `[0, minimap_height)` that corresponds to `line` in a
+/// file of `total_lines` lines.  Returns `None` when `total_lines` or
+/// `minimap_height` is zero.
+fn map_line_to_row(line: usize, total_lines: usize, minimap_height: usize) -> Option<usize> {
+    if total_lines == 0 || minimap_height == 0 {
+        return None;
+    }
+    Some(line.min(total_lines.saturating_sub(1)) * minimap_height / total_lines)
+}
+
+/// Draw a 1-column minimap overview scrollbar.
+///
+/// `markers` is a list of `(file_line, color)` pairs sorted by ascending
+/// priority — later entries overwrite earlier ones when they map to the same
+/// minimap row.  `viewport_start` / `viewport_lines` describe the currently
+/// visible region so it can be highlighted.
+fn draw_minimap(
+    frame: &mut Frame,
+    area: Rect,
+    markers: &[(usize, Color)],
+    total_lines: usize,
+    viewport_start: usize,
+    viewport_lines: usize,
+) {
+    let h = area.height as usize;
+    if h == 0 || total_lines == 0 {
+        return;
+    }
+
+    // Build per-row background colours.
+    let dark_bg = Color::Rgb(40, 40, 40);
+    let viewport_bg = Color::Rgb(100, 100, 100);
+
+    let mut row_colors: Vec<Color> = Vec::with_capacity(h);
+
+    // Compute viewport row range.
+    let vp_row_start = map_line_to_row(viewport_start, total_lines, h).unwrap_or(0);
+    let vp_end_line = viewport_start.saturating_add(viewport_lines).min(total_lines);
+    let vp_row_end = if vp_end_line == 0 {
+        0
+    } else {
+        map_line_to_row(vp_end_line.saturating_sub(1), total_lines, h)
+            .unwrap_or(0)
+            .saturating_add(1)
+    };
+
+    for r in 0..h {
+        if r >= vp_row_start && r < vp_row_end {
+            row_colors.push(viewport_bg);
+        } else {
+            row_colors.push(dark_bg);
+        }
+    }
+
+    // Apply markers (lowest priority first, so higher priorities overwrite).
+    for &(line, color) in markers {
+        if let Some(row) = map_line_to_row(line, total_lines, h) {
+            row_colors[row] = color;
+        }
+    }
+
+    // Render each row as a single space with the computed background.
+    for (r, &bg) in row_colors.iter().enumerate() {
+        let cell_area = Rect::new(area.x, area.y + r as u16, 1, 1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(" ", Style::default().bg(bg))),
+            cell_area,
+        );
     }
 }
 
@@ -193,11 +316,16 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
         None => return,
     };
 
-    // Split horizontally 50/50.
+    // Split horizontally: 50/50 for diff panes + 1 column for minimap.
     let hsplit = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+            Constraint::Length(1),
+        ])
         .split(area);
+    let diff_minimap_area = hsplit[2];
 
     let left_title = format!(" HEAD: {} ", dv.file_path);
     let right_title = format!(" Working: {} ", dv.file_path);
@@ -346,6 +474,26 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
+
+    // Draw minimap with diff change markers.
+    let diff_markers: Vec<(usize, Color)> = dv
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| match line {
+            DiffLine::LeftOnly(_) => Some((i, Color::Red)),
+            DiffLine::RightOnly(_) => Some((i, Color::Green)),
+            DiffLine::Both(_, _) => None,
+        })
+        .collect();
+    draw_minimap(
+        frame,
+        diff_minimap_area,
+        &diff_markers,
+        dv.lines.len(),
+        scroll,
+        viewport_height,
+    );
 }
 
 /// Draw the tab bar showing all open tabs.
@@ -1557,5 +1705,49 @@ fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: 
             Style::default().fg(app.theme.ghost),
         ));
         frame.render_widget(hint_line, hint_area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_line_to_row_basic() {
+        // 100-line file, 10-row minimap.
+        assert_eq!(map_line_to_row(0, 100, 10), Some(0));
+        assert_eq!(map_line_to_row(50, 100, 10), Some(5));
+        assert_eq!(map_line_to_row(99, 100, 10), Some(9));
+    }
+
+    #[test]
+    fn map_line_to_row_small_file_large_minimap() {
+        // 5-line file, 20-row minimap.
+        assert_eq!(map_line_to_row(0, 5, 20), Some(0));
+        assert_eq!(map_line_to_row(1, 5, 20), Some(4));
+        assert_eq!(map_line_to_row(4, 5, 20), Some(16));
+    }
+
+    #[test]
+    fn map_line_to_row_zero_total_lines() {
+        assert_eq!(map_line_to_row(0, 0, 10), None);
+    }
+
+    #[test]
+    fn map_line_to_row_zero_minimap_height() {
+        assert_eq!(map_line_to_row(0, 100, 0), None);
+    }
+
+    #[test]
+    fn map_line_to_row_line_beyond_total_clamped() {
+        // Line 200 in a 100-line file should clamp to the last row.
+        assert_eq!(map_line_to_row(200, 100, 10), Some(9));
+    }
+
+    #[test]
+    fn map_line_to_row_single_line_file() {
+        // 1-line file: line 0 maps to row 0 regardless of minimap height.
+        assert_eq!(map_line_to_row(0, 1, 10), Some(0));
+        assert_eq!(map_line_to_row(0, 1, 1), Some(0));
     }
 }
