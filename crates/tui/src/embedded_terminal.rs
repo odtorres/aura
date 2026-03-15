@@ -1050,45 +1050,47 @@ impl EmbeddedTerminal {
             return (scr.cells.clone(), scr.cursor_row, scr.cursor_col);
         }
 
-        // Find the last row with content (non-space) or cursor row.
-        let mut last_active = scr.cursor_row;
-        for (r, row) in scr.cells.iter().enumerate() {
-            if row.iter().any(|c| c.ch != ' ') {
-                last_active = last_active.max(r);
+        // Bottom-anchor: find the last row with content or the cursor row,
+        // then shift everything so that active content sits at the bottom
+        // of the pane (like VS Code's integrated terminal).
+        let active_bottom = {
+            let mut last_content = scr.cursor_row;
+            for (r, row) in scr.cells.iter().enumerate() {
+                if row.iter().any(|c| c.ch != ' ') {
+                    last_content = last_content.max(r);
+                }
             }
-        }
+            last_content
+        };
 
-        let content_rows = last_active + 1;
-        if content_rows >= scr.rows {
-            // Content fills the screen — no adjustment needed.
+        let active_height = active_bottom + 1;
+        if active_height >= scr.rows {
+            // Content fills or exceeds the screen — no shifting needed.
             return (scr.cells.clone(), scr.cursor_row, scr.cursor_col);
         }
 
-        // Shift content down: pad with scrollback/blank lines at the top.
-        let pad = scr.rows - content_rows;
+        let shift = scr.rows - active_height;
         let mut result = Vec::with_capacity(scr.rows);
 
-        // Fill top padding from scrollback if available.
-        let from_scrollback = pad.min(scr.scrollback.len());
-        let blank_count = pad - from_scrollback;
-
-        for _ in 0..blank_count {
-            result.push(vec![TerminalCell::default(); scr.cols]);
+        // Fill the top with scrollback lines (if any), otherwise blank.
+        let sb_len = scr.scrollback.len();
+        let sb_start = sb_len.saturating_sub(shift);
+        for i in 0..shift {
+            if sb_start + i < sb_len {
+                let mut line = scr.scrollback[sb_start + i].clone();
+                line.resize(scr.cols, TerminalCell::default());
+                result.push(line);
+            } else {
+                result.push(vec![TerminalCell::default(); scr.cols]);
+            }
         }
 
-        let sb_start = scr.scrollback.len().saturating_sub(from_scrollback);
-        for line in &scr.scrollback[sb_start..] {
-            let mut padded = line.clone();
-            padded.resize(scr.cols, TerminalCell::default());
-            result.push(padded);
-        }
-
-        // Copy the active content rows.
-        for r in 0..content_rows {
+        // Append the active screen rows.
+        for r in 0..active_height {
             result.push(scr.cells[r].clone());
         }
 
-        let adjusted_cursor_row = scr.cursor_row + pad;
+        let adjusted_cursor_row = scr.cursor_row + shift;
         (result, adjusted_cursor_row, scr.cursor_col)
     }
 

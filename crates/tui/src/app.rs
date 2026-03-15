@@ -212,11 +212,29 @@ impl App {
         let ai_client = AiConfig::from_env().and_then(|config| AnthropicClient::new(config).ok());
 
         // Open conversation database.
+        // Try project-local .aura/ first, then fall back to ~/.aura/.
         let conversation_store = buffer
             .file_path()
             .and_then(|p| p.parent())
             .map(|dir| dir.join(".aura").join("conversations.db"))
-            .and_then(|db_path| ConversationStore::open(db_path).ok());
+            .and_then(|db_path| {
+                tracing::debug!("Trying conversation store at {:?}", db_path);
+                ConversationStore::open(&db_path)
+                    .inspect_err(|e| tracing::warn!("Failed to open conversation store at {:?}: {}", db_path, e))
+                    .ok()
+            })
+            .or_else(|| {
+                let fallback = dirs_path()?.join(".aura").join("conversations.db");
+                tracing::debug!("Trying fallback conversation store at {:?}", fallback);
+                ConversationStore::open(&fallback)
+                    .inspect_err(|e| tracing::warn!("Failed to open fallback conversation store: {}", e))
+                    .ok()
+            });
+        if conversation_store.is_some() {
+            tracing::info!("Conversation store initialized");
+        } else {
+            tracing::warn!("No conversation store available — AI history will not be recorded");
+        }
 
         // Start MCP server.
         let mcp_server = match McpServer::start() {
@@ -509,6 +527,8 @@ impl App {
                         proposal.streaming = false;
                     }
                     self.ai_receiver = None;
+                    // Refresh history panel so the new conversation appears.
+                    self.refresh_conversation_history();
                     // In experimental mode, auto-accept without user review.
                     if self.experimental_mode {
                         self.mode = Mode::Review;
@@ -620,6 +640,17 @@ impl App {
         let start_line = tab.buffer.char_idx_to_cursor(start).row;
         let end_line = tab.buffer.char_idx_to_cursor(end).row;
 
+        // Lazily initialize conversation store if not already set.
+        if self.conversation_store.is_none() {
+            let fallback = dirs_path()
+                .map(|d| d.join(".aura").join("conversations.db"))
+                .and_then(|p| ConversationStore::open(p).ok());
+            if let Some(s) = fallback {
+                tracing::info!("Lazily initialized conversation store via fallback");
+                self.conversation_store = Some(s);
+            }
+        }
+
         if let Some(store) = &self.conversation_store {
             let conv = store
                 .create_conversation(&file_path_str, start_line, end_line, None)
@@ -684,6 +715,7 @@ impl App {
             self.set_status("AI proposal accepted");
         }
         self.mode = Mode::Normal;
+        self.refresh_conversation_history();
     }
 
     /// Reject the current AI proposal.
@@ -699,6 +731,7 @@ impl App {
         }
         self.proposal = None;
         self.mode = Mode::Normal;
+        self.refresh_conversation_history();
         self.set_status("AI proposal rejected");
     }
 

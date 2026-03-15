@@ -241,8 +241,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         if app.file_picker.visible {
             // No editor cursor while the file picker is open.
         } else if app.terminal_focused && has_terminal {
-            // The PTY manages its own cursor — we render it as reversed text
-            // in draw_terminal, so don't set a hardware cursor here.
+            // Position the hardware cursor at the PTY cursor location.
+            let inner = terminal_area.inner(ratatui::layout::Margin { horizontal: 1, vertical: 1 });
+            let (_snap, t_cursor_row, t_cursor_col) = app.terminal.snapshot();
+            let cx = inner.x + t_cursor_col as u16;
+            let cy = inner.y + t_cursor_row as u16;
+            if cx < inner.right() && cy < inner.bottom() {
+                frame.set_cursor_position((cx, cy));
+            }
         } else if app.mode != Mode::Review {
             // Editor cursor (6 = gutter width), positioned inside the border.
             let tab = app.tab();
