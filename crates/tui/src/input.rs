@@ -554,12 +554,27 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
 
-        // Ctrl+n — toggle file tree sidebar and focus
+        // Ctrl+n — toggle file tree sidebar and focus.
+        // If the sidebar is open but the editor has focus, move focus to the
+        // sidebar first instead of closing it.
         KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
             if app.file_tree.visible {
-                app.file_tree_focused = false;
-                app.source_control_focused = false;
-                app.file_tree.toggle();
+                let sidebar_focused = app.file_tree_focused || app.source_control_focused;
+                if sidebar_focused {
+                    // Already focused — close the sidebar.
+                    app.file_tree_focused = false;
+                    app.source_control_focused = false;
+                    app.file_tree.toggle();
+                    let state = if app.file_tree.visible { "on" } else { "off" };
+                    app.set_status(format!("File tree: {state}"));
+                } else {
+                    // Sidebar open but editor focused — move focus to sidebar.
+                    if app.sidebar_view == SidebarView::Files {
+                        app.file_tree_focused = true;
+                    } else {
+                        app.source_control_focused = true;
+                    }
+                }
             } else {
                 app.file_tree.toggle();
                 if app.sidebar_view == SidebarView::Files {
@@ -568,9 +583,9 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.source_control_focused = true;
                     app.refresh_source_control();
                 }
+                let state = if app.file_tree.visible { "on" } else { "off" };
+                app.set_status(format!("File tree: {state}"));
             }
-            let state = if app.file_tree.visible { "on" } else { "off" };
-            app.set_status(format!("File tree: {state}"));
         }
 
         _ => {}
