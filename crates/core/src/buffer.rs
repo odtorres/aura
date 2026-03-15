@@ -13,8 +13,11 @@ use ropey::Rope;
 /// A single recorded edit, tagged with who made it.
 #[derive(Debug, Clone)]
 pub struct Edit {
+    /// What kind of edit was performed.
     pub kind: EditKind,
+    /// Who performed this edit.
     pub author: AuthorId,
+    /// When this edit occurred.
     pub timestamp: std::time::Instant,
 }
 
@@ -468,18 +471,22 @@ impl Buffer {
 
     // --- Accessors ---
 
+    /// Get a reference to the underlying rope.
     pub fn rope(&self) -> &Rope {
         &self.rope
     }
 
+    /// Get the full buffer contents as a String.
     pub fn text(&self) -> String {
         self.rope.to_string()
     }
 
+    /// Get the number of lines in the buffer.
     pub fn line_count(&self) -> usize {
         self.rope.len_lines()
     }
 
+    /// Get a rope slice for the given line index, if it exists.
     pub fn line(&self, idx: usize) -> Option<ropey::RopeSlice<'_>> {
         if idx < self.rope.len_lines() {
             Some(self.rope.line(idx))
@@ -488,22 +495,27 @@ impl Buffer {
         }
     }
 
+    /// Whether the buffer has unsaved changes.
     pub fn is_modified(&self) -> bool {
         self.modified
     }
 
+    /// The file path associated with this buffer, if any.
     pub fn file_path(&self) -> Option<&std::path::Path> {
         self.file_path.as_deref()
     }
 
+    /// Set the file path associated with this buffer.
     pub fn set_file_path(&mut self, path: impl AsRef<std::path::Path>) {
         self.file_path = Some(path.as_ref().to_path_buf());
     }
 
+    /// Total number of characters in the buffer.
     pub fn len_chars(&self) -> usize {
         self.rope.len_chars()
     }
 
+    /// Whether the buffer contains no characters.
     pub fn is_empty(&self) -> bool {
         self.rope.len_chars() == 0
     }

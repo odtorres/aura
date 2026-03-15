@@ -13,14 +13,23 @@ pub type SymbolId = usize;
 /// The kind of code symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
+    /// A free function.
     Function,
+    /// A method on a type.
     Method,
+    /// A struct definition.
     Struct,
+    /// An enum definition.
     Enum,
+    /// A trait definition.
     Trait,
+    /// A module declaration.
     Module,
+    /// An import / use statement.
     Import,
+    /// A test function.
     Test,
+    /// A constant value.
     Constant,
 }
 
@@ -43,10 +52,15 @@ impl std::fmt::Display for SymbolKind {
 /// A code symbol (function, struct, etc.).
 #[derive(Debug, Clone)]
 pub struct Symbol {
+    /// The symbol's name.
     pub name: String,
+    /// What kind of symbol this is.
     pub kind: SymbolKind,
+    /// File where the symbol is defined.
     pub file_path: PathBuf,
+    /// First line of the symbol's span (0-indexed).
     pub line_start: usize,
+    /// Last line of the symbol's span (0-indexed).
     pub line_end: usize,
     /// Parent scope (e.g. "impl Foo" for a method).
     pub scope: Option<String>,
@@ -66,8 +80,11 @@ pub enum RelationKind {
 /// A directed relationship between two symbols.
 #[derive(Debug, Clone)]
 pub struct Relation {
+    /// The symbol initiating the relationship.
     pub source: SymbolId,
+    /// The symbol being referenced.
     pub target: SymbolId,
+    /// What kind of relationship this is.
     pub kind: RelationKind,
 }
 

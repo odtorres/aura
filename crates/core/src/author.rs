@@ -16,22 +16,27 @@ pub enum AuthorId {
 }
 
 impl AuthorId {
+    /// Create a human author ID.
     pub fn human() -> Self {
         Self::Human
     }
 
+    /// Create an AI agent author ID.
     pub fn ai(name: impl Into<String>) -> Self {
         Self::Ai(name.into())
     }
 
+    /// Returns true if this is the human author.
     pub fn is_human(&self) -> bool {
         matches!(self, Self::Human)
     }
 
+    /// Returns true if this is an AI agent author.
     pub fn is_ai(&self) -> bool {
         matches!(self, Self::Ai(_))
     }
 
+    /// Human-readable name ("you" or the agent name).
     pub fn display_name(&self) -> &str {
         match self {
             Self::Human => "you",
@@ -49,6 +54,7 @@ impl std::fmt::Display for AuthorId {
 /// Metadata about an author for display in the UI.
 #[derive(Debug, Clone)]
 pub struct Author {
+    /// The underlying author identifier.
     pub id: AuthorId,
     /// Color hint for the TUI (e.g., gutter markers).
     pub color: AuthorColor,
@@ -64,6 +70,7 @@ pub enum AuthorColor {
 }
 
 impl Author {
+    /// Create an Author representing the human user.
     pub fn human() -> Self {
         Self {
             id: AuthorId::Human,
@@ -71,6 +78,7 @@ impl Author {
         }
     }
 
+    /// Create an Author representing an AI agent.
     pub fn ai(name: impl Into<String>) -> Self {
         Self {
             id: AuthorId::ai(name),

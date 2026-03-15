@@ -40,10 +40,15 @@ fn chrono_now() -> String {
 /// The editing mode — vim-inspired but simplified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
+    /// Default mode for navigation and commands.
     Normal,
+    /// Text insertion mode.
     Insert,
+    /// Command-line input mode (`:` commands).
     Command,
+    /// Character-wise visual selection mode.
     Visual,
+    /// Line-wise visual selection mode.
     VisualLine,
     /// User is typing a natural-language intent for the AI.
     Intent,
@@ -99,9 +104,13 @@ pub struct ConversationPanel {
 pub struct App {
     /// Tab manager holding all open editor buffers.
     pub tabs: TabManager,
+    /// Current editing mode.
     pub mode: Mode,
+    /// When true, the event loop will exit.
     pub should_quit: bool,
+    /// Text buffer for command-mode input.
     pub command_input: String,
+    /// Transient message shown in the status bar.
     pub status_message: Option<String>,
     /// Yank register (clipboard).
     pub register: Option<String>,
