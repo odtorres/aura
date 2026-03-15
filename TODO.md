@@ -382,11 +382,11 @@ When working on this project with Claude Code:
 
 ---
 
-## Open Questions
+## Open Questions (Resolved & Remaining)
 
-- [ ] Should the CRDT layer sit between the rope and the renderer, or wrap the rope?
-- [ ] Automerge vs Yrs (Yjs) — need to benchmark both for this use case
-- [ ] Lua vs WASM for the future plugin system — Lua is simpler, WASM is more universal
-- [ ] How aggressive should the speculative execution be by default?
-- [ ] Should AURA support Vim emulation deeply, or define its own keybinding paradigm?
+- [x] Should the CRDT layer sit between the rope and the renderer, or wrap the rope? → **Decided: CRDT wraps the rope** (`crdt.rs` CrdtDoc wraps Buffer)
+- [x] Automerge vs Yrs (Yjs) — need to benchmark both for this use case → **Decided: Automerge** (in Cargo.toml)
+- [x] Lua vs WASM for the future plugin system — Lua is simpler, WASM is more universal → **Decided: Rust trait-based plugin system** (`plugin.rs`)
+- [x] How aggressive should the speculative execution be by default? → **Decided: Configurable via `<leader>g`** (minimal/moderate/proactive)
+- [x] Should AURA support Vim emulation deeply, or define its own keybinding paradigm? → **Decided: Vim-inspired essentials**, not full emulation
 - [ ] How to handle very long conversations — summarize and compact, or paginate?
