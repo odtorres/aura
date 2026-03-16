@@ -137,6 +137,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Backspace => {
                     app.source_control.commit_message.pop();
                 }
+                // Ctrl+V — paste from system clipboard.
+                KeyCode::Char('v') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        if let Ok(text) = clipboard.get_text() {
+                            app.source_control.commit_message.push_str(&text);
+                        }
+                    }
+                }
+                // Ctrl+P — paste from internal yank register.
+                KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(ref text) = app.register {
+                        app.source_control.commit_message.push_str(text);
+                    }
+                }
                 KeyCode::Char(c) => {
                     app.source_control.commit_message.push(c);
                 }
@@ -295,6 +309,59 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Ctrl+h — toggle AI conversation history panel.
     if code == KeyCode::Char('h') && modifiers.contains(KeyModifiers::CONTROL) {
         app.toggle_conversation_history();
+        return;
+    }
+
+    // F1 — open help from any mode.
+    if code == KeyCode::F(1) {
+        app.help.open();
+        return;
+    }
+
+    // Route keys to the help overlay when it is visible.
+    if app.help.visible {
+        match code {
+            KeyCode::Esc => {
+                app.help.back();
+            }
+            KeyCode::Enter => {
+                app.help.enter();
+            }
+            KeyCode::Backspace => {
+                if app.help.in_content_view() {
+                    app.help.back();
+                } else {
+                    app.help.backspace();
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if app.help.in_topics_view() {
+                    app.help.select_down();
+                } else {
+                    app.help.scroll_down();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if app.help.in_topics_view() {
+                    app.help.select_up();
+                } else {
+                    app.help.scroll_up();
+                }
+            }
+            KeyCode::Char('u') if app.help.in_content_view() => {
+                app.help.page_up(15);
+            }
+            KeyCode::Char('d') if app.help.in_content_view() => {
+                app.help.page_down(15);
+            }
+            KeyCode::Char(c)
+                if app.help.in_topics_view()
+                    && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                app.help.type_char(c);
+            }
+            _ => {}
+        }
         return;
     }
 
@@ -596,6 +663,11 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 Ok(_) => app.set_status("Saved"),
                 Err(e) => app.set_status(format!("Error saving: {}", e)),
             }
+        }
+
+        // ? — open help overlay (vim convention).
+        KeyCode::Char('?') => {
+            app.help.open();
         }
 
         // Ctrl+n — toggle file tree sidebar and focus.
@@ -1128,6 +1200,9 @@ fn execute_command(app: &mut App, cmd: &str) {
         "decisions" | "dec" => {
             app.show_recent_decisions();
         }
+        "seed-history" => {
+            app.seed_conversation_history();
+        }
         "undo-tree" | "ut" => {
             app.show_undo_tree();
         }
@@ -1203,6 +1278,18 @@ fn execute_command(app: &mut App, cmd: &str) {
                 app.set_status("No plugins loaded");
             } else {
                 app.set_status(format!("Plugins: {}", names.join(", ")));
+            }
+        }
+        // :help — open help overlay; :help <topic> — open specific topic.
+        "help" => {
+            app.help.open();
+        }
+        _ if cmd.trim().starts_with("help ") => {
+            let topic = cmd.trim().strip_prefix("help ").unwrap_or("").trim();
+            if !topic.is_empty() {
+                app.help.open_topic(topic);
+            } else {
+                app.help.open();
             }
         }
         // :files / :fp — open fuzzy file picker.

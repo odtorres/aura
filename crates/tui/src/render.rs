@@ -251,6 +251,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_file_picker(frame, app, area);
         }
 
+        // Render help overlay if visible.
+        if app.help.visible {
+            draw_help(frame, app, area);
+        }
+
         // Position the terminal cursor.
         if app.file_picker.visible {
             // No editor cursor while the file picker is open.
@@ -923,6 +928,27 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
             y += 1;
         }
 
+        // Git context line (branch @ commit).
+        let git_info = match (entry.branch.as_deref(), entry.git_commit.as_deref()) {
+            (Some(b), Some(c)) => Some(format!("{b} @ {c}")),
+            (Some(b), None) => Some(b.to_string()),
+            (None, Some(c)) => Some(format!("@ {c}")),
+            (None, None) => None,
+        };
+        if let Some(info) = git_info {
+            if y < end_y {
+                let git_line: String = format!("  {info}")
+                    .chars()
+                    .take(max_width)
+                    .collect();
+                frame.render_widget(
+                    Paragraph::new(git_line).style(Style::default().fg(Color::Magenta)),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+                y += 1;
+            }
+        }
+
         // If expanded, show messages.
         if is_expanded {
             let msgs = &panel.expanded_messages;
@@ -1353,6 +1379,190 @@ fn draw_file_picker(frame: &mut Frame, app: &App, area: Rect) {
         let line_widget = Paragraph::new(Span::styled(display, style));
         frame.render_widget(line_widget, Rect::new(inner.x, row_y, inner.width, 1));
     }
+}
+
+/// Draw the help overlay (centered popup).
+fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
+    let width = area.width.min(90);
+    let height = (area.height * 4 / 5).max(10);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup_area);
+
+    if app.help.in_topics_view() {
+        // --- Topics view ---
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Help ")
+            .border_style(Style::default().fg(Color::Cyan));
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        if inner.height < 3 {
+            return;
+        }
+
+        // Search bar.
+        let query_line = format!("> {}", app.help.query);
+        let query_display: String = query_line.chars().take(inner.width as usize).collect();
+        let query_widget = Paragraph::new(Span::styled(
+            query_display,
+            Style::default().fg(Color::Yellow),
+        ));
+        frame.render_widget(query_widget, Rect::new(inner.x, inner.y, inner.width, 1));
+
+        // Hint bar at the bottom.
+        let hint = " ?/F1 open  j/k navigate  Enter view  Esc close ";
+        let hint_y = inner.y + inner.height.saturating_sub(1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+            Rect::new(inner.x, hint_y, inner.width, 1),
+        );
+
+        // Topic list area.
+        let list_y = inner.y + 1;
+        let list_height = inner.height.saturating_sub(3) as usize; // -1 query, -1 blank, -1 hint
+
+        // Build display lines with section headers.
+        let mut display_lines: Vec<(Option<usize>, String, String)> = Vec::new(); // (topic_idx, display, section)
+        let mut last_section = String::new();
+        for (filter_pos, &topic_idx) in app.help.filtered.iter().enumerate() {
+            let topic = &app.help.topics()[topic_idx];
+            if topic.section != last_section {
+                display_lines.push((None, topic.section.clone(), String::new()));
+                last_section = topic.section.clone();
+            }
+            display_lines.push((Some(filter_pos), format!("  {}", topic.title), topic.section.clone()));
+        }
+
+        // Scroll so selected item is visible.
+        let selected_display_idx = display_lines
+            .iter()
+            .position(|(fp, _, _)| *fp == Some(app.help.selected))
+            .unwrap_or(0);
+        let scroll_start = if selected_display_idx >= list_height {
+            selected_display_idx - list_height + 1
+        } else {
+            0
+        };
+
+        for (i, (filter_pos, text, _)) in display_lines
+            .iter()
+            .enumerate()
+            .skip(scroll_start)
+            .take(list_height)
+        {
+            let row_y = list_y + (i - scroll_start) as u16;
+            let style = if filter_pos.is_none() {
+                // Section header.
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if *filter_pos == Some(app.help.selected) {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let display: String = text.chars().take(inner.width as usize).collect();
+            frame.render_widget(
+                Paragraph::new(Span::styled(display, style)),
+                Rect::new(inner.x, row_y, inner.width, 1),
+            );
+        }
+    } else {
+        // --- Content view ---
+        let title = app
+            .help
+            .current_topic()
+            .map(|t| format!(" {} ", t.title))
+            .unwrap_or_else(|| " Help ".to_string());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(Color::Cyan));
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        if inner.height < 3 {
+            return;
+        }
+
+        // Hint bar at the bottom.
+        let hint = " Esc back  j/k scroll  u/d page ";
+        let hint_y = inner.y + inner.height.saturating_sub(1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+            Rect::new(inner.x, hint_y, inner.width, 1),
+        );
+
+        // Content area.
+        let content_height = inner.height.saturating_sub(1) as usize; // -1 for hint bar
+
+        if let Some(topic) = app.help.current_topic() {
+            let total = topic.rendered.len();
+            let scroll = app.help.scroll;
+
+            // Scroll indicator.
+            if total > content_height {
+                let pct = if total > 0 {
+                    (scroll * 100) / total.saturating_sub(1)
+                } else {
+                    0
+                };
+                let indicator = format!("{pct}%");
+                let ind_x = inner.x + inner.width.saturating_sub(indicator.len() as u16 + 1);
+                frame.render_widget(
+                    Paragraph::new(Span::styled(
+                        indicator,
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Rect::new(ind_x, hint_y, inner.width, 1),
+                );
+            }
+
+            for (i, line) in topic
+                .rendered
+                .iter()
+                .skip(scroll)
+                .take(content_height)
+                .enumerate()
+            {
+                let row_y = inner.y + i as u16;
+                // Truncate spans to fit width.
+                let truncated = truncate_line(line, inner.width as usize);
+                frame.render_widget(
+                    Paragraph::new(truncated),
+                    Rect::new(inner.x, row_y, inner.width, 1),
+                );
+            }
+        }
+    }
+}
+
+/// Truncate a ratatui line to fit within `max_width` columns.
+fn truncate_line<'a>(line: &ratatui::text::Line<'a>, max_width: usize) -> ratatui::text::Line<'a> {
+    let mut remaining = max_width;
+    let mut spans = Vec::new();
+    for span in &line.spans {
+        if remaining == 0 {
+            break;
+        }
+        let content = span.content.as_ref();
+        if content.len() <= remaining {
+            spans.push(span.clone());
+            remaining -= content.len();
+        } else {
+            let truncated: String = content.chars().take(remaining).collect();
+            remaining = 0;
+            spans.push(Span::styled(truncated, span.style));
+        }
+    }
+    ratatui::text::Line::from(spans)
 }
 
 /// Map an AuthorId to a terminal color using the theme.

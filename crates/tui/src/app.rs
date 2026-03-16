@@ -5,6 +5,7 @@ use crate::diff_view::DiffView;
 use crate::embedded_terminal::EmbeddedTerminal;
 use crate::file_picker::FilePicker;
 use crate::file_tree::FileTree;
+use crate::help::HelpOverlay;
 use crate::git::{GitRepo, LineStatus};
 use crate::lsp::{Diagnostic, LspEvent};
 use crate::conversation_history::ConversationHistoryPanel;
@@ -14,7 +15,7 @@ use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::plugin::PluginManager;
 use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
 use crate::tab::{EditorTab, TabManager};
-use aura_ai::{estimate_tokens, AiConfig, AiEvent, AnthropicClient, EditorContext, Message};
+use aura_ai::{estimate_tokens, AiBackend, AiConfig, AiEvent, EditorContext, Message};
 use aura_core::conversation::{
     ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
 };
@@ -124,8 +125,8 @@ pub struct App {
     pub intent_input: String,
     /// Active AI proposal for review.
     pub proposal: Option<AiProposal>,
-    /// AI client (None if no API key is configured).
-    ai_client: Option<AnthropicClient>,
+    /// AI backend (None if neither API key nor Claude Code CLI is available).
+    ai_client: Option<AiBackend>,
     /// Receiver for streaming AI events.
     ai_receiver: Option<mpsc::Receiver<AiEvent>>,
     /// Whether `g` was pressed (waiting for second key: `g`→top, `d`→definition).
@@ -178,6 +179,8 @@ pub struct App {
     pub file_tree_focused: bool,
     /// Fuzzy file picker overlay.
     pub file_picker: FilePicker,
+    /// In-editor help overlay.
+    pub help: HelpOverlay,
     /// File tree sidebar.
     pub file_tree: FileTree,
     /// Which sidebar view is active (Files or Git).
@@ -218,32 +221,8 @@ impl App {
         let theme = crate::config::resolve_theme(&config.theme, config_table.as_ref());
         tracing::info!("Loaded config, theme: {}", theme.name);
 
-        let ai_client = AiConfig::from_env().and_then(|config| AnthropicClient::new(config).ok());
+        let ai_client = AiBackend::auto_detect();
 
-        // Open conversation database.
-        // Try project-local .aura/ first, then fall back to ~/.aura/.
-        let conversation_store = buffer
-            .file_path()
-            .and_then(|p| p.parent())
-            .map(|dir| dir.join(".aura").join("conversations.db"))
-            .and_then(|db_path| {
-                tracing::debug!("Trying conversation store at {:?}", db_path);
-                ConversationStore::open(&db_path)
-                    .inspect_err(|e| tracing::warn!("Failed to open conversation store at {:?}: {}", db_path, e))
-                    .ok()
-            })
-            .or_else(|| {
-                let fallback = dirs_path()?.join(".aura").join("conversations.db");
-                tracing::debug!("Trying fallback conversation store at {:?}", fallback);
-                ConversationStore::open(&fallback)
-                    .inspect_err(|e| tracing::warn!("Failed to open fallback conversation store: {}", e))
-                    .ok()
-            });
-        if conversation_store.is_some() {
-            tracing::info!("Conversation store initialized");
-        } else {
-            tracing::warn!("No conversation store available — AI history will not be recorded");
-        }
 
         // Start MCP server.
         let mcp_server = match McpServer::start() {
@@ -276,6 +255,41 @@ impl App {
                 repo.workdir(),
                 repo.current_branch().unwrap_or_else(|| "detached".into())
             );
+        }
+
+        // Open conversation database.
+        // Priority: git workdir .aura/ → cwd .aura/ → ~/.aura/ (global fallback).
+        let conversation_store = git_repo
+            .as_ref()
+            .map(|r| r.workdir().join(".aura").join("conversations.db"))
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|cwd| cwd.join(".aura").join("conversations.db"))
+            })
+            .and_then(|db_path| {
+                tracing::debug!("Trying project-local conversation store at {:?}", db_path);
+                ConversationStore::open(&db_path)
+                    .inspect_err(|e| tracing::warn!("Failed to open conversation store at {:?}: {}", db_path, e))
+                    .ok()
+            })
+            .or_else(|| {
+                let fallback = dirs_path()?.join(".aura").join("conversations.db");
+                tracing::debug!("Trying global fallback conversation store at {:?}", fallback);
+                ConversationStore::open(&fallback)
+                    .inspect_err(|e| tracing::warn!("Failed to open fallback conversation store: {}", e))
+                    .ok()
+            });
+        if let Some(ref store) = conversation_store {
+            match store.all_conversations_with_stats(1) {
+                Ok(existing) => tracing::info!(
+                    "Conversation store initialized ({} existing conversations)",
+                    existing.len()
+                ),
+                Err(e) => tracing::warn!("Conversation store opened but query failed: {e}"),
+            }
+        } else {
+            tracing::warn!("No conversation store available — AI history will not be recorded");
         }
 
         // Initialize speculative engine (reuses AI config).
@@ -366,6 +380,7 @@ impl App {
             terminal_focused: false,
             file_tree_focused: false,
             file_picker: FilePicker::new(terminal_cwd.clone()),
+            help: HelpOverlay::new(),
             file_tree: FileTree::new(terminal_cwd),
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
@@ -381,6 +396,12 @@ impl App {
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
+
+        // Show AI backend status on startup.
+        if let Some(ref backend) = app.ai_client {
+            app.status_message = Some(format!("AI ready ({})", backend.label()));
+        }
+
         app
     }
 
@@ -533,11 +554,19 @@ impl App {
                     if let (Some(store), Some(conv_id)) =
                         (&self.conversation_store, &self.active_conversation)
                     {
-                        let _ = store.add_message(
+                        if let Err(e) = store.add_message(
                             conv_id,
                             MessageRole::AiResponse,
                             &full_text,
                             Some("claude"),
+                        ) {
+                            tracing::warn!("Failed to log AI response: {e}");
+                        }
+                    } else {
+                        tracing::warn!(
+                            "Cannot log AI response: store={} conv={}",
+                            self.conversation_store.is_some(),
+                            self.active_conversation.is_some()
                         );
                     }
                     if let Some(proposal) = &mut self.proposal {
@@ -570,8 +599,24 @@ impl App {
                     self.ai_receiver = None;
                     if let Some(proposal) = &mut self.proposal {
                         if !proposal.proposed_text.is_empty() {
+                            // Save the AI response that was accumulated via Token
+                            // events — the Done event may not have been delivered
+                            // before the sender dropped.
+                            if let (Some(store), Some(conv_id)) =
+                                (&self.conversation_store, &self.active_conversation)
+                            {
+                                if let Err(e) = store.add_message(
+                                    conv_id,
+                                    MessageRole::AiResponse,
+                                    &proposal.proposed_text,
+                                    Some("claude"),
+                                ) {
+                                    tracing::warn!("Failed to log AI response on disconnect: {e}");
+                                }
+                            }
                             proposal.streaming = false;
                             self.mode = Mode::Review;
+                            self.refresh_conversation_history();
                             self.set_status("AI proposal ready — a: accept, r: reject");
                         } else {
                             self.proposal = None;
@@ -587,14 +632,16 @@ impl App {
 
     /// Send an intent to the AI.
     pub fn send_intent(&mut self, intent: &str) {
-        let client = match &self.ai_client {
-            Some(c) => c,
-            None => {
-                self.set_status("No API key configured. Set ANTHROPIC_API_KEY");
-                self.mode = Mode::Normal;
-                return;
-            }
-        };
+        if self.ai_client.is_none() {
+            self.set_status("No AI backend available. Set ANTHROPIC_API_KEY or install Claude Code CLI");
+            self.mode = Mode::Normal;
+            return;
+        }
+
+        // Ensure conversation store is ready before we borrow ai_client.
+        self.ensure_conversation_store();
+
+        let client = self.ai_client.as_ref().unwrap();
 
         // Build context with semantic info and LSP diagnostics.
         let selection = self.visual_selection_range();
@@ -658,29 +705,35 @@ impl App {
         let start_line = tab.buffer.char_idx_to_cursor(start).row;
         let end_line = tab.buffer.char_idx_to_cursor(end).row;
 
-        // Lazily initialize conversation store if not already set.
-        if self.conversation_store.is_none() {
-            let fallback = dirs_path()
-                .map(|d| d.join(".aura").join("conversations.db"))
-                .and_then(|p| ConversationStore::open(p).ok());
-            if let Some(s) = fallback {
-                tracing::info!("Lazily initialized conversation store via fallback");
-                self.conversation_store = Some(s);
-            }
-        }
-
+        let (branch, commit) = self.git_context();
         if let Some(store) = &self.conversation_store {
-            let conv = store
-                .create_conversation(&file_path_str, start_line, end_line, None)
-                .ok();
-            if let Some(ref conv) = conv {
-                let _ = store.add_message(&conv.id, MessageRole::HumanIntent, intent, None);
-                let intent_rec = store
-                    .record_intent(&conv.id, intent, &file_path_str, start_line, end_line)
-                    .ok();
-                self.active_intent_id = intent_rec.map(|i| i.id);
-                self.active_conversation = Some(conv.id.clone());
+            match store.create_conversation(&file_path_str, start_line, end_line, commit.as_deref(), branch.as_deref()) {
+                Ok(conv) => {
+                    if let Err(e) =
+                        store.add_message(&conv.id, MessageRole::HumanIntent, intent, None)
+                    {
+                        tracing::warn!("Failed to log human intent message: {e}");
+                    }
+                    let intent_rec = store
+                        .record_intent(&conv.id, intent, &file_path_str, start_line, end_line)
+                        .ok();
+                    self.active_intent_id = intent_rec.map(|i| i.id);
+                    self.active_conversation = Some(conv.id.clone());
+                    tracing::info!(
+                        "Created conversation {} for '{}'",
+                        conv.id,
+                        file_path_str
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to create conversation for '{}': {e}",
+                        file_path_str
+                    );
+                }
             }
+        } else {
+            tracing::warn!("No conversation store — AI history will not be saved");
         }
 
         // Compute token estimate for the status bar display.
@@ -864,7 +917,8 @@ impl App {
                 .buffer
                 .char_idx_to_cursor(end.min(tab.buffer.len_chars()))
                 .row;
-            let _ = store.log_decision(
+            let (branch, commit) = self.git_context();
+            if let Err(e) = store.log_decision(
                 conv_id,
                 self.active_intent_id.as_deref(),
                 decision,
@@ -873,7 +927,11 @@ impl App {
                 &file_path,
                 start_line,
                 end_line,
-            );
+                commit.as_deref(),
+                branch.as_deref(),
+            ) {
+                tracing::warn!("Failed to log edit decision: {e}");
+            }
         }
     }
 
@@ -1309,9 +1367,25 @@ impl App {
             None => return,
         };
 
+        let mut needs_history_refresh = false;
         for req in requests {
+            // Track whether this action may have modified conversation history.
+            let modifies_history = matches!(
+                &req.action,
+                McpAction::ReadBuffer { .. }
+                    | McpAction::EditBuffer { .. }
+                    | McpAction::LogConversation { .. }
+                    | McpAction::RegisterAgent { .. }
+                    | McpAction::RegisterAgentWithRole { .. }
+            );
             let response = self.handle_mcp_action(&req.action);
+            if modifies_history && response.success {
+                needs_history_refresh = true;
+            }
             let _ = req.response_tx.send(response);
+        }
+        if needs_history_refresh {
+            self.refresh_conversation_history();
         }
     }
 
@@ -1334,16 +1408,40 @@ impl App {
                     }
                 }
 
-                McpAppResponse {
+                let file_path = tab.buffer.file_path().map(|p| p.display().to_string());
+
+                // Automatically include selection context when present.
+                let selection = self.visual_selection_range().map(|(s, e)| {
+                    let tab = self.tab();
+                    let text = tab.buffer.rope().slice(s..e).to_string();
+                    let start_cursor = tab.buffer.char_idx_to_cursor(s);
+                    let end_cursor = tab.buffer.char_idx_to_cursor(e);
+                    serde_json::json!({
+                        "text": text,
+                        "start": { "line": start_cursor.row, "col": start_cursor.col },
+                        "end": { "line": end_cursor.row, "col": end_cursor.col },
+                    })
+                });
+
+                let response = McpAppResponse {
                     success: true,
                     data: serde_json::json!({
                         "content": lines.join(""),
                         "start_line": start,
                         "end_line": end,
                         "total_lines": total,
-                        "file_path": tab.buffer.file_path().map(|p| p.display().to_string()),
+                        "file_path": file_path,
+                        "selection": selection,
                     }),
+                };
+
+                // Auto-create a conversation if none is active, so MCP reads
+                // are tracked in the AI History panel.
+                if self.active_conversation.is_none() {
+                    self.ensure_mcp_conversation(start, end.saturating_sub(1));
                 }
+
+                response
             }
             McpAction::EditBuffer {
                 start_line,
@@ -1388,11 +1486,18 @@ impl App {
                     let end_l = end_line.unwrap_or(*start_line);
                     let conv = store
                         .conversations_for_range(&file_path, *start_line, end_l)
+                        .inspect_err(|e| {
+                            tracing::warn!("Failed to query conversations for range: {e}")
+                        })
                         .ok()
                         .and_then(|v| v.into_iter().next())
                         .or_else(|| {
+                            let (branch, commit) = self.git_context();
                             store
-                                .create_conversation(&file_path, *start_line, end_l, None)
+                                .create_conversation(&file_path, *start_line, end_l, commit.as_deref(), branch.as_deref())
+                                .inspect_err(|e| {
+                                    tracing::error!("Failed to create MCP conversation: {e}")
+                                })
                                 .ok()
                         });
                     if let Some(c) = conv {
@@ -1405,13 +1510,17 @@ impl App {
                             "[{}] Edited lines {}-{}: {}",
                             agent_id, start_line, end_l, preview
                         );
-                        let _ = store.add_message(
+                        if let Err(e) = store.add_message(
                             &c.id,
                             MessageRole::AiResponse,
                             &content,
                             Some(agent_id),
-                        );
+                        ) {
+                            tracing::warn!("Failed to log MCP edit message: {e}");
+                        }
                     }
+                } else {
+                    tracing::warn!("No conversation store for MCP edit logging");
                 }
 
                 // Show agent edit in status bar, including role if available.
@@ -1481,6 +1590,19 @@ impl App {
                 let total_lines = tab.buffer.line_count();
                 let semantic = self.semantic_context_for_ai();
 
+                // Automatically include selection context when present.
+                let selection = self.visual_selection_range().map(|(s, e)| {
+                    let tab = self.tab();
+                    let text = tab.buffer.rope().slice(s..e).to_string();
+                    let start_cursor = tab.buffer.char_idx_to_cursor(s);
+                    let end_cursor = tab.buffer.char_idx_to_cursor(e);
+                    serde_json::json!({
+                        "text": text,
+                        "start": { "line": start_cursor.row, "col": start_cursor.col },
+                        "end": { "line": end_cursor.row, "col": end_cursor.col },
+                    })
+                });
+
                 McpAppResponse {
                     success: true,
                     data: serde_json::json!({
@@ -1493,6 +1615,7 @@ impl App {
                         "file_path": file_path,
                         "total_lines": total_lines,
                         "semantic_context": semantic,
+                        "selection": selection,
                     }),
                 }
             }
@@ -1559,6 +1682,7 @@ impl App {
                 let registered = self.agent_registry.register(name);
                 if registered {
                     self.set_status(format!("Agent '{}' connected", name));
+                    self.log_agent_session(name, None);
                 }
                 McpAppResponse {
                     success: registered,
@@ -1574,6 +1698,7 @@ impl App {
                 if registered {
                     let role_str = role.as_deref().unwrap_or("unassigned");
                     self.set_status(format!("Agent '{}' connected (role: {})", name, role_str));
+                    self.log_agent_session(name, role.as_deref());
                 }
                 McpAppResponse {
                     success: registered,
@@ -1658,22 +1783,14 @@ impl App {
                 line_start,
                 line_end,
             } => {
+                self.ensure_conversation_store();
                 let store = match &self.conversation_store {
                     Some(s) => s,
                     None => {
-                        // Try to initialize a conversation store in ~/.aura/ as fallback.
-                        let fallback = dirs_path()
-                            .map(|d| d.join("conversations.db"))
-                            .and_then(|p| ConversationStore::open(p).ok());
-                        if let Some(s) = fallback {
-                            self.conversation_store = Some(s);
-                            self.conversation_store.as_ref().unwrap()
-                        } else {
-                            return McpAppResponse {
-                                success: false,
-                                data: serde_json::json!({ "error": "No conversation store available" }),
-                            };
-                        }
+                        return McpAppResponse {
+                            success: false,
+                            data: serde_json::json!({ "error": "No conversation store available" }),
+                        };
                     }
                 };
 
@@ -1698,7 +1815,10 @@ impl App {
                     .conversations_for_range(&file_path, start, end)
                     .ok()
                     .and_then(|v| v.into_iter().next())
-                    .or_else(|| store.create_conversation(&file_path, start, end, None).ok());
+                    .or_else(|| {
+                        let (branch, commit) = self.git_context();
+                        store.create_conversation(&file_path, start, end, commit.as_deref(), branch.as_deref()).ok()
+                    });
 
                 match conv {
                     Some(c) => {
@@ -2017,6 +2137,14 @@ impl App {
         self.git_repo.as_ref()?.current_branch()
     }
 
+    /// Get the current git branch and commit hash for conversation context.
+    fn git_context(&self) -> (Option<String>, Option<String>) {
+        match &self.git_repo {
+            Some(repo) => (repo.current_branch(), repo.head_short()),
+            None => (None, None),
+        }
+    }
+
     /// Commit the current file with a message.
     pub fn git_commit(&self, message: &str) {
         let file_path = match self.tab().buffer.file_path() {
@@ -2298,11 +2426,235 @@ impl App {
         }
     }
 
+    /// Seed sample conversations into the database for testing the history panel.
+    ///
+    /// Creates 3 conversations with realistic data (messages, summaries, decisions)
+    /// so the AI History panel can be developed without a live AI backend.
+    pub fn seed_conversation_history(&mut self) {
+        self.ensure_conversation_store();
+        let (branch, commit) = self.git_context();
+
+        let store = match &self.conversation_store {
+            Some(s) => s,
+            None => {
+                self.set_status("Failed to open conversation store");
+                return;
+            }
+        };
+
+        let samples: &[(&str, usize, usize, &str, &[(&str, &str)])] = &[
+            (
+                "src/main.rs",
+                10,
+                25,
+                "Refactor main entry point to use async runtime",
+                &[
+                    ("human_intent", "Refactor the main function to use tokio async runtime instead of blocking calls"),
+                    ("ai_response", "I'll restructure main() to use #[tokio::main] and convert the blocking I/O calls to their async equivalents. The key changes are:\n1. Add tokio::main attribute\n2. Convert file reads to tokio::fs\n3. Wrap the event loop in a select! macro"),
+                ],
+            ),
+            (
+                "src/lib.rs",
+                42,
+                68,
+                "Add error handling for buffer operations",
+                &[
+                    ("human_intent", "Add proper error handling to the buffer insert and delete operations"),
+                    ("ai_response", "I'll replace the unwrap() calls with proper Result propagation using the ? operator and add context via anyhow::Context. This ensures buffer operations never panic in production."),
+                    ("human_intent", "Also add a custom error type for out-of-bounds access"),
+                    ("ai_response", "Added BufferError::OutOfBounds with the range information. All index-based operations now validate bounds before accessing the rope and return this error type."),
+                ],
+            ),
+            (
+                "src/utils.rs",
+                1,
+                15,
+                "Implement word-boundary detection for cursor movement",
+                &[
+                    ("human_intent", "Write a utility function that detects word boundaries for vim-style w/b cursor movement"),
+                    ("ai_response", "Here's a word_boundary_forward() function that handles three categories: whitespace, punctuation, and word characters. It follows vim's definition where a word boundary is a transition between character categories."),
+                ],
+            ),
+        ];
+
+        let mut count = 0usize;
+        for (file_path, start, end, summary, messages) in samples {
+            let conv = match store.create_conversation(
+                file_path,
+                *start,
+                *end,
+                commit.as_deref(),
+                branch.as_deref(),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("seed: failed to create conversation: {e}");
+                    continue;
+                }
+            };
+
+            let _ = store.update_summary(&conv.id, summary);
+
+            for (role_str, content) in *messages {
+                let role = match *role_str {
+                    "human_intent" => MessageRole::HumanIntent,
+                    "ai_response" => MessageRole::AiResponse,
+                    _ => MessageRole::System,
+                };
+                let model = if role == MessageRole::AiResponse {
+                    Some("claude-sonnet-4-20250514")
+                } else {
+                    None
+                };
+                let _ = store.add_message(&conv.id, role, content, model);
+            }
+
+            // Log a sample decision on the first conversation.
+            if count == 0 {
+                let _ = store.log_decision(
+                    &conv.id,
+                    None,
+                    Decision::Accepted,
+                    Some("fn main() {"),
+                    Some("#[tokio::main]\nasync fn main() {"),
+                    file_path,
+                    *start,
+                    *end,
+                    commit.as_deref(),
+                    branch.as_deref(),
+                );
+            } else if count == 1 {
+                let _ = store.log_decision(
+                    &conv.id,
+                    None,
+                    Decision::Rejected,
+                    Some("buffer.insert(pos, text)"),
+                    Some("buffer.try_insert(pos, text)?"),
+                    file_path,
+                    *start,
+                    *end,
+                    commit.as_deref(),
+                    branch.as_deref(),
+                );
+            }
+
+            count += 1;
+        }
+
+        self.refresh_conversation_history();
+
+        // Open the history panel if not already visible.
+        if !self.conversation_history.visible {
+            self.conversation_history.visible = true;
+            self.conversation_history_focused = true;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+            self.terminal_focused = false;
+        }
+
+        self.set_status(format!("Seeded {count} sample conversations"));
+    }
+
+    /// Lazily initialize the conversation store if not already set.
+    ///
+    /// Uses the same priority as initial construction:
+    /// git workdir `.aura/` → cwd `.aura/` → `~/.aura/` (global fallback).
+    fn ensure_conversation_store(&mut self) {
+        if self.conversation_store.is_some() {
+            return;
+        }
+        let db_path = self
+            .git_repo
+            .as_ref()
+            .map(|r| r.workdir().join(".aura").join("conversations.db"))
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|cwd| cwd.join(".aura").join("conversations.db"))
+            })
+            .or_else(|| dirs_path().map(|d| d.join(".aura").join("conversations.db")));
+        if let Some(path) = db_path {
+            match ConversationStore::open(&path) {
+                Ok(s) => {
+                    tracing::info!("Lazily initialized conversation store at {:?}", path);
+                    self.conversation_store = Some(s);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to lazily open conversation store at {:?}: {e}", path);
+                }
+            }
+        }
+    }
+
     /// Toggle-expand the selected conversation in the history panel.
     pub fn conversation_history_toggle_expand(&mut self) {
         if let Some(store) = &self.conversation_store {
             self.conversation_history.toggle_expand(store);
         }
+    }
+
+    /// Ensure an active MCP conversation exists, creating one if needed.
+    fn ensure_mcp_conversation(&mut self, start_line: usize, end_line: usize) {
+        self.ensure_conversation_store();
+
+        if let Some(store) = &self.conversation_store {
+            let file_path = self
+                .tab()
+                .buffer
+                .file_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<scratch>".to_string());
+
+            // Reuse an existing conversation for this range, or create a new one.
+            let conv = store
+                .conversations_for_range(&file_path, start_line, end_line)
+                .ok()
+                .and_then(|v| v.into_iter().next())
+                .or_else(|| {
+                    let (branch, commit) = self.git_context();
+                    store
+                        .create_conversation(&file_path, start_line, end_line, commit.as_deref(), branch.as_deref())
+                        .ok()
+                });
+
+            if let Some(c) = conv {
+                self.active_conversation = Some(c.id);
+                self.refresh_conversation_history();
+            }
+        }
+    }
+
+    /// Log an agent session start as a conversation entry.
+    fn log_agent_session(&mut self, agent_name: &str, role: Option<&str>) {
+        self.ensure_conversation_store();
+
+        if let Some(store) = &self.conversation_store {
+            let file_path = self
+                .tab()
+                .buffer
+                .file_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<scratch>".to_string());
+            let end_line = self.tab().buffer.line_count().saturating_sub(1);
+
+            let (branch, commit) = self.git_context();
+            if let Ok(conv) = store.create_conversation(&file_path, 0, end_line, commit.as_deref(), branch.as_deref()) {
+                let msg = if let Some(r) = role {
+                    format!("Agent '{}' connected (role: {})", agent_name, r)
+                } else {
+                    format!("Agent '{}' connected", agent_name)
+                };
+                let _ = store.add_message(
+                    &conv.id,
+                    MessageRole::System,
+                    &msg,
+                    Some(agent_name),
+                );
+                self.active_conversation = Some(conv.id);
+            }
+        }
+
+        self.refresh_conversation_history();
     }
 
     /// Read the git aura log and display it in the conversation panel.

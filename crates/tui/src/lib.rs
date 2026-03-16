@@ -12,6 +12,7 @@ pub mod embedded_terminal;
 pub mod file_picker;
 pub mod file_tree;
 pub mod git;
+pub mod help;
 pub mod highlight;
 pub mod input;
 pub mod lsp;

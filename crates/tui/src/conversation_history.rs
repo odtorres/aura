@@ -17,6 +17,10 @@ pub struct ConversationEntry {
     pub message_count: usize,
     /// ISO-8601 timestamp of the last update.
     pub updated_at: String,
+    /// Git commit hash at conversation creation time.
+    pub git_commit: Option<String>,
+    /// Git branch name at conversation creation time.
+    pub branch: Option<String>,
 }
 
 /// Persistent right-side panel showing all AI conversations.
@@ -72,6 +76,8 @@ impl ConversationHistoryPanel {
                         files_changed,
                         message_count,
                         updated_at: conv.updated_at,
+                        git_commit: conv.git_commit,
+                        branch: conv.branch,
                     })
                     .collect();
                 self.clamp_selected();
@@ -179,6 +185,8 @@ mod tests {
                 files_changed: 0,
                 message_count: 0,
                 updated_at: String::new(),
+                git_commit: None,
+                branch: None,
             });
         }
 
@@ -195,7 +203,7 @@ mod tests {
     #[test]
     fn test_expand_collapse() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
         store
             .add_message(&conv.id, MessageRole::HumanIntent, "hello", None)
             .unwrap();
@@ -220,8 +228,8 @@ mod tests {
     #[test]
     fn test_refresh() {
         let store = ConversationStore::in_memory().unwrap();
-        store.create_conversation("a.rs", 0, 5, None).unwrap();
-        store.create_conversation("b.rs", 0, 5, None).unwrap();
+        store.create_conversation("a.rs", 0, 5, None, None).unwrap();
+        store.create_conversation("b.rs", 0, 5, None, None).unwrap();
 
         let mut panel = ConversationHistoryPanel::new(30);
         panel.refresh(&store);

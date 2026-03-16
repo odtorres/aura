@@ -7,3 +7,4 @@ Cargo.lock
 /tmp/
 *.log
 /docs/book/
+.aura/

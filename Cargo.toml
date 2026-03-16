@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/tui", "crates/ai", "crates/editor"]
+members = ["crates/core", "crates/tui", "crates/ai", "crates/editor", "crates/bridge"]
 resolver = "2"
 
 [workspace.package]
@@ -49,6 +49,9 @@ gix = { version = "0.70", default-features = false, features = ["basic", "index"
 # Storage
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
+
+# Clipboard
+arboard = "3"
 
 # Terminal emulation
 portable-pty = "0.8"

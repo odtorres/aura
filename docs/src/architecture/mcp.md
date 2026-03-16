@@ -46,6 +46,38 @@ When AURA starts, it:
 
 This allows Claude Code (or any MCP client) running inside AURA's terminal to automatically connect.
 
+## Claude Code Bridge (`aura-mcp-bridge`)
+
+Claude Code communicates with MCP servers over **stdio**, while AURA's MCP server uses **TCP** with Content-Length framing. The `aura-mcp-bridge` binary bridges the two transports:
+
+```
+Claude Code <--stdio--> aura-mcp-bridge <--TCP--> AURA MCP Server
+```
+
+The bridge:
+1. Discovers the running AURA instance via `AURA_MCP_PORT` env var or `~/.aura/mcp.json`
+2. Connects to AURA's TCP MCP server
+3. Forwards Content-Length framed JSON-RPC messages bidirectionally between stdio and TCP
+4. Logs to `~/.aura/bridge.log` (never to stdout, which is the MCP transport)
+
+### Setup
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "aura": {
+      "command": "aura-mcp-bridge"
+    }
+  }
+}
+```
+
+No arguments needed — the bridge auto-discovers the running AURA instance.
+
+See [Claude Code Integration](../user-guide/claude-code.md) for detailed setup instructions.
+
 ## MCP Client
 
 AURA can connect to external MCP servers defined in `aura.toml`:

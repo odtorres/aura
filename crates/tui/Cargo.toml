@@ -22,6 +22,7 @@ toml.workspace = true
 gix.workspace = true
 portable-pty.workspace = true
 vte.workspace = true
+arboard.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

@@ -24,6 +24,8 @@ pub struct Conversation {
     pub end_line: usize,
     /// Git commit hash at conversation creation time.
     pub git_commit: Option<String>,
+    /// Git branch name at conversation creation time.
+    pub branch: Option<String>,
     /// ISO-8601 timestamp when the conversation was created.
     pub created_at: String,
     /// ISO-8601 timestamp of the last update.
@@ -161,6 +163,10 @@ pub struct EditDecision {
     pub end_line: usize,
     /// ISO-8601 timestamp when the decision was made.
     pub created_at: String,
+    /// Git commit hash at decision time.
+    pub git_commit: Option<String>,
+    /// Git branch name at decision time.
+    pub branch: Option<String>,
 }
 
 /// Persistent storage for conversations and edit decisions.
@@ -245,6 +251,17 @@ impl ConversationStore {
             ",
         )?;
 
+        // Backward-compatible migrations for new columns.
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE conversations ADD COLUMN branch TEXT;");
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE edit_decisions ADD COLUMN git_commit TEXT;");
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE edit_decisions ADD COLUMN branch TEXT;");
+
         Ok(())
     }
 
@@ -257,13 +274,14 @@ impl ConversationStore {
         start_line: usize,
         end_line: usize,
         git_commit: Option<&str>,
+        branch: Option<&str>,
     ) -> Result<Conversation> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_iso();
         self.conn.execute(
-            "INSERT INTO conversations (id, file_path, start_line, end_line, git_commit, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, file_path, start_line as i64, end_line as i64, git_commit, now, now],
+            "INSERT INTO conversations (id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, file_path, start_line as i64, end_line as i64, git_commit, branch, now, now],
         )?;
         Ok(Conversation {
             id,
@@ -271,6 +289,7 @@ impl ConversationStore {
             start_line,
             end_line,
             git_commit: git_commit.map(String::from),
+            branch: branch.map(String::from),
             created_at: now.clone(),
             updated_at: now,
             summary: None,
@@ -285,7 +304,7 @@ impl ConversationStore {
         end_line: usize,
     ) -> Result<Vec<Conversation>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, file_path, start_line, end_line, git_commit, created_at, updated_at, summary
+            "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
              FROM conversations
              WHERE file_path = ?1 AND start_line <= ?3 AND end_line >= ?2
              ORDER BY updated_at DESC",
@@ -300,7 +319,7 @@ impl ConversationStore {
     /// Find conversations for a specific file.
     pub fn conversations_for_file(&self, file_path: &str) -> Result<Vec<Conversation>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, file_path, start_line, end_line, git_commit, created_at, updated_at, summary
+            "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
              FROM conversations WHERE file_path = ?1 ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map(params![file_path], row_to_conversation)?;
@@ -310,7 +329,7 @@ impl ConversationStore {
     /// Get a conversation by ID.
     pub fn get_conversation(&self, id: &str) -> Result<Option<Conversation>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, file_path, start_line, end_line, git_commit, created_at, updated_at, summary
+            "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
              FROM conversations WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], row_to_conversation)?;
@@ -439,13 +458,15 @@ impl ConversationStore {
         file_path: &str,
         start_line: usize,
         end_line: usize,
+        git_commit: Option<&str>,
+        branch: Option<&str>,
     ) -> Result<EditDecision> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_iso();
         self.conn.execute(
-            "INSERT INTO edit_decisions (id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![id, conversation_id, intent_id, decision.as_str(), original_text, proposed_text, file_path, start_line as i64, end_line as i64, now],
+            "INSERT INTO edit_decisions (id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at, git_commit, branch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![id, conversation_id, intent_id, decision.as_str(), original_text, proposed_text, file_path, start_line as i64, end_line as i64, now, git_commit, branch],
         )?;
         Ok(EditDecision {
             id,
@@ -458,6 +479,8 @@ impl ConversationStore {
             start_line,
             end_line,
             created_at: now,
+            git_commit: git_commit.map(String::from),
+            branch: branch.map(String::from),
         })
     }
 
@@ -488,10 +511,10 @@ impl ConversationStore {
         let decision_str = decision_filter.map(|d| d.as_str().to_string());
 
         let sql = if decision_str.is_some() {
-            "SELECT id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at
+            "SELECT id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at, git_commit, branch
              FROM edit_decisions WHERE created_at >= ?1 AND decision = ?2 ORDER BY created_at DESC"
         } else {
-            "SELECT id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at
+            "SELECT id, conversation_id, intent_id, decision, original_text, proposed_text, file_path, start_line, end_line, created_at, git_commit, branch
              FROM edit_decisions WHERE created_at >= ?1 ORDER BY created_at DESC"
         };
 
@@ -532,7 +555,7 @@ impl ConversationStore {
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
             "SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, m.model,
-                    c.id, c.file_path, c.start_line, c.end_line, c.git_commit, c.created_at, c.updated_at, c.summary
+                    c.id, c.file_path, c.start_line, c.end_line, c.git_commit, c.branch, c.created_at, c.updated_at, c.summary
              FROM messages m
              JOIN conversations c ON m.conversation_id = c.id
              WHERE m.content LIKE ?1
@@ -554,9 +577,10 @@ impl ConversationStore {
                 start_line: row.get::<_, i64>(8)? as usize,
                 end_line: row.get::<_, i64>(9)? as usize,
                 git_commit: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-                summary: row.get(13)?,
+                branch: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
+                summary: row.get(14)?,
             };
             Ok((msg, conv))
         })?;
@@ -609,7 +633,7 @@ impl ConversationStore {
         limit: usize,
     ) -> Result<Vec<(Conversation, usize, usize)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.id, c.file_path, c.start_line, c.end_line, c.git_commit,
+            "SELECT c.id, c.file_path, c.start_line, c.end_line, c.git_commit, c.branch,
                     c.created_at, c.updated_at, c.summary,
                     COALESCE(d.file_count, 0) AS files_changed,
                     COALESCE(m.msg_count, 0) AS message_count
@@ -632,12 +656,13 @@ impl ConversationStore {
                 start_line: row.get::<_, i64>(2)? as usize,
                 end_line: row.get::<_, i64>(3)? as usize,
                 git_commit: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                summary: row.get(7)?,
+                branch: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                summary: row.get(8)?,
             };
-            let files_changed = row.get::<_, i64>(8)? as usize;
-            let message_count = row.get::<_, i64>(9)? as usize;
+            let files_changed = row.get::<_, i64>(9)? as usize;
+            let message_count = row.get::<_, i64>(10)? as usize;
             Ok((conv, files_changed, message_count))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -710,9 +735,10 @@ fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation
         start_line: row.get::<_, i64>(2)? as usize,
         end_line: row.get::<_, i64>(3)? as usize,
         git_commit: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
-        summary: row.get(7)?,
+        branch: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+        summary: row.get(8)?,
     })
 }
 
@@ -740,6 +766,8 @@ fn row_to_decision(row: &rusqlite::Row<'_>) -> rusqlite::Result<EditDecision> {
         start_line: row.get::<_, i64>(7)? as usize,
         end_line: row.get::<_, i64>(8)? as usize,
         created_at: row.get(9)?,
+        git_commit: row.get(10)?,
+        branch: row.get(11)?,
     })
 }
 
@@ -750,7 +778,7 @@ mod tests {
     #[test]
     fn test_create_and_query_conversation() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 10, 20, None).unwrap();
+        let conv = store.create_conversation("test.rs", 10, 20, None, None).unwrap();
         assert_eq!(conv.file_path, "test.rs");
         assert_eq!(conv.start_line, 10);
 
@@ -762,7 +790,7 @@ mod tests {
     #[test]
     fn test_messages() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
 
         store
             .add_message(&conv.id, MessageRole::HumanIntent, "Fix the bug", None)
@@ -785,7 +813,7 @@ mod tests {
     #[test]
     fn test_intent_and_decision() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
         let intent = store
             .record_intent(&conv.id, "Fix error handling", "test.rs", 5, 8)
             .unwrap();
@@ -800,6 +828,8 @@ mod tests {
                 "test.rs",
                 5,
                 8,
+                None,
+                None,
             )
             .unwrap();
 
@@ -812,7 +842,7 @@ mod tests {
     #[test]
     fn test_search() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
         store
             .add_message(
                 &conv.id,
@@ -830,7 +860,7 @@ mod tests {
     #[test]
     fn test_conversation_for_code() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 5, 15, None).unwrap();
+        let conv = store.create_conversation("test.rs", 5, 15, None, None).unwrap();
         let intent = store
             .record_intent(&conv.id, "Refactor", "test.rs", 5, 15)
             .unwrap();
@@ -844,6 +874,8 @@ mod tests {
                 "test.rs",
                 5,
                 15,
+                None,
+                None,
             )
             .unwrap();
 
@@ -856,8 +888,8 @@ mod tests {
     #[test]
     fn test_lines_with_conversations() {
         let store = ConversationStore::in_memory().unwrap();
-        store.create_conversation("test.rs", 5, 15, None).unwrap();
-        store.create_conversation("test.rs", 30, 40, None).unwrap();
+        store.create_conversation("test.rs", 5, 15, None, None).unwrap();
+        store.create_conversation("test.rs", 30, 40, None, None).unwrap();
 
         let lines = store.lines_with_conversations("test.rs").unwrap();
         assert_eq!(lines.len(), 2);
@@ -868,8 +900,8 @@ mod tests {
         let store = ConversationStore::in_memory().unwrap();
 
         // Create two conversations.
-        let conv1 = store.create_conversation("foo.rs", 0, 10, None).unwrap();
-        let conv2 = store.create_conversation("bar.rs", 5, 20, None).unwrap();
+        let conv1 = store.create_conversation("foo.rs", 0, 10, None, None).unwrap();
+        let conv2 = store.create_conversation("bar.rs", 5, 20, None, None).unwrap();
 
         // Add messages to conv1.
         store
@@ -881,11 +913,11 @@ mod tests {
 
         // Add a decision to conv1 (file_path = "foo.rs").
         store
-            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "foo.rs", 0, 5)
+            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "foo.rs", 0, 5, None, None)
             .unwrap();
         // Add another decision to conv1 with a different file path.
         store
-            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "baz.rs", 0, 3)
+            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "baz.rs", 0, 3, None, None)
             .unwrap();
 
         let results = store.all_conversations_with_stats(10).unwrap();
@@ -905,7 +937,7 @@ mod tests {
     #[test]
     fn test_decision_filter() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None).unwrap();
+        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
         store
             .log_decision(
                 &conv.id,
@@ -916,6 +948,8 @@ mod tests {
                 "test.rs",
                 0,
                 5,
+                None,
+                None,
             )
             .unwrap();
         store
@@ -928,6 +962,8 @@ mod tests {
                 "test.rs",
                 0,
                 5,
+                None,
+                None,
             )
             .unwrap();
 
@@ -940,5 +976,50 @@ mod tests {
             .query_decisions(None, Some(Decision::Rejected))
             .unwrap();
         assert_eq!(rejected.len(), 1);
+    }
+
+    #[test]
+    fn test_create_conversation_with_git_context() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, Some("abc1234"), Some("main"))
+            .unwrap();
+        assert_eq!(conv.git_commit.as_deref(), Some("abc1234"));
+        assert_eq!(conv.branch.as_deref(), Some("main"));
+
+        // Verify round-trip through query.
+        let found = store.get_conversation(&conv.id).unwrap().unwrap();
+        assert_eq!(found.git_commit.as_deref(), Some("abc1234"));
+        assert_eq!(found.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn test_decision_with_git_context() {
+        let store = ConversationStore::in_memory().unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, None, None)
+            .unwrap();
+        let decision = store
+            .log_decision(
+                &conv.id,
+                None,
+                Decision::Accepted,
+                None,
+                None,
+                "test.rs",
+                0,
+                5,
+                Some("def5678"),
+                Some("feature-branch"),
+            )
+            .unwrap();
+        assert_eq!(decision.git_commit.as_deref(), Some("def5678"));
+        assert_eq!(decision.branch.as_deref(), Some("feature-branch"));
+
+        // Verify round-trip through query.
+        let decisions = store.query_decisions(None, None).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].git_commit.as_deref(), Some("def5678"));
+        assert_eq!(decisions[0].branch.as_deref(), Some("feature-branch"));
     }
 }

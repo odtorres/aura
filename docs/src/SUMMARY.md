@@ -18,6 +18,7 @@
 - [Git Integration](user-guide/git.md)
 - [LSP](user-guide/lsp.md)
 - [Plugins](user-guide/plugins.md)
+- [Claude Code Integration](user-guide/claude-code.md)
 
 # Architecture
 
