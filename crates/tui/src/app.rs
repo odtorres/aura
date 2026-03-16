@@ -467,6 +467,24 @@ impl App {
             }
             terminal.draw(|frame| crate::render::draw(frame, self))?;
 
+            // Set blinking bar cursor when chat input is focused, block otherwise.
+            if self.chat_panel_focused && !self.chat_panel.streaming {
+                crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::cursor::SetCursorStyle::BlinkingBar
+                )?;
+            } else if self.mode == Mode::Insert {
+                crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::cursor::SetCursorStyle::BlinkingBar
+                )?;
+            } else {
+                crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::cursor::SetCursorStyle::SteadyBlock
+                )?;
+            }
+
             // Poll for AI streaming events.
             self.poll_ai_events();
 

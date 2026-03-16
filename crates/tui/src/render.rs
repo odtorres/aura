@@ -276,6 +276,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // Position the terminal cursor.
         if app.file_picker.visible {
             // No editor cursor while the file picker is open.
+        } else if app.chat_panel_focused && !app.chat_panel.streaming {
+            // Chat input cursor is already set inside draw_chat_input — skip editor cursor.
         } else if app.terminal_focused && has_terminal {
             // Position the hardware cursor at the PTY cursor location.
             let inner = terminal_area.inner(ratatui::layout::Margin { horizontal: 1, vertical: 1 });
@@ -1032,8 +1034,18 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Vertical layout: messages area + input area (3 rows).
-    let input_height = 3u16;
+    // Vertical layout: messages area + input area (dynamic height).
+    // Calculate input height based on content: at least 3 rows, grows up to half the panel.
+    let input_inner_width = inner.width.saturating_sub(2) as usize; // account for borders
+    let input_lines = if input_inner_width > 0 && !panel.input.is_empty() {
+        let char_count = panel.input.chars().count();
+        ((char_count + input_inner_width - 1) / input_inner_width).max(1) as u16
+    } else {
+        1u16
+    };
+    // 2 for borders + number of content lines, minimum 3, max half of panel
+    let max_input_height = (inner.height / 2).max(3);
+    let input_height = (input_lines + 2).clamp(3, max_input_height);
     let msg_height = inner.height.saturating_sub(input_height);
     let msg_area = Rect::new(inner.x, inner.y, inner.width, msg_height);
     let input_area = Rect::new(inner.x, inner.y + msg_height, inner.width, input_height);
@@ -1128,34 +1140,50 @@ fn draw_chat_input(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let display_text = if panel.input.is_empty() && !focused {
-        "Ctrl+J to chat..."
-    } else if panel.input.is_empty() && focused {
-        ""
-    } else {
-        &panel.input
-    };
+    let w = input_inner.width as usize;
 
-    let style = if panel.input.is_empty() && !focused {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default().fg(Color::White)
-    };
+    if panel.input.is_empty() {
+        // Placeholder or empty.
+        let (text, style) = if !focused {
+            (
+                "Ctrl+J to chat...".to_string(),
+                Style::default().fg(Color::DarkGray),
+            )
+        } else {
+            (String::new(), Style::default().fg(Color::White))
+        };
+        frame.render_widget(
+            Paragraph::new(text).style(style),
+            Rect::new(input_inner.x, input_inner.y, input_inner.width, 1),
+        );
+    } else if w > 0 {
+        // Wrap the input text into visual lines.
+        let chars: Vec<char> = panel.input.chars().collect();
+        let mut start = 0;
+        let mut row = 0u16;
+        while start < chars.len() && row < input_inner.height {
+            let end = (start + w).min(chars.len());
+            let line: String = chars[start..end].iter().collect();
+            frame.render_widget(
+                Paragraph::new(line).style(Style::default().fg(Color::White)),
+                Rect::new(input_inner.x, input_inner.y + row, input_inner.width, 1),
+            );
+            start = end;
+            row += 1;
+        }
+    }
 
-    let text: String = display_text
-        .chars()
-        .take(input_inner.width as usize)
-        .collect();
-    frame.render_widget(
-        Paragraph::new(text).style(style),
-        Rect::new(input_inner.x, input_inner.y, input_inner.width, 1),
-    );
-
-    // Show cursor in the input box when focused.
+    // Show blinking cursor in the input box when focused.
     if focused && !panel.streaming {
-        let cursor_x = input_inner.x + panel.input_cursor as u16;
-        let cursor_x = cursor_x.min(input_inner.x + input_inner.width.saturating_sub(1));
-        frame.set_cursor_position((cursor_x, input_inner.y));
+        let cursor_char_pos = panel.input_cursor;
+        let (cursor_row, cursor_col) = if w > 0 {
+            ((cursor_char_pos / w) as u16, (cursor_char_pos % w) as u16)
+        } else {
+            (0u16, 0u16)
+        };
+        let cursor_y = (input_inner.y + cursor_row).min(input_inner.y + input_inner.height.saturating_sub(1));
+        let cursor_x = (input_inner.x + cursor_col).min(input_inner.x + input_inner.width.saturating_sub(1));
+        frame.set_cursor_position((cursor_x, cursor_y));
     }
 }
 

@@ -198,6 +198,39 @@ impl ChatPanel {
         }
     }
 
+    /// Move input cursor up one visual line (based on wrap width).
+    pub fn input_up(&mut self, wrap_width: usize) {
+        if wrap_width == 0 {
+            return;
+        }
+        let col = self.input_cursor % wrap_width;
+        if self.input_cursor >= wrap_width {
+            self.input_cursor = self.input_cursor.saturating_sub(wrap_width);
+        } else {
+            // Already on first line — move to start.
+            self.input_cursor = 0;
+        }
+        // Clamp column to not exceed text length.
+        let max = self.input.chars().count();
+        let _ = col; // col preserved by subtraction
+        self.input_cursor = self.input_cursor.min(max);
+    }
+
+    /// Move input cursor down one visual line (based on wrap width).
+    pub fn input_down(&mut self, wrap_width: usize) {
+        if wrap_width == 0 {
+            return;
+        }
+        let max = self.input.chars().count();
+        let new_pos = self.input_cursor.saturating_add(wrap_width);
+        if new_pos <= max {
+            self.input_cursor = new_pos;
+        } else {
+            // Past last line — move to end.
+            self.input_cursor = max;
+        }
+    }
+
     /// Move input cursor to the start.
     pub fn input_home(&mut self) {
         self.input_cursor = 0;
