@@ -668,6 +668,30 @@ impl ConversationStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Find or create a chat conversation (uses `__chat__` as the file path).
+    ///
+    /// Returns the most recent `__chat__` conversation, or creates a new one
+    /// if none exists.
+    pub fn find_or_create_chat_conversation(
+        &self,
+        branch: Option<&str>,
+    ) -> Result<Conversation> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
+             FROM conversations WHERE file_path = '__chat__'
+             ORDER BY updated_at DESC LIMIT 1",
+        )?;
+        let existing: Option<Conversation> = stmt
+            .query_map([], row_to_conversation)?
+            .next()
+            .transpose()?;
+
+        match existing {
+            Some(conv) => Ok(conv),
+            None => self.create_conversation("__chat__", 0, 0, None, branch),
+        }
+    }
+
     /// Get lines that have conversation history (for gutter markers).
     pub fn lines_with_conversations(&self, file_path: &str) -> Result<Vec<(usize, usize)>> {
         let mut stmt = self.conn.prepare(

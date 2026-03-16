@@ -1,5 +1,6 @@
 //! Application state and main event loop.
 
+use crate::chat_panel::ChatPanel;
 use crate::config::{AuraConfig, Theme};
 use crate::diff_view::DiffView;
 use crate::embedded_terminal::EmbeddedTerminal;
@@ -197,6 +198,14 @@ pub struct App {
     pub conversation_history: ConversationHistoryPanel,
     /// Whether the conversation history panel has keyboard focus.
     pub conversation_history_focused: bool,
+    /// Interactive AI chat panel.
+    pub chat_panel: ChatPanel,
+    /// Whether the chat panel has keyboard focus.
+    pub chat_panel_focused: bool,
+    /// Receiver for streaming chat AI events.
+    chat_receiver: Option<mpsc::Receiver<AiEvent>>,
+    /// Cached chat panel rect from the last render frame.
+    pub chat_panel_rect: Rect,
     /// Cached panel rects from the last render frame (used for mouse click-to-focus).
     pub editor_rect: Rect,
     /// Cached terminal panel rect from the last render frame.
@@ -389,6 +398,10 @@ impl App {
             last_sc_refresh: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
+            chat_panel: ChatPanel::new(40),
+            chat_panel_focused: false,
+            chat_receiver: None,
+            chat_panel_rect: Rect::default(),
             editor_rect: Rect::default(),
             terminal_rect: Rect::default(),
             file_tree_rect: Rect::default(),
@@ -456,6 +469,9 @@ impl App {
 
             // Poll for AI streaming events.
             self.poll_ai_events();
+
+            // Poll for chat panel streaming events.
+            self.poll_chat_events();
 
             // Poll for LSP events.
             self.poll_lsp_events();
@@ -2374,6 +2390,9 @@ impl App {
                 self.terminal_focused = false;
             }
         } else {
+            // Hide chat panel — same right-side area.
+            self.chat_panel.visible = false;
+            self.chat_panel_focused = false;
             self.conversation_history.visible = true;
             self.refresh_conversation_history();
             self.conversation_history_focused = true;
@@ -2408,6 +2427,13 @@ impl App {
             }
         } else if self.conversation_history.visible && point_in(self.conv_history_rect) {
             self.conversation_history_focused = true;
+            self.chat_panel_focused = false;
+            self.terminal_focused = false;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+        } else if self.chat_panel.visible && point_in(self.chat_panel_rect) {
+            self.chat_panel_focused = true;
+            self.conversation_history_focused = false;
             self.terminal_focused = false;
             self.file_tree_focused = false;
             self.source_control_focused = false;
@@ -2416,6 +2442,7 @@ impl App {
             self.file_tree_focused = false;
             self.source_control_focused = false;
             self.conversation_history_focused = false;
+            self.chat_panel_focused = false;
         }
     }
 
@@ -2423,6 +2450,250 @@ impl App {
     pub fn refresh_conversation_history(&mut self) {
         if let Some(store) = &self.conversation_store {
             self.conversation_history.refresh(store);
+        }
+    }
+
+    // ── Chat panel ───────────────────────────────────────────────
+
+    /// Toggle the chat panel.
+    ///
+    /// If visible and focused → close. If visible but unfocused → focus.
+    /// If hidden → open and focus. Mutually exclusive with conversation history.
+    pub fn toggle_chat_panel(&mut self) {
+        if self.chat_panel.visible {
+            if self.chat_panel_focused {
+                self.chat_panel.visible = false;
+                self.chat_panel_focused = false;
+            } else {
+                self.chat_panel_focused = true;
+                self.conversation_history_focused = false;
+                self.file_tree_focused = false;
+                self.source_control_focused = false;
+                self.terminal_focused = false;
+            }
+        } else {
+            // Hide conversation history — same right-side area.
+            self.conversation_history.visible = false;
+            self.conversation_history_focused = false;
+            self.chat_panel.visible = true;
+            self.chat_panel_focused = true;
+            self.file_tree_focused = false;
+            self.source_control_focused = false;
+            self.terminal_focused = false;
+            // Load existing chat conversation if we have one.
+            self.load_chat_conversation();
+        }
+    }
+
+    /// Send the current chat input as a message to the AI.
+    pub fn send_chat_message(&mut self) {
+        let text = self.chat_panel.take_input();
+        if text.trim().is_empty() {
+            return;
+        }
+
+        // Handle slash commands.
+        if text.starts_with('/') {
+            match text.trim() {
+                "/clear" => {
+                    self.chat_panel.clear();
+                    self.set_status("Chat cleared");
+                    return;
+                }
+                "/help" => {
+                    self.chat_panel.push_system_message(
+                        "Commands: /clear — clear chat, /help — show help\n\
+                         Enter — send message, Esc — unfocus, Ctrl+Up/Down — scroll",
+                    );
+                    return;
+                }
+                _ => {
+                    self.chat_panel.push_system_message(
+                        &format!("Unknown command: {}", text.trim()),
+                    );
+                    return;
+                }
+            }
+        }
+
+        if self.ai_client.is_none() {
+            self.chat_panel.push_system_message(
+                "No AI backend available. Set ANTHROPIC_API_KEY or install Claude Code CLI.",
+            );
+            return;
+        }
+
+        // Ensure we have a chat conversation in the database.
+        self.ensure_chat_conversation();
+
+        // Add user message to panel.
+        self.chat_panel.push_user_message(&text);
+
+        // Persist user message.
+        if let (Some(store), Some(conv_id)) =
+            (&self.conversation_store, &self.chat_panel.conversation_id)
+        {
+            if let Err(e) = store.add_message(conv_id, MessageRole::HumanIntent, &text, None) {
+                tracing::warn!("Failed to persist chat user message: {e}");
+            }
+        }
+
+        // Build system prompt with editor context.
+        let system = self.build_chat_system_prompt();
+        let messages = self.chat_panel.build_messages();
+
+        let client = self.ai_client.as_ref().unwrap();
+        let rx = client.stream_completion(&system, messages);
+        self.chat_receiver = Some(rx);
+        self.chat_panel.start_streaming();
+    }
+
+    /// Poll the chat receiver for streaming events.
+    fn poll_chat_events(&mut self) {
+        let rx = match &self.chat_receiver {
+            Some(rx) => rx,
+            None => return,
+        };
+
+        loop {
+            match rx.try_recv() {
+                Ok(AiEvent::Token(text)) => {
+                    self.chat_panel.append_token(&text);
+                }
+                Ok(AiEvent::Done(full_text)) => {
+                    // Persist AI response.
+                    if let (Some(store), Some(conv_id)) =
+                        (&self.conversation_store, &self.chat_panel.conversation_id)
+                    {
+                        if let Err(e) = store.add_message(
+                            conv_id,
+                            MessageRole::AiResponse,
+                            &full_text,
+                            Some("claude"),
+                        ) {
+                            tracing::warn!("Failed to persist chat AI response: {e}");
+                        }
+                    }
+                    self.chat_panel.finish_streaming();
+                    self.chat_receiver = None;
+                    return;
+                }
+                Ok(AiEvent::Error(err)) => {
+                    self.chat_panel.push_system_message(&format!("Error: {err}"));
+                    self.chat_panel.streaming = false;
+                    self.chat_panel.streaming_text.clear();
+                    self.chat_receiver = None;
+                    return;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    // Finalize whatever was accumulated.
+                    if !self.chat_panel.streaming_text.is_empty() {
+                        let text = self.chat_panel.streaming_text.clone();
+                        if let (Some(store), Some(conv_id)) =
+                            (&self.conversation_store, &self.chat_panel.conversation_id)
+                        {
+                            if let Err(e) = store.add_message(
+                                conv_id,
+                                MessageRole::AiResponse,
+                                &text,
+                                Some("claude"),
+                            ) {
+                                tracing::warn!("Failed to persist chat AI response on disconnect: {e}");
+                            }
+                        }
+                    }
+                    self.chat_panel.finish_streaming();
+                    self.chat_receiver = None;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Build a system prompt for chat that includes editor context.
+    fn build_chat_system_prompt(&self) -> String {
+        let tab = self.tab();
+        let file_path = tab
+            .buffer
+            .file_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<scratch>".to_string());
+        let line_count = tab.buffer.line_count();
+        let cursor_row = tab.cursor.row + 1;
+        let cursor_col = tab.cursor.col + 1;
+
+        let mut prompt = String::from(
+            "You are an AI assistant integrated into the AURA text editor. \
+             Help the user with their coding questions and tasks. \
+             Be concise and helpful.\n\n",
+        );
+        prompt.push_str(&format!("Current file: {file_path}\n"));
+        prompt.push_str(&format!("Lines: {line_count}, Cursor: {cursor_row}:{cursor_col}\n"));
+
+        // Include a snippet of surrounding code for context.
+        let start = cursor_row.saturating_sub(6);
+        let end = (cursor_row + 5).min(line_count);
+        if start < end {
+            prompt.push_str("\nCode around cursor:\n```\n");
+            for i in start..end {
+                if let Some(line) = tab.buffer.line(i) {
+                    let marker = if i + 1 == cursor_row { ">" } else { " " };
+                    prompt.push_str(&format!("{marker}{:4} | {}\n", i + 1, line));
+                }
+            }
+            prompt.push_str("```\n");
+        }
+
+        // Include diagnostics if any.
+        if !tab.diagnostics.is_empty() {
+            prompt.push_str("\nActive diagnostics:\n");
+            for d in tab.diagnostics.iter().take(5) {
+                let sev = if d.is_error() { "error" } else { "warning" };
+                prompt.push_str(&format!(
+                    "- L{}: [{}] {}\n",
+                    d.range.start.line + 1,
+                    sev,
+                    d.message
+                ));
+            }
+        }
+
+        prompt
+    }
+
+    /// Ensure a chat conversation exists in the database.
+    fn ensure_chat_conversation(&mut self) {
+        if self.chat_panel.conversation_id.is_some() {
+            return;
+        }
+        self.ensure_conversation_store();
+        let (branch, _) = self.git_context();
+        if let Some(store) = &self.conversation_store {
+            match store.find_or_create_chat_conversation(branch.as_deref()) {
+                Ok(conv) => {
+                    self.chat_panel.conversation_id = Some(conv.id);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to create chat conversation: {e}");
+                }
+            }
+        }
+    }
+
+    /// Load an existing chat conversation from the database.
+    fn load_chat_conversation(&mut self) {
+        self.ensure_conversation_store();
+        let (branch, _) = self.git_context();
+        if let Some(store) = &self.conversation_store {
+            match store.find_or_create_chat_conversation(branch.as_deref()) {
+                Ok(conv) => {
+                    self.chat_panel.load_conversation(store, &conv.id);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load chat conversation: {e}");
+                }
+            }
         }
     }
 

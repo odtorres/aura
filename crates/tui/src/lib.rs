@@ -5,6 +5,7 @@
 //! and will eventually render ghost-text overlays and diff views.
 
 pub mod app;
+pub mod chat_panel;
 pub mod config;
 pub mod conversation_history;
 pub mod diff_view;

@@ -231,6 +231,64 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // When the chat panel is focused, route all keys to chat input.
+    if app.chat_panel_focused {
+        match code {
+            KeyCode::Enter => {
+                if !app.chat_panel.streaming {
+                    app.send_chat_message();
+                }
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.chat_panel.input_char(c);
+            }
+            KeyCode::Backspace => {
+                app.chat_panel.input_backspace();
+            }
+            KeyCode::Delete => {
+                app.chat_panel.input_delete();
+            }
+            KeyCode::Left => {
+                app.chat_panel.input_left();
+            }
+            KeyCode::Right => {
+                app.chat_panel.input_right();
+            }
+            KeyCode::Home => {
+                app.chat_panel.input_home();
+            }
+            KeyCode::End => {
+                app.chat_panel.input_end();
+            }
+            KeyCode::Up if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.chat_panel.scroll_up();
+            }
+            KeyCode::Down if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.chat_panel.scroll_down();
+            }
+            KeyCode::PageUp => {
+                app.chat_panel.page_up(10);
+            }
+            KeyCode::PageDown => {
+                app.chat_panel.page_down(10);
+            }
+            KeyCode::Esc => {
+                app.chat_panel_focused = false;
+            }
+            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_chat_panel();
+            }
+            KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
+                // Switch to conversation history.
+                app.chat_panel.visible = false;
+                app.chat_panel_focused = false;
+                app.toggle_conversation_history();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // When the conversation history panel is focused, route keys to it.
     if app.conversation_history_focused {
         match code {
@@ -262,6 +320,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
                 app.toggle_conversation_history();
+            }
+            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
+                // Switch to chat panel.
+                app.conversation_history.visible = false;
+                app.conversation_history_focused = false;
+                app.toggle_chat_panel();
             }
             _ => {}
         }
@@ -309,6 +373,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Ctrl+h — toggle AI conversation history panel.
     if code == KeyCode::Char('h') && modifiers.contains(KeyModifiers::CONTROL) {
         app.toggle_conversation_history();
+        return;
+    }
+
+    // Ctrl+j — toggle interactive chat panel.
+    if code == KeyCode::Char('j') && modifiers.contains(KeyModifiers::CONTROL) {
+        app.toggle_chat_panel();
         return;
     }
 

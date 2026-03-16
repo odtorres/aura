@@ -1,6 +1,7 @@
 //! Rendering the editor UI with ratatui.
 
 use crate::app::{App, ConversationPanel, Mode};
+use crate::chat_panel::ChatRole;
 use crate::config::Theme;
 use crate::diff_view::DiffLine;
 use crate::git::LineStatus;
@@ -83,13 +84,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         app.file_tree_rect = Rect::default();
     }
 
-    // If the conversation history panel is visible, split off the right side.
-    let (editor_area, conv_history_area) = if app.conversation_history.visible {
+    // If the conversation history panel or chat panel is visible, split off the right side.
+    let right_panel_width = if app.chat_panel.visible {
+        Some(app.chat_panel.width)
+    } else if app.conversation_history.visible {
+        Some(app.conversation_history.width)
+    } else {
+        None
+    };
+
+    let (editor_area, right_panel_area) = if let Some(width) = right_panel_width {
         let hsplit = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Min(1),
-                Constraint::Length(app.conversation_history.width),
+                Constraint::Length(width),
             ])
             .split(editor_area_outer);
         (hsplit[0], Some(hsplit[1]))
@@ -97,12 +106,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         (editor_area_outer, None)
     };
 
-    // Draw conversation history panel if visible.
-    if let Some(area) = conv_history_area {
-        app.conv_history_rect = area;
-        draw_conversation_history(frame, app, area);
+    // Draw the active right panel.
+    if let Some(area) = right_panel_area {
+        if app.chat_panel.visible {
+            app.chat_panel_rect = area;
+            app.conv_history_rect = Rect::default();
+            draw_chat_panel(frame, app, area);
+        } else {
+            app.conv_history_rect = area;
+            app.chat_panel_rect = Rect::default();
+            draw_conversation_history(frame, app, area);
+        }
     } else {
         app.conv_history_rect = Rect::default();
+        app.chat_panel_rect = Rect::default();
     }
 
     // Save panel rects for mouse click-to-focus.
@@ -985,6 +1002,183 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
     }
+}
+
+/// Draw the interactive chat panel.
+fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let focused = app.chat_panel_focused;
+    let panel = &app.chat_panel;
+
+    let (title, border_color) = if focused {
+        if panel.streaming {
+            (" Chat [streaming...] ", Color::Cyan)
+        } else {
+            (" Chat [focused] ", Color::Yellow)
+        }
+    } else if panel.streaming {
+        (" Chat [streaming...] ", Color::Cyan)
+    } else {
+        (" Chat ", Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    // Vertical layout: messages area + input area (3 rows).
+    let input_height = 3u16;
+    let msg_height = inner.height.saturating_sub(input_height);
+    let msg_area = Rect::new(inner.x, inner.y, inner.width, msg_height);
+    let input_area = Rect::new(inner.x, inner.y + msg_height, inner.width, input_height);
+
+    // ── Render messages ──
+    let max_width = msg_area.width as usize;
+    if max_width == 0 || msg_area.height == 0 {
+        draw_chat_input(frame, app, input_area);
+        return;
+    }
+
+    // Build wrapped lines from all messages + streaming text.
+    let mut wrapped_lines: Vec<(ChatRole, String)> = Vec::new();
+    for msg in &panel.messages {
+        let prefix = match msg.role {
+            ChatRole::User => "You: ",
+            ChatRole::Assistant => "AI: ",
+            ChatRole::System => "Sys: ",
+        };
+        let full = format!("{prefix}{}", msg.content);
+        for wl in wrap_text(&full, max_width) {
+            wrapped_lines.push((msg.role, wl));
+        }
+        // Blank separator line.
+        wrapped_lines.push((ChatRole::System, String::new()));
+    }
+
+    // Add streaming text if active.
+    if panel.streaming && !panel.streaming_text.is_empty() {
+        let full = format!("AI: {}", panel.streaming_text);
+        for wl in wrap_text(&full, max_width) {
+            wrapped_lines.push((ChatRole::Assistant, wl));
+        }
+        // Blinking cursor indicator.
+        wrapped_lines.push((ChatRole::Assistant, "▌".to_string()));
+    } else if panel.streaming {
+        wrapped_lines.push((ChatRole::Assistant, "AI: ...".to_string()));
+    }
+
+    let visible_height = msg_area.height as usize;
+    let total_lines = wrapped_lines.len();
+
+    // Clamp scroll so we don't go past the end.
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let scroll = panel.scroll.min(max_scroll);
+
+    let visible = wrapped_lines
+        .iter()
+        .skip(scroll)
+        .take(visible_height);
+
+    for (i, (role, text)) in visible.enumerate() {
+        let y = msg_area.y + i as u16;
+        let color = match role {
+            ChatRole::User => Color::Green,
+            ChatRole::Assistant => Color::Cyan,
+            ChatRole::System => Color::Red,
+        };
+        let style = if text.is_empty() {
+            Style::default()
+        } else {
+            Style::default().fg(color)
+        };
+        let display: String = text.chars().take(max_width).collect();
+        frame.render_widget(
+            Paragraph::new(display).style(style),
+            Rect::new(msg_area.x, y, msg_area.width, 1),
+        );
+    }
+
+    // ── Render input ──
+    draw_chat_input(frame, app, input_area);
+}
+
+/// Draw the chat input box.
+fn draw_chat_input(frame: &mut Frame, app: &App, area: Rect) {
+    let panel = &app.chat_panel;
+    let focused = app.chat_panel_focused;
+
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .title(if panel.streaming { " ... " } else { " > " })
+        .border_style(Style::default().fg(if focused {
+            Color::Yellow
+        } else {
+            Color::DarkGray
+        }));
+    let input_inner = input_block.inner(area);
+    frame.render_widget(input_block, area);
+
+    if input_inner.width == 0 || input_inner.height == 0 {
+        return;
+    }
+
+    let display_text = if panel.input.is_empty() && !focused {
+        "Ctrl+J to chat..."
+    } else if panel.input.is_empty() && focused {
+        ""
+    } else {
+        &panel.input
+    };
+
+    let style = if panel.input.is_empty() && !focused {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let text: String = display_text
+        .chars()
+        .take(input_inner.width as usize)
+        .collect();
+    frame.render_widget(
+        Paragraph::new(text).style(style),
+        Rect::new(input_inner.x, input_inner.y, input_inner.width, 1),
+    );
+
+    // Show cursor in the input box when focused.
+    if focused && !panel.streaming {
+        let cursor_x = input_inner.x + panel.input_cursor as u16;
+        let cursor_x = cursor_x.min(input_inner.x + input_inner.width.saturating_sub(1));
+        frame.set_cursor_position((cursor_x, input_inner.y));
+    }
+}
+
+/// Word-wrap text to the given width.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    for raw_line in text.split('\n') {
+        if raw_line.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let chars: Vec<char> = raw_line.chars().collect();
+        let mut start = 0;
+        while start < chars.len() {
+            let end = (start + width).min(chars.len());
+            lines.push(chars[start..end].iter().collect());
+            start = end;
+        }
+    }
+    lines
 }
 
 fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
