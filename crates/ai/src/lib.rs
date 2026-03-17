@@ -12,7 +12,10 @@ pub mod client;
 pub mod context;
 
 pub use claude_code::ClaudeCodeClient;
-pub use client::{AiEvent, AnthropicClient, Message};
+pub use client::{
+    AiEvent, AnthropicClient, ContentBlock, Message, MessageContent, ToolDefinition,
+    ToolPermission, editor_tools, tool_permission,
+};
 pub use context::{estimate_tokens, DiagnosticSummary, EditorContext};
 
 /// Configuration for the AI integration.
@@ -104,6 +107,32 @@ impl AiBackend {
             AiBackend::Api(client) => client.stream_completion(system_prompt, messages),
             AiBackend::ClaudeCode(client) => client.stream_completion(system_prompt, messages),
         }
+    }
+
+    /// Send a streaming completion request with tool definitions.
+    ///
+    /// Both backends support tool use: the API backend uses native tool_use
+    /// content blocks, while the CLI backend encodes tools in the prompt
+    /// and parses `TOOL_CALL:` directives from the response.
+    pub fn stream_completion_with_tools(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> std::sync::mpsc::Receiver<AiEvent> {
+        match self {
+            AiBackend::Api(client) => {
+                client.stream_completion_with_tools(system_prompt, messages, tools)
+            }
+            AiBackend::ClaudeCode(client) => {
+                client.stream_completion_with_tools(system_prompt, messages, tools)
+            }
+        }
+    }
+
+    /// Whether this backend supports tool use.
+    pub fn supports_tools(&self) -> bool {
+        true
     }
 
     /// Return a label describing which backend is active.

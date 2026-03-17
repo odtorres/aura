@@ -1,7 +1,7 @@
 //! Rendering the editor UI with ratatui.
 
 use crate::app::{App, ConversationPanel, Mode};
-use crate::chat_panel::ChatRole;
+use crate::chat_panel::{ChatItem, ChatRole, ToolCallStatus};
 use crate::config::Theme;
 use crate::diff_view::DiffLine;
 use crate::git::LineStatus;
@@ -1011,9 +1011,13 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.chat_panel_focused;
     let panel = &app.chat_panel;
 
-    let (title, border_color) = if focused {
+    let (title, border_color) = if panel.pending_approval.is_some() {
+        (" Chat [approve? Y/N] ", Color::Yellow)
+    } else if focused {
         if panel.streaming {
             (" Chat [streaming...] ", Color::Cyan)
+        } else if panel.in_tool_loop {
+            (" Chat [tools] ", Color::Magenta)
         } else {
             (" Chat [focused] ", Color::Yellow)
         }
@@ -1057,32 +1061,93 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Build wrapped lines from all messages + streaming text.
-    let mut wrapped_lines: Vec<(ChatRole, String)> = Vec::new();
-    for msg in &panel.messages {
-        let prefix = match msg.role {
-            ChatRole::User => "You: ",
-            ChatRole::Assistant => "AI: ",
-            ChatRole::System => "Sys: ",
-        };
-        let full = format!("{prefix}{}", msg.content);
-        for wl in wrap_text(&full, max_width) {
-            wrapped_lines.push((msg.role, wl));
+    // Build wrapped lines from all items + streaming text.
+    let mut wrapped_lines: Vec<(ChatRole, String, Option<Color>)> = Vec::new();
+    for item in &panel.items {
+        match item {
+            ChatItem::Text {
+                role,
+                content,
+                ..
+            } => {
+                let prefix = match role {
+                    ChatRole::User => "You: ",
+                    ChatRole::Assistant => "AI: ",
+                    ChatRole::System => "Sys: ",
+                };
+                let full = format!("{prefix}{content}");
+                for wl in wrap_text(&full, max_width) {
+                    wrapped_lines.push((*role, wl, None));
+                }
+                wrapped_lines.push((ChatRole::System, String::new(), None));
+            }
+            ChatItem::ToolCall {
+                name,
+                input,
+                status,
+                result,
+                ..
+            } => {
+                // Tool call header.
+                let (status_icon, status_color) = match status {
+                    ToolCallStatus::PendingApproval => ("⏳", Color::Yellow),
+                    ToolCallStatus::Running => ("⟳", Color::Blue),
+                    ToolCallStatus::Completed => ("✓", Color::Green),
+                    ToolCallStatus::Denied => ("✗", Color::Red),
+                    ToolCallStatus::Failed(_) => ("✗", Color::Red),
+                };
+                let header = format!(" {status_icon} Tool: {name}");
+                for wl in wrap_text(&header, max_width) {
+                    wrapped_lines.push((ChatRole::System, wl, Some(status_color)));
+                }
+
+                // Show compact input summary.
+                let input_summary = format_tool_input(name, input);
+                if !input_summary.is_empty() {
+                    for wl in wrap_text(&format!("   {input_summary}"), max_width) {
+                        wrapped_lines.push((ChatRole::System, wl, Some(Color::DarkGray)));
+                    }
+                }
+
+                // Show approval prompt if pending.
+                if *status == ToolCallStatus::PendingApproval {
+                    let prompt = "   Allow? [Y]es / [N]o".to_string();
+                    wrapped_lines.push((ChatRole::System, prompt, Some(Color::Yellow)));
+                }
+
+                // Show result summary if available.
+                if let Some(res) = result {
+                    let lines: Vec<&str> = res.lines().take(3).collect();
+                    for line in &lines {
+                        for wl in wrap_text(&format!("   {line}"), max_width) {
+                            wrapped_lines.push((ChatRole::System, wl, Some(Color::DarkGray)));
+                        }
+                    }
+                    let total = res.lines().count();
+                    if total > 3 {
+                        wrapped_lines.push((
+                            ChatRole::System,
+                            format!("   ... ({} more lines)", total - 3),
+                            Some(Color::DarkGray),
+                        ));
+                    }
+                }
+
+                wrapped_lines.push((ChatRole::System, String::new(), None));
+            }
         }
-        // Blank separator line.
-        wrapped_lines.push((ChatRole::System, String::new()));
     }
 
     // Add streaming text if active.
     if panel.streaming && !panel.streaming_text.is_empty() {
         let full = format!("AI: {}", panel.streaming_text);
         for wl in wrap_text(&full, max_width) {
-            wrapped_lines.push((ChatRole::Assistant, wl));
+            wrapped_lines.push((ChatRole::Assistant, wl, None));
         }
         // Blinking cursor indicator.
-        wrapped_lines.push((ChatRole::Assistant, "▌".to_string()));
+        wrapped_lines.push((ChatRole::Assistant, "▌".to_string(), None));
     } else if panel.streaming {
-        wrapped_lines.push((ChatRole::Assistant, "AI: ...".to_string()));
+        wrapped_lines.push((ChatRole::Assistant, "AI: ...".to_string(), None));
     }
 
     let visible_height = msg_area.height as usize;
@@ -1097,12 +1162,16 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
         .skip(scroll)
         .take(visible_height);
 
-    for (i, (role, text)) in visible.enumerate() {
+    for (i, (role, text, override_color)) in visible.enumerate() {
         let y = msg_area.y + i as u16;
-        let color = match role {
-            ChatRole::User => Color::Green,
-            ChatRole::Assistant => Color::Cyan,
-            ChatRole::System => Color::Red,
+        let color = if let Some(c) = override_color {
+            *c
+        } else {
+            match role {
+                ChatRole::User => Color::Green,
+                ChatRole::Assistant => Color::Cyan,
+                ChatRole::System => Color::Red,
+            }
         };
         let style = if text.is_empty() {
             Style::default()
@@ -1207,6 +1276,69 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         }
     }
     lines
+}
+
+/// Format tool input parameters for display in a compact way.
+fn format_tool_input(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "read_file" | "edit_file" => {
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+            if name == "edit_file" {
+                let old_len = input
+                    .get("old_text")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                let new_len = input
+                    .get("new_text")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                format!("{path} ({old_len}→{new_len} chars)")
+            } else {
+                path.to_string()
+            }
+        }
+        "list_files" => {
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            let recursive = input
+                .get("recursive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if recursive {
+                format!("{path} (recursive)")
+            } else {
+                path.to_string()
+            }
+        }
+        "search_files" => {
+            let pattern = input
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            format!("\"{pattern}\" in {path}")
+        }
+        "run_command" => {
+            let cmd = input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            if cmd.len() > 60 {
+                format!("{}...", &cmd[..60])
+            } else {
+                cmd.to_string()
+            }
+        }
+        _ => {
+            let s = serde_json::to_string(input).unwrap_or_default();
+            if s.len() > 80 {
+                format!("{}...", &s[..80])
+            } else {
+                s
+            }
+        }
+    }
 }
 
 fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {

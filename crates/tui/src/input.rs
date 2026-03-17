@@ -7,6 +7,21 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 /// Handle keys in Normal mode.
 pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // Global: if a tool call is pending approval, intercept Y/N regardless of focus.
+    if app.chat_panel.pending_approval.is_some() {
+        match code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                app.approve_pending_tool();
+                return;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                app.deny_pending_tool();
+                return;
+            }
+            _ => {}
+        }
+    }
+
     // When the terminal pane is focused, route all keystrokes to the PTY.
     if app.terminal_focused {
         match code {
@@ -233,6 +248,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // When the chat panel is focused, route all keys to chat input.
     if app.chat_panel_focused {
+        // If a tool call is pending approval, intercept Y/N.
+        if app.chat_panel.pending_approval.is_some() {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    app.approve_pending_tool();
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    app.deny_pending_tool();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match code {
             KeyCode::Enter => {
                 if !app.chat_panel.streaming {
@@ -789,6 +818,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
 /// Handle keys in Insert mode.
 pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // If a tool call is pending approval, intercept Y/N regardless of mode.
+    if app.chat_panel.pending_approval.is_some() {
+        match code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                app.approve_pending_tool();
+                return;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                app.deny_pending_tool();
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;

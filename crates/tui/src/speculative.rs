@@ -291,9 +291,9 @@ impl SpeculativeEngine {
         // Build context and send to AI.
         let ctx = EditorContext::from_buffer_with_semantic(buffer, cursor, None, semantic_context);
         let system = build_analysis_prompt(&ctx, self.aggressiveness, diagnostics);
-        let messages = vec![Message {
-            role: "user".to_string(),
-            content: format!(
+        let messages = vec![Message::text(
+            "user",
+            &format!(
                 "Analyze lines {}-{} and suggest improvements. \
                  Respond with one suggestion per line in format: \
                  CATEGORY|EXPLANATION|REPLACEMENT_CODE\n\
@@ -302,7 +302,7 @@ impl SpeculativeEngine {
                 start_line + 1,
                 end_line
             ),
-        }];
+        )];
 
         let rx = self.ai_client.stream_completion(&system, messages);
         let (event_tx, event_rx) = mpsc::channel();
@@ -327,6 +327,9 @@ impl SpeculativeEngine {
                             let _ = event_tx.send(SpecEvent::Error(e));
                             return;
                         }
+                        Ok(AiEvent::ToolUse { .. })
+                        | Ok(AiEvent::ToolUseComplete { .. })
+                        | Ok(AiEvent::Activity(_)) => {}
                         Err(_) => break,
                     }
                 }
@@ -452,16 +455,16 @@ impl SpeculativeEngine {
         let system = ctx.to_system_prompt();
 
         let file_list = related_files.join(", ");
-        let messages = vec![Message {
-            role: "user".to_string(),
-            content: format!(
+        let messages = vec![Message::text(
+            "user",
+            &format!(
                 "A change was just accepted in this file. \
                  Check if these related files need updates: {file_list}\n\
                  For each file that needs changes, respond with:\n\
                  FILE|path|start_line|end_line|description|replacement_code\n\
                  If no changes needed, respond with: NONE"
             ),
-        }];
+        )];
 
         let rx = self.ai_client.stream_completion(&system, messages);
         let (event_tx, event_rx) = mpsc::channel();
@@ -481,6 +484,9 @@ impl SpeculativeEngine {
                             let _ = event_tx.send(SpecEvent::Error(e));
                             return;
                         }
+                        Ok(AiEvent::ToolUse { .. })
+                        | Ok(AiEvent::ToolUseComplete { .. })
+                        | Ok(AiEvent::Activity(_)) => {}
                         Err(_) => break,
                     }
                 }

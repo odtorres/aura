@@ -4,7 +4,7 @@
 //! streaming AI responses, with full multi-turn conversation support
 //! and persistence to SQLite.
 
-use aura_ai::Message;
+use aura_ai::{ContentBlock, Message};
 use aura_core::conversation::{ConversationId, ConversationStore, MessageRole};
 
 /// Role of a chat message for display purposes.
@@ -18,7 +18,61 @@ pub enum ChatRole {
     System,
 }
 
-/// A single message in the chat panel.
+/// Status of a tool call in the chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolCallStatus {
+    /// Waiting for user to approve (Y/N).
+    PendingApproval,
+    /// Tool is currently running.
+    Running,
+    /// Tool completed successfully.
+    Completed,
+    /// User denied the tool call.
+    Denied,
+    /// Tool execution failed.
+    Failed(String),
+}
+
+/// A displayable item in the chat panel.
+#[derive(Debug, Clone)]
+pub enum ChatItem {
+    /// Plain text message.
+    Text {
+        /// Who sent this message.
+        role: ChatRole,
+        /// The message text.
+        content: String,
+        /// Display timestamp.
+        timestamp: String,
+    },
+    /// A tool call from the AI.
+    ToolCall {
+        /// Tool use ID (for API result matching).
+        id: String,
+        /// Tool name.
+        name: String,
+        /// Tool input parameters.
+        input: serde_json::Value,
+        /// Current status of the tool call.
+        status: ToolCallStatus,
+        /// Tool execution result (if completed).
+        result: Option<String>,
+        /// Display timestamp.
+        timestamp: String,
+    },
+}
+
+impl ChatItem {
+    /// Get the role for rendering purposes.
+    pub fn role(&self) -> ChatRole {
+        match self {
+            ChatItem::Text { role, .. } => *role,
+            ChatItem::ToolCall { .. } => ChatRole::System,
+        }
+    }
+}
+
+/// A single message in the chat panel (legacy, kept for compatibility).
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     /// Who sent this message.
@@ -35,7 +89,9 @@ pub struct ChatPanel {
     pub visible: bool,
     /// Panel width in columns.
     pub width: u16,
-    /// Display messages (rendered in the panel).
+    /// Display items (rendered in the panel).
+    pub items: Vec<ChatItem>,
+    /// Legacy display messages (for rendering compatibility).
     pub messages: Vec<ChatMessage>,
     /// Scroll offset for the message area.
     pub scroll: usize,
@@ -51,6 +107,12 @@ pub struct ChatPanel {
     pub conversation_id: Option<ConversationId>,
     /// Full message history for multi-turn API calls.
     pub context_messages: Vec<Message>,
+    /// Index of tool call currently awaiting user approval.
+    pub pending_approval: Option<usize>,
+    /// Whether we are in a multi-turn tool loop.
+    pub in_tool_loop: bool,
+    /// Number of tool iterations in the current loop (for safety limit).
+    pub tool_loop_count: usize,
 }
 
 impl ChatPanel {
@@ -59,6 +121,7 @@ impl ChatPanel {
         Self {
             visible: false,
             width,
+            items: Vec::new(),
             messages: Vec::new(),
             scroll: 0,
             input: String::new(),
@@ -67,6 +130,9 @@ impl ChatPanel {
             streaming_text: String::new(),
             conversation_id: None,
             context_messages: Vec::new(),
+            pending_approval: None,
+            in_tool_loop: false,
+            tool_loop_count: 0,
         }
     }
 
@@ -78,15 +144,17 @@ impl ChatPanel {
     /// Push a user message to the display and context history.
     pub fn push_user_message(&mut self, text: &str) {
         let timestamp = simple_timestamp();
+        self.items.push(ChatItem::Text {
+            role: ChatRole::User,
+            content: text.to_string(),
+            timestamp: timestamp.clone(),
+        });
         self.messages.push(ChatMessage {
             role: ChatRole::User,
             content: text.to_string(),
             timestamp,
         });
-        self.context_messages.push(Message {
-            role: "user".to_string(),
-            content: text.to_string(),
-        });
+        self.context_messages.push(Message::text("user", text));
         self.scroll_to_bottom();
     }
 
@@ -108,21 +176,139 @@ impl ChatPanel {
         let text = std::mem::take(&mut self.streaming_text);
         if !text.is_empty() {
             let timestamp = simple_timestamp();
+            self.items.push(ChatItem::Text {
+                role: ChatRole::Assistant,
+                content: text.clone(),
+                timestamp: timestamp.clone(),
+            });
             self.messages.push(ChatMessage {
                 role: ChatRole::Assistant,
                 content: text.clone(),
                 timestamp,
             });
-            self.context_messages.push(Message {
-                role: "assistant".to_string(),
+            self.context_messages.push(Message::text("assistant", &text));
+        }
+        self.scroll_to_bottom();
+    }
+
+    /// Finalize streaming for a tool-use response (text + tool calls).
+    ///
+    /// Unlike `finish_streaming`, this does NOT add to context_messages
+    /// because the caller will add the full content blocks.
+    pub fn finish_streaming_for_tools(&mut self) {
+        self.streaming = false;
+        let text = std::mem::take(&mut self.streaming_text);
+        if !text.is_empty() {
+            let timestamp = simple_timestamp();
+            self.items.push(ChatItem::Text {
+                role: ChatRole::Assistant,
+                content: text.clone(),
+                timestamp: timestamp.clone(),
+            });
+            self.messages.push(ChatMessage {
+                role: ChatRole::Assistant,
                 content: text,
+                timestamp,
             });
         }
         self.scroll_to_bottom();
     }
 
+    /// Add a tool call to the display.
+    pub fn add_tool_call(
+        &mut self,
+        id: &str,
+        name: &str,
+        input: serde_json::Value,
+        status: ToolCallStatus,
+    ) -> usize {
+        let timestamp = simple_timestamp();
+        let idx = self.items.len();
+        self.items.push(ChatItem::ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            input,
+            status,
+            result: None,
+            timestamp,
+        });
+        // Also add to legacy messages for rendering.
+        self.messages.push(ChatMessage {
+            role: ChatRole::System,
+            content: format!("[Tool: {}]", name),
+            timestamp: simple_timestamp(),
+        });
+        self.scroll_to_bottom();
+        idx
+    }
+
+    /// Update the status of a tool call by item index.
+    pub fn update_tool_status(&mut self, idx: usize, status: ToolCallStatus) {
+        if let Some(ChatItem::ToolCall {
+            status: ref mut s, ..
+        }) = self.items.get_mut(idx)
+        {
+            *s = status;
+        }
+    }
+
+    /// Set the result of a tool call by item index.
+    pub fn set_tool_result(&mut self, idx: usize, result: String, success: bool) {
+        if let Some(ChatItem::ToolCall {
+            status: ref mut s,
+            result: ref mut r,
+            name,
+            ..
+        }) = self.items.get_mut(idx)
+        {
+            *r = Some(result.clone());
+            if success {
+                *s = ToolCallStatus::Completed;
+            } else {
+                *s = ToolCallStatus::Failed(result.clone());
+            }
+            // Update the legacy message to show result summary.
+            let summary = if result.len() > 100 {
+                format!("{}...", &result[..100])
+            } else {
+                result
+            };
+            if let Some(msg) = self.messages.last_mut() {
+                msg.content = format!("[Tool: {} → {}]", name, summary);
+            }
+        }
+    }
+
+    /// Add a tool result to the context messages for the API.
+    pub fn add_tool_result_to_context(
+        &mut self,
+        tool_use_id: &str,
+        result: &str,
+        is_error: bool,
+    ) {
+        self.context_messages.push(Message::blocks(
+            "user",
+            vec![ContentBlock::ToolResult {
+                tool_use_id: tool_use_id.to_string(),
+                content: result.to_string(),
+                is_error: if is_error { Some(true) } else { None },
+            }],
+        ));
+    }
+
+    /// Add the assistant's content blocks (with tool_use) to context messages.
+    pub fn add_assistant_blocks_to_context(&mut self, blocks: Vec<ContentBlock>) {
+        self.context_messages
+            .push(Message::blocks("assistant", blocks));
+    }
+
     /// Add a system/error message.
     pub fn push_system_message(&mut self, text: &str) {
+        self.items.push(ChatItem::Text {
+            role: ChatRole::System,
+            content: text.to_string(),
+            timestamp: simple_timestamp(),
+        });
         self.messages.push(ChatMessage {
             role: ChatRole::System,
             content: text.to_string(),
@@ -254,12 +440,16 @@ impl ChatPanel {
 
     /// Clear all messages and reset conversation.
     pub fn clear(&mut self) {
+        self.items.clear();
         self.messages.clear();
         self.context_messages.clear();
         self.conversation_id = None;
         self.scroll = 0;
         self.streaming = false;
         self.streaming_text.clear();
+        self.pending_approval = None;
+        self.in_tool_loop = false;
+        self.tool_loop_count = 0;
     }
 
     /// Load an existing conversation from the store.
@@ -281,10 +471,7 @@ impl ChatPanel {
                     });
                     // Only add user/assistant to context (skip system for API).
                     if role != ChatRole::System {
-                        self.context_messages.push(Message {
-                            role: api_role.to_string(),
-                            content: msg.content.clone(),
-                        });
+                        self.context_messages.push(Message::text(api_role, &msg.content));
                     }
                 }
                 self.conversation_id = Some(conv_id.to_string());
@@ -424,10 +611,7 @@ mod tests {
     fn test_build_messages() {
         let mut panel = ChatPanel::new(40);
         panel.push_user_message("hello");
-        panel.context_messages.push(Message {
-            role: "assistant".to_string(),
-            content: "hi there".to_string(),
-        });
+        panel.context_messages.push(Message::text("assistant", "hi there"));
         let msgs = panel.build_messages();
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "user");

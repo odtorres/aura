@@ -16,7 +16,12 @@ use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::plugin::PluginManager;
 use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
 use crate::tab::{EditorTab, TabManager};
-use aura_ai::{estimate_tokens, AiBackend, AiConfig, AiEvent, EditorContext, Message};
+use crate::chat_panel::ToolCallStatus;
+use crate::chat_tools;
+use aura_ai::{
+    estimate_tokens, editor_tools, tool_permission, AiBackend, AiConfig, AiEvent, ContentBlock,
+    EditorContext, Message, ToolPermission,
+};
 use aura_core::conversation::{
     ConversationId, ConversationMessage, ConversationStore, Decision, MessageRole,
 };
@@ -206,6 +211,12 @@ pub struct App {
     chat_receiver: Option<mpsc::Receiver<AiEvent>>,
     /// Cached chat panel rect from the last render frame.
     pub chat_panel_rect: Rect,
+    /// Pending tool calls awaiting execution or approval.
+    pending_tool_calls: Vec<PendingToolCall>,
+    /// Content blocks from the current assistant turn (for multi-turn tool use).
+    current_assistant_blocks: Vec<ContentBlock>,
+    /// Cached system prompt for continuing tool loops.
+    tool_loop_system_prompt: String,
     /// Cached panel rects from the last render frame (used for mouse click-to-focus).
     pub editor_rect: Rect,
     /// Cached terminal panel rect from the last render frame.
@@ -214,6 +225,19 @@ pub struct App {
     pub file_tree_rect: Rect,
     /// Cached conversation history panel rect from the last render frame.
     pub conv_history_rect: Rect,
+}
+
+/// A tool call pending execution or approval.
+#[derive(Debug, Clone)]
+struct PendingToolCall {
+    /// Tool use ID from the API.
+    id: String,
+    /// Tool name.
+    name: String,
+    /// Tool input parameters.
+    input: serde_json::Value,
+    /// Index in chat_panel.items for status updates.
+    item_index: usize,
 }
 
 impl App {
@@ -402,6 +426,9 @@ impl App {
             chat_panel_focused: false,
             chat_receiver: None,
             chat_panel_rect: Rect::default(),
+            pending_tool_calls: Vec::new(),
+            current_assistant_blocks: Vec::new(),
+            tool_loop_system_prompt: String::new(),
             editor_rect: Rect::default(),
             terminal_rect: Rect::default(),
             file_tree_rect: Rect::default(),
@@ -628,6 +655,10 @@ impl App {
                     self.set_status(format!("AI error: {err}"));
                     return;
                 }
+                // Tool use / activity events are only relevant for chat; ignore here.
+                Ok(AiEvent::ToolUse { .. })
+                | Ok(AiEvent::ToolUseComplete { .. })
+                | Ok(AiEvent::Activity(_)) => {}
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.ai_receiver = None;
@@ -725,10 +756,7 @@ impl App {
         };
 
         let system = ctx.to_system_prompt();
-        let messages = vec![Message {
-            role: "user".to_string(),
-            content: intent.to_string(),
-        }];
+        let messages = vec![Message::text("user", intent)];
 
         // Log intent to conversation store.
         let file_path_str = tab
@@ -2245,13 +2273,13 @@ impl App {
                       Write a concise, conventional commit message (type: description). \
                       Output ONLY the commit message, no explanations."
             .to_string();
-        let messages = vec![Message {
-            role: "user".to_string(),
-            content: format!(
+        let messages = vec![Message::text(
+            "user",
+            &format!(
                 "Generate a commit message for these changes:\n\n{}\n\nFile: {}",
                 diff_summary, file_path_str
             ),
-        }];
+        )];
 
         let rx = client.stream_completion(&system, messages);
         // Collect synchronously in a background thread, then apply.
@@ -2267,6 +2295,9 @@ impl App {
                             msg = t;
                             break;
                         }
+                        Ok(AiEvent::ToolUse { .. })
+                        | Ok(AiEvent::ToolUseComplete { .. })
+                        | Ok(AiEvent::Activity(_)) => {}
                         Ok(AiEvent::Error(_)) | Err(_) => break,
                     }
                 }
@@ -2521,7 +2552,11 @@ impl App {
                 "/help" => {
                     self.chat_panel.push_system_message(
                         "Commands: /clear — clear chat, /help — show help\n\
-                         Enter — send message, Esc — unfocus, Ctrl+Up/Down — scroll",
+                         Enter — send message, Esc — unfocus, Ctrl+Up/Down — scroll\n\n\
+                         AI Tools: The AI can read files, edit files, search code,\n\
+                         list files, and run commands. Safe tools (read/search/list)\n\
+                         auto-approve. Destructive tools (edit/run) ask for approval:\n\
+                         press Y to allow, N to deny.",
                     );
                     return;
                 }
@@ -2561,13 +2596,30 @@ impl App {
         let messages = self.chat_panel.build_messages();
 
         let client = self.ai_client.as_ref().unwrap();
-        let rx = client.stream_completion(&system, messages);
-        self.chat_receiver = Some(rx);
-        self.chat_panel.start_streaming();
+
+        // Use tools if the backend supports them.
+        if client.supports_tools() {
+            let tools = editor_tools();
+            let rx = client.stream_completion_with_tools(&system, messages, tools);
+            self.chat_receiver = Some(rx);
+            self.chat_panel.start_streaming();
+            self.chat_panel.in_tool_loop = false;
+            self.chat_panel.tool_loop_count = 0;
+            self.tool_loop_system_prompt = system;
+        } else {
+            let rx = client.stream_completion(&system, messages);
+            self.chat_receiver = Some(rx);
+            self.chat_panel.start_streaming();
+        }
     }
 
     /// Poll the chat receiver for streaming events.
     fn poll_chat_events(&mut self) {
+        // If we have pending tool calls awaiting approval, don't poll.
+        if self.chat_panel.pending_approval.is_some() {
+            return;
+        }
+
         let rx = match &self.chat_receiver {
             Some(rx) => rx,
             None => return,
@@ -2593,13 +2645,62 @@ impl App {
                         }
                     }
                     self.chat_panel.finish_streaming();
+                    self.chat_panel.in_tool_loop = false;
                     self.chat_receiver = None;
                     return;
                 }
+                Ok(AiEvent::ToolUse { id, name, input }) => {
+                    // A tool call is being streamed — track it.
+                    let permission = tool_permission(&name);
+                    let status = match permission {
+                        ToolPermission::AutoApprove => ToolCallStatus::Running,
+                        ToolPermission::RequiresApproval => ToolCallStatus::PendingApproval,
+                    };
+                    let idx = self.chat_panel.add_tool_call(&id, &name, input.clone(), status);
+                    self.pending_tool_calls.push(PendingToolCall {
+                        id,
+                        name,
+                        input,
+                        item_index: idx,
+                    });
+                }
+                Ok(AiEvent::ToolUseComplete { text, content_blocks }) => {
+                    // The assistant turn is complete with tool calls.
+                    self.chat_panel.finish_streaming_for_tools();
+                    self.current_assistant_blocks = content_blocks.clone();
+                    self.chat_panel
+                        .add_assistant_blocks_to_context(content_blocks);
+                    self.chat_panel.in_tool_loop = true;
+                    self.chat_receiver = None;
+
+                    // Persist the text portion.
+                    if !text.is_empty() {
+                        if let (Some(store), Some(conv_id)) =
+                            (&self.conversation_store, &self.chat_panel.conversation_id)
+                        {
+                            let _ = store.add_message(
+                                conv_id,
+                                MessageRole::AiResponse,
+                                &text,
+                                Some("claude"),
+                            );
+                        }
+                    }
+
+                    // Process pending tool calls.
+                    self.process_pending_tools();
+                    return;
+                }
+                Ok(AiEvent::Activity(msg)) => {
+                    // Show activity/status from the backend in the chat panel.
+                    self.chat_panel.push_system_message(&msg);
+                }
                 Ok(AiEvent::Error(err)) => {
-                    self.chat_panel.push_system_message(&format!("Error: {err}"));
+                    self.chat_panel
+                        .push_system_message(&format!("Error: {err}"));
                     self.chat_panel.streaming = false;
                     self.chat_panel.streaming_text.clear();
+                    self.chat_panel.in_tool_loop = false;
                     self.chat_receiver = None;
                     return;
                 }
@@ -2611,14 +2712,12 @@ impl App {
                         if let (Some(store), Some(conv_id)) =
                             (&self.conversation_store, &self.chat_panel.conversation_id)
                         {
-                            if let Err(e) = store.add_message(
+                            let _ = store.add_message(
                                 conv_id,
                                 MessageRole::AiResponse,
                                 &text,
                                 Some("claude"),
-                            ) {
-                                tracing::warn!("Failed to persist chat AI response on disconnect: {e}");
-                            }
+                            );
                         }
                     }
                     self.chat_panel.finish_streaming();
@@ -2627,6 +2726,145 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Process pending tool calls — auto-approve safe ones, prompt for others.
+    fn process_pending_tools(&mut self) {
+        if self.pending_tool_calls.is_empty() {
+            return;
+        }
+
+        // Process all auto-approve tools first.
+        let mut needs_approval = Vec::new();
+        let calls: Vec<PendingToolCall> = std::mem::take(&mut self.pending_tool_calls);
+
+        for call in calls {
+            let permission = tool_permission(&call.name);
+            if permission == ToolPermission::AutoApprove {
+                self.execute_tool_call(&call);
+            } else {
+                needs_approval.push(call);
+            }
+        }
+
+        if let Some(call) = needs_approval.first() {
+            // Set pending approval for the first tool that needs it.
+            self.chat_panel.pending_approval = Some(call.item_index);
+            self.pending_tool_calls = needs_approval;
+            // Auto-focus the chat panel so the user can press Y/N.
+            self.chat_panel_focused = true;
+        } else {
+            // All tools were auto-approved — continue the loop.
+            self.continue_tool_loop();
+        }
+    }
+
+    /// Execute a single tool call and update the chat panel.
+    fn execute_tool_call(&mut self, call: &PendingToolCall) {
+        self.chat_panel
+            .update_tool_status(call.item_index, ToolCallStatus::Running);
+
+        let project_root = std::env::current_dir().unwrap_or_default();
+        let result = chat_tools::execute_tool(&call.name, &call.input, &project_root);
+
+        match result {
+            Ok(output) => {
+                self.chat_panel
+                    .set_tool_result(call.item_index, output.clone(), true);
+                self.chat_panel
+                    .add_tool_result_to_context(&call.id, &output, false);
+            }
+            Err(err) => {
+                self.chat_panel
+                    .set_tool_result(call.item_index, err.clone(), false);
+                self.chat_panel
+                    .add_tool_result_to_context(&call.id, &err, true);
+            }
+        }
+    }
+
+    /// Approve the pending tool call and execute it.
+    pub fn approve_pending_tool(&mut self) {
+        if self.pending_tool_calls.is_empty() {
+            return;
+        }
+
+        let call = self.pending_tool_calls.remove(0);
+        self.chat_panel.pending_approval = None;
+        self.execute_tool_call(&call);
+
+        // Check if there are more pending tools that need approval.
+        if let Some(next) = self.pending_tool_calls.first() {
+            let permission = tool_permission(&next.name);
+            if permission == ToolPermission::RequiresApproval {
+                self.chat_panel.pending_approval = Some(next.item_index);
+            } else {
+                // Auto-approve remaining.
+                let remaining: Vec<PendingToolCall> =
+                    std::mem::take(&mut self.pending_tool_calls);
+                for c in &remaining {
+                    self.execute_tool_call(c);
+                }
+                self.continue_tool_loop();
+            }
+        } else {
+            self.continue_tool_loop();
+        }
+    }
+
+    /// Deny the pending tool call.
+    pub fn deny_pending_tool(&mut self) {
+        if self.pending_tool_calls.is_empty() {
+            return;
+        }
+
+        let call = self.pending_tool_calls.remove(0);
+        self.chat_panel
+            .update_tool_status(call.item_index, ToolCallStatus::Denied);
+        self.chat_panel.add_tool_result_to_context(
+            &call.id,
+            "User denied this tool call.",
+            true,
+        );
+
+        // Deny all remaining pending tools too.
+        let remaining: Vec<PendingToolCall> = std::mem::take(&mut self.pending_tool_calls);
+        for c in &remaining {
+            self.chat_panel
+                .update_tool_status(c.item_index, ToolCallStatus::Denied);
+            self.chat_panel.add_tool_result_to_context(
+                &c.id,
+                "User denied this tool call.",
+                true,
+            );
+        }
+        self.chat_panel.pending_approval = None;
+        self.continue_tool_loop();
+    }
+
+    /// Continue the tool loop by sending tool results back to the API.
+    fn continue_tool_loop(&mut self) {
+        self.chat_panel.tool_loop_count = self.chat_panel.tool_loop_count.saturating_add(1);
+
+        if self.chat_panel.tool_loop_count >= chat_tools::MAX_TOOL_ITERATIONS {
+            self.chat_panel.push_system_message(
+                "Tool loop limit reached. Stopping automatic tool use.",
+            );
+            self.chat_panel.in_tool_loop = false;
+            return;
+        }
+
+        let client = match &self.ai_client {
+            Some(c) => c,
+            None => return,
+        };
+
+        let messages = self.chat_panel.build_messages();
+        let tools = editor_tools();
+        let system = self.tool_loop_system_prompt.clone();
+        let rx = client.stream_completion_with_tools(&system, messages, tools);
+        self.chat_receiver = Some(rx);
+        self.chat_panel.start_streaming();
     }
 
     /// Build a system prompt for chat that includes editor context.
@@ -2644,7 +2882,12 @@ impl App {
         let mut prompt = String::from(
             "You are an AI assistant integrated into the AURA text editor. \
              Help the user with their coding questions and tasks. \
-             Be concise and helpful.\n\n",
+             Be concise and helpful.\n\n\
+             You have access to tools for interacting with the codebase. \
+             Use them when the user asks you to read, edit, or search files, \
+             or run commands. Always prefer using tools over guessing about \
+             file contents. When editing files, show the user what you plan \
+             to change.\n\n",
         );
         prompt.push_str(&format!("Current file: {file_path}\n"));
         prompt.push_str(&format!("Lines: {line_count}, Cursor: {cursor_row}:{cursor_col}\n"));

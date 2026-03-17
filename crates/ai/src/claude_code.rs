@@ -7,9 +7,16 @@
 //! The CLI is invoked in *print mode* (`claude -p`) which runs
 //! non-interactively and streams text to stdout.  We use
 //! `--output-format stream-json` so each chunk arrives as a JSON line
-//! that we can parse for incremental token display.
+//! that we can parse for incremental token display and activity
+//! notifications.
+//!
+//! **Important**: Claude Code executes its own built-in tools (Read, Grep,
+//! Edit, Bash, etc.) internally. These tool events are displayed as
+//! informational activity in the chat panel. For custom editor tools,
+//! the model is instructed to output `TOOL_CALL:` directives which go
+//! through the editor's approval flow.
 
-use crate::AiEvent;
+use crate::{AiEvent, ContentBlock, Message, MessageContent, ToolDefinition};
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -63,7 +70,7 @@ impl ClaudeCodeClient {
     pub fn stream_completion(
         &self,
         system_prompt: &str,
-        messages: Vec<crate::Message>,
+        messages: Vec<Message>,
     ) -> mpsc::Receiver<AiEvent> {
         let (tx, rx) = mpsc::channel();
 
@@ -73,13 +80,13 @@ impl ClaudeCodeClient {
         full_prompt.push_str("\n\n");
         for msg in &messages {
             if msg.role == "user" {
-                full_prompt.push_str(&msg.content);
+                full_prompt.push_str(&msg.text_content());
                 full_prompt.push('\n');
             }
         }
 
         std::thread::spawn(move || {
-            let result = Self::run_claude_cli(&full_prompt, &tx);
+            let result = Self::run_claude_cli(&full_prompt, &tx, false);
             if let Err(e) = result {
                 let _ = tx.send(AiEvent::Error(e.to_string()));
             }
@@ -88,16 +95,127 @@ impl ClaudeCodeClient {
         rx
     }
 
+    /// Send a completion request with tool definitions via `claude -p`.
+    ///
+    /// Tool definitions are encoded into the prompt text. The response is
+    /// parsed for `TOOL_CALL:` text directives which go through the editor's
+    /// approval flow. Claude Code's own native tool use is shown as activity.
+    pub fn stream_completion_with_tools(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> mpsc::Receiver<AiEvent> {
+        let (tx, rx) = mpsc::channel();
+
+        let full_prompt = Self::build_tool_prompt(system_prompt, &messages, &tools);
+
+        std::thread::spawn(move || {
+            let result = Self::run_claude_cli(&full_prompt, &tx, true);
+            if let Err(e) = result {
+                let _ = tx.send(AiEvent::Error(e.to_string()));
+            }
+        });
+
+        rx
+    }
+
+    /// Build a prompt that includes tool definitions and full conversation history.
+    fn build_tool_prompt(
+        system_prompt: &str,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> String {
+        let mut prompt = String::new();
+        prompt.push_str(system_prompt);
+        prompt.push_str("\n\n");
+
+        // Encode tool definitions as instructions.
+        if !tools.is_empty() {
+            prompt.push_str("# Available Tools\n\n");
+            prompt.push_str(
+                "You can call tools by outputting a line in this exact format:\n\
+                 TOOL_CALL: {\"name\": \"tool_name\", \"input\": {parameters}}\n\n\
+                 IMPORTANT RULES:\n\
+                 - Each TOOL_CALL must be on its own line, starting with 'TOOL_CALL: '\n\
+                 - The JSON must be valid and on a single line\n\
+                 - You may call multiple tools in one response\n\
+                 - After outputting tool calls, stop and wait for results\n\
+                 - Do NOT wrap tool calls in code blocks\n\
+                 - Do NOT ask for permission — just call the tool directly\n\n",
+            );
+
+            for tool in tools {
+                prompt.push_str(&format!("## {}\n", tool.name));
+                prompt.push_str(&format!("{}\n", tool.description));
+                prompt.push_str(&format!("Parameters: {}\n\n", tool.input_schema));
+            }
+        }
+
+        // Add conversation messages with proper formatting.
+        for msg in messages {
+            match &msg.content {
+                MessageContent::Text(text) => {
+                    if msg.role == "user" {
+                        prompt.push_str(&format!("User: {text}\n\n"));
+                    } else {
+                        prompt.push_str(&format!("Assistant: {text}\n\n"));
+                    }
+                }
+                MessageContent::Blocks(blocks) => {
+                    for block in blocks {
+                        match block {
+                            ContentBlock::Text { text } => {
+                                if msg.role == "user" {
+                                    prompt.push_str(&format!("User: {text}\n\n"));
+                                } else {
+                                    prompt.push_str(&format!("Assistant: {text}\n\n"));
+                                }
+                            }
+                            ContentBlock::ToolUse { id, name, input } => {
+                                prompt.push_str(&format!(
+                                    "[Tool called: {name} (id: {id})]\nInput: {input}\n\n"
+                                ));
+                            }
+                            ContentBlock::ToolResult {
+                                tool_use_id,
+                                content,
+                                is_error,
+                            } => {
+                                let label = if is_error.unwrap_or(false) {
+                                    "Tool error"
+                                } else {
+                                    "Tool result"
+                                };
+                                prompt.push_str(&format!(
+                                    "[{label} for {tool_use_id}]:\n{content}\n\n"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        prompt
+    }
+
     /// Internal: spawn `claude -p` and stream its stdout.
     ///
     /// Uses `--output-format stream-json` for structured streaming.
-    /// Each line is a JSON object; we extract text from `content_block_delta`
-    /// events and fall back to raw text if JSON parsing fails.
+    /// Parses Anthropic API events for text deltas and displays Claude Code's
+    /// native tool use as informational activity. When `with_tools` is true,
+    /// also checks the final text for `TOOL_CALL:` directives.
     fn run_claude_cli(
         prompt: &str,
         tx: &mpsc::Sender<AiEvent>,
+        with_tools: bool,
     ) -> anyhow::Result<()> {
-        debug!("Spawning claude -p (prompt length: {} chars)", prompt.len());
+        debug!(
+            "Spawning claude -p (prompt length: {} chars, tools: {})",
+            prompt.len(),
+            with_tools
+        );
 
         let mut child = Command::new("claude")
             .arg("-p")
@@ -116,8 +234,12 @@ impl ClaudeCodeClient {
             .ok_or_else(|| anyhow::anyhow!("Failed to capture claude stdout"))?;
 
         let reader = BufReader::new(stdout);
-        let mut accumulated = String::new();
+        let mut accumulated_text = String::new();
         let mut result_text: Option<String> = None;
+
+        // Track native Claude Code tool use (for activity display only).
+        let mut current_native_tool_name: Option<String> = None;
+        let mut current_native_tool_json = String::new();
 
         for line in reader.lines() {
             match line {
@@ -125,16 +247,118 @@ impl ClaudeCodeClient {
                     if raw.trim().is_empty() {
                         continue;
                     }
-                    // Try to parse as stream-json event.
-                    match Self::parse_stream_json_event(&raw) {
-                        StreamJsonEvent::TextDelta(text) => {
-                            accumulated.push_str(&text);
-                            let _ = tx.send(AiEvent::Token(text));
+
+                    let v: serde_json::Value = match serde_json::from_str(&raw) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    // ── Handle stream_event wrapped Anthropic API events ──
+                    if let Some(event) = v.get("event") {
+                        let event_type = event
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("");
+
+                        match event_type {
+                            "content_block_start" => {
+                                if let Some(cb) = event.get("content_block") {
+                                    let block_type =
+                                        cb.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                    if block_type == "tool_use" {
+                                        // Claude Code's own tool — display as activity only.
+                                        current_native_tool_name = cb
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .map(String::from);
+                                        current_native_tool_json.clear();
+
+                                        if let Some(name) = &current_native_tool_name {
+                                            let _ = tx.send(AiEvent::Activity(format!(
+                                                "Using tool: {name}..."
+                                            )));
+                                        }
+                                    }
+                                }
+                            }
+                            "content_block_delta" => {
+                                if let Some(delta) = event.get("delta") {
+                                    let delta_type =
+                                        delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                                    match delta_type {
+                                        "text_delta" => {
+                                            if let Some(text) =
+                                                delta.get("text").and_then(|t| t.as_str())
+                                            {
+                                                accumulated_text.push_str(text);
+                                                let _ =
+                                                    tx.send(AiEvent::Token(text.to_string()));
+                                            }
+                                        }
+                                        "input_json_delta" => {
+                                            // Accumulate native tool input for activity display.
+                                            if let Some(partial) = delta
+                                                .get("partial_json")
+                                                .and_then(|t| t.as_str())
+                                            {
+                                                current_native_tool_json.push_str(partial);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            "content_block_stop" => {
+                                // Finalize native tool use — show activity with input summary.
+                                if let Some(name) = current_native_tool_name.take() {
+                                    let input_summary =
+                                        Self::summarize_tool_input(&current_native_tool_json);
+                                    current_native_tool_json.clear();
+                                    if !input_summary.is_empty() {
+                                        let _ = tx.send(AiEvent::Activity(format!(
+                                            "Tool {name}: {input_summary}"
+                                        )));
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
-                        StreamJsonEvent::Result(text) => {
-                            result_text = Some(text);
+                        continue;
+                    }
+
+                    // ── Handle top-level Claude Code events ──
+                    let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                    match event_type {
+                        "result" => {
+                            if let Some(text) = v.get("result").and_then(|r| r.as_str()) {
+                                result_text = Some(text.to_string());
+                            }
                         }
-                        StreamJsonEvent::Other => {}
+                        "system" => {
+                            let message = v
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .or_else(|| v.get("subtype").and_then(|s| s.as_str()))
+                                .unwrap_or("system event");
+                            let _ = tx.send(AiEvent::Activity(message.to_string()));
+                        }
+                        "assistant" => {
+                            // Assistant message — extract tool use as activity info.
+                            if let Some(message) = v.get("message") {
+                                Self::parse_assistant_activity(message, tx);
+                            }
+                        }
+                        "user" => {
+                            // Tool result from Claude Code's own tool execution.
+                            if let Some(message) = v.get("message") {
+                                Self::parse_tool_result_activity(message, tx);
+                            }
+                        }
+                        _ => {
+                            debug!("Unhandled stream-json event type: {event_type}");
+                        }
                     }
                 }
                 Err(e) => {
@@ -146,7 +370,6 @@ impl ClaudeCodeClient {
 
         let status = child.wait()?;
         if !status.success() {
-            // Read stderr for error details.
             let stderr_msg = child
                 .stderr
                 .take()
@@ -163,62 +386,293 @@ impl ClaudeCodeClient {
             anyhow::bail!("Claude Code error: {stderr_msg}");
         }
 
-        // Use the result event text as fallback when no tokens were accumulated
-        // (e.g. if the stream format changed and text_delta events were not matched).
-        let final_text = if accumulated.is_empty() {
+        // Use the result event text as fallback.
+        if accumulated_text.is_empty() {
             if let Some(ref text) = result_text {
-                // Send the result as a single token so the proposal gets populated.
+                accumulated_text = text.clone();
                 let _ = tx.send(AiEvent::Token(text.clone()));
             }
-            result_text.unwrap_or(accumulated)
-        } else {
-            accumulated
-        };
+        }
 
-        let _ = tx.send(AiEvent::Done(final_text));
+        if with_tools {
+            // Check for TOOL_CALL: text directives in the response.
+            let (display_text, tool_calls) = Self::extract_tool_calls(&accumulated_text);
+
+            if tool_calls.is_empty() {
+                let _ = tx.send(AiEvent::Done(accumulated_text));
+            } else {
+                let mut blocks = Vec::new();
+                if !display_text.is_empty() {
+                    blocks.push(ContentBlock::Text {
+                        text: display_text.clone(),
+                    });
+                }
+
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+
+                for (i, (name, input)) in tool_calls.iter().enumerate() {
+                    let id = format!("cli_toolu_{timestamp}_{i}");
+                    blocks.push(ContentBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    });
+                    let _ = tx.send(AiEvent::ToolUse {
+                        id,
+                        name: name.clone(),
+                        input: input.clone(),
+                    });
+                }
+
+                let _ = tx.send(AiEvent::ToolUseComplete {
+                    text: display_text,
+                    content_blocks: blocks,
+                });
+            }
+        } else {
+            let _ = tx.send(AiEvent::Done(accumulated_text));
+        }
+
         Ok(())
     }
 
-    /// Parse a stream-json line into a categorized event.
+    /// Parse an assistant message event and emit activity notifications.
     ///
-    /// Claude Code `--output-format stream-json` emits JSON objects.
-    /// We categorize them as text deltas (incremental tokens), result
-    /// events (final complete text), or other (ignored).
-    fn parse_stream_json_event(line: &str) -> StreamJsonEvent {
-        let v: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => return StreamJsonEvent::Other,
-        };
-
-        // Stream event wrapping: {"type":"stream_event","event":{...}}
-        if let Some(event) = v.get("event") {
-            // content_block_delta with text_delta
-            if let Some(delta) = event.get("delta") {
-                if delta.get("type").and_then(|t| t.as_str()) == Some("text_delta") {
-                    if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                        return StreamJsonEvent::TextDelta(text.to_string());
-                    }
+    /// Claude Code's `{"type":"assistant","message":{...}}` events show
+    /// what the AI is doing. We display tool use as informational activity.
+    fn parse_assistant_activity(
+        message: &serde_json::Value,
+        tx: &mpsc::Sender<AiEvent>,
+    ) {
+        // Check for content array.
+        if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
+            for block in content {
+                let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if block_type == "tool_use" {
+                    let name = block
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let input = block.get("input").cloned().unwrap_or_default();
+                    let summary = Self::summarize_tool_input_value(&input);
+                    let _ = tx.send(AiEvent::Activity(format!(
+                        "Tool: {name} {summary}"
+                    )));
                 }
             }
         }
 
-        // Top-level result event: {"type":"result","result":"..."}
-        if v.get("type").and_then(|t| t.as_str()) == Some("result") {
-            if let Some(text) = v.get("result").and_then(|r| r.as_str()) {
-                return StreamJsonEvent::Result(text.to_string());
+        // Check for single tool_use message format.
+        if let Some(msg_type) = message.get("type").and_then(|t| t.as_str()) {
+            if msg_type == "tool_use" {
+                let name = message
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let input = message.get("input").cloned().unwrap_or_default();
+                let summary = Self::summarize_tool_input_value(&input);
+                let _ = tx.send(AiEvent::Activity(format!(
+                    "Tool: {name} {summary}"
+                )));
             }
         }
+    }
 
-        StreamJsonEvent::Other
+    /// Parse a tool result event and emit an activity notification.
+    fn parse_tool_result_activity(
+        message: &serde_json::Value,
+        tx: &mpsc::Sender<AiEvent>,
+    ) {
+        let content = message
+            .get("content")
+            .and_then(|c| {
+                if let Some(s) = c.as_str() {
+                    Some(s.to_string())
+                } else if let Some(arr) = c.as_array() {
+                    let texts: Vec<String> = arr
+                        .iter()
+                        .filter_map(|b| {
+                            b.get("text")
+                                .and_then(|t| t.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect();
+                    if texts.is_empty() {
+                        None
+                    } else {
+                        Some(texts.join("\n"))
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+        if !content.is_empty() {
+            let summary = if content.len() > 150 {
+                format!("{}...", &content[..150])
+            } else {
+                content
+            };
+            let _ = tx.send(AiEvent::Activity(format!("Result: {summary}")));
+        }
+    }
+
+    /// Create a short summary of tool input JSON for display.
+    fn summarize_tool_input(json_str: &str) -> String {
+        if json_str.is_empty() {
+            return String::new();
+        }
+        match serde_json::from_str::<serde_json::Value>(json_str) {
+            Ok(v) => Self::summarize_tool_input_value(&v),
+            Err(_) => {
+                // Show raw truncated.
+                if json_str.len() > 100 {
+                    format!("{}...", &json_str[..100])
+                } else {
+                    json_str.to_string()
+                }
+            }
+        }
+    }
+
+    /// Summarize a tool input Value for compact display.
+    fn summarize_tool_input_value(input: &serde_json::Value) -> String {
+        if let Some(obj) = input.as_object() {
+            // Show key=value pairs compactly.
+            let parts: Vec<String> = obj
+                .iter()
+                .take(3)
+                .map(|(k, v)| {
+                    let val_str = match v {
+                        serde_json::Value::String(s) => {
+                            if s.len() > 60 {
+                                format!("\"{}...\"", &s[..60])
+                            } else {
+                                format!("\"{s}\"")
+                            }
+                        }
+                        other => {
+                            let s = other.to_string();
+                            if s.len() > 60 {
+                                format!("{}...", &s[..60])
+                            } else {
+                                s
+                            }
+                        }
+                    };
+                    format!("{k}={val_str}")
+                })
+                .collect();
+            let suffix = if obj.len() > 3 { ", ..." } else { "" };
+            format!("({}{})", parts.join(", "), suffix)
+        } else {
+            let s = input.to_string();
+            if s.len() > 100 {
+                format!("{}...", &s[..100])
+            } else {
+                s
+            }
+        }
+    }
+
+    /// Extract tool calls from the model's response text.
+    ///
+    /// Looks for lines matching `TOOL_CALL: {...}` and extracts them.
+    /// Returns the remaining display text (with tool call lines removed)
+    /// and a list of `(name, input)` pairs.
+    fn extract_tool_calls(text: &str) -> (String, Vec<(String, serde_json::Value)>) {
+        let mut display_lines = Vec::new();
+        let mut tool_calls = Vec::new();
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some(json_str) = trimmed.strip_prefix("TOOL_CALL:") {
+                let json_str = json_str.trim();
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let (Some(name), Some(input)) = (
+                        v.get("name").and_then(|n| n.as_str()),
+                        v.get("input"),
+                    ) {
+                        tool_calls.push((name.to_string(), input.clone()));
+                        continue;
+                    }
+                }
+            }
+            display_lines.push(line);
+        }
+
+        // Trim trailing empty lines from display text.
+        while display_lines
+            .last()
+            .map_or(false, |l| l.trim().is_empty())
+        {
+            display_lines.pop();
+        }
+
+        (display_lines.join("\n"), tool_calls)
     }
 }
 
-/// Categorized stream-json event from the Claude Code CLI.
-enum StreamJsonEvent {
-    /// Incremental text token from a content_block_delta.
-    TextDelta(String),
-    /// Final complete result text.
-    Result(String),
-    /// Any other event type (ignored).
-    Other,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_tool_calls_no_tools() {
+        let text = "Here is some regular text.\nNo tools here.";
+        let (display, tools) = ClaudeCodeClient::extract_tool_calls(text);
+        assert_eq!(display, "Here is some regular text.\nNo tools here.");
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn test_extract_tool_calls_with_tools() {
+        let text = "Let me read that file.\n\
+                     TOOL_CALL: {\"name\": \"read_file\", \"input\": {\"path\": \"src/main.rs\"}}\n";
+        let (display, tools) = ClaudeCodeClient::extract_tool_calls(text);
+        assert_eq!(display, "Let me read that file.");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].0, "read_file");
+        assert_eq!(
+            tools[0].1.get("path").and_then(|v| v.as_str()),
+            Some("src/main.rs")
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_calls_multiple() {
+        let text = "I'll search and then read.\n\
+                     TOOL_CALL: {\"name\": \"search_files\", \"input\": {\"pattern\": \"fn main\"}}\n\
+                     TOOL_CALL: {\"name\": \"read_file\", \"input\": {\"path\": \"Cargo.toml\"}}";
+        let (display, tools) = ClaudeCodeClient::extract_tool_calls(text);
+        assert_eq!(display, "I'll search and then read.");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].0, "search_files");
+        assert_eq!(tools[1].0, "read_file");
+    }
+
+    #[test]
+    fn test_extract_tool_calls_invalid_json_kept_as_text() {
+        let text = "Some text\nTOOL_CALL: not valid json\nMore text";
+        let (display, tools) = ClaudeCodeClient::extract_tool_calls(text);
+        assert_eq!(display, "Some text\nTOOL_CALL: not valid json\nMore text");
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn test_summarize_tool_input_value() {
+        let input = serde_json::json!({"path": "src/main.rs", "pattern": "fn main"});
+        let summary = ClaudeCodeClient::summarize_tool_input_value(&input);
+        assert!(summary.contains("path="));
+        assert!(summary.contains("pattern="));
+    }
+
+    #[test]
+    fn test_summarize_tool_input_empty() {
+        let summary = ClaudeCodeClient::summarize_tool_input("");
+        assert!(summary.is_empty());
+    }
 }

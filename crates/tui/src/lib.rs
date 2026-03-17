@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod chat_panel;
+pub mod chat_tools;
 pub mod config;
 pub mod conversation_history;
 pub mod diff_view;
