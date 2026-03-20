@@ -113,6 +113,8 @@ pub struct ChatPanel {
     pub in_tool_loop: bool,
     /// Number of tool iterations in the current loop (for safety limit).
     pub tool_loop_count: usize,
+    /// Description of attached selection context (e.g. "12 lines from main.rs").
+    pub selection_context: Option<String>,
 }
 
 impl ChatPanel {
@@ -133,6 +135,7 @@ impl ChatPanel {
             pending_approval: None,
             in_tool_loop: false,
             tool_loop_count: 0,
+            selection_context: None,
         }
     }
 

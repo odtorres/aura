@@ -58,7 +58,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Draw tab bar if multiple tabs are open.
     if has_tab_bar {
+        app.tab_bar_rect = tab_bar_area;
         draw_tab_bar(frame, app, tab_bar_area);
+    } else {
+        app.tab_bar_rect = Rect::default();
     }
 
     // If the file tree is visible, split the editor area horizontally.
@@ -1047,12 +1050,30 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         1u16
     };
+    // Selection context badge takes 1 row when present.
+    let has_selection_ctx = panel.selection_context.is_some();
+    let selection_ctx_height: u16 = if has_selection_ctx { 1 } else { 0 };
+
     // 2 for borders + number of content lines, minimum 3, max half of panel
     let max_input_height = (inner.height / 2).max(3);
     let input_height = (input_lines + 2).clamp(3, max_input_height);
-    let msg_height = inner.height.saturating_sub(input_height);
+    let bottom_height = input_height + selection_ctx_height;
+    let msg_height = inner.height.saturating_sub(bottom_height);
     let msg_area = Rect::new(inner.x, inner.y, inner.width, msg_height);
-    let input_area = Rect::new(inner.x, inner.y + msg_height, inner.width, input_height);
+    let selection_ctx_area = Rect::new(inner.x, inner.y + msg_height, inner.width, selection_ctx_height);
+    let input_area = Rect::new(inner.x, inner.y + msg_height + selection_ctx_height, inner.width, input_height);
+
+    // Draw selection context badge if present.
+    if let Some(ctx) = &panel.selection_context {
+        let badge = ratatui::text::Line::from(vec![
+            Span::styled(" @ ", Style::default().fg(Color::Black).bg(Color::Cyan)),
+            Span::styled(
+                format!(" {ctx}"),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(badge), selection_ctx_area);
+    }
 
     // ── Render messages ──
     let max_width = msg_area.width as usize;
@@ -2192,7 +2213,30 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         mcp_indicator,
         experiment_indicator
     );
-    let right = format!(" {}:{} ", app.cursor().row + 1, app.cursor().col + 1);
+    // Show selection info when in visual mode.
+    let selection_info = if matches!(app.mode, Mode::Visual | Mode::VisualLine) {
+        if let Some((sel_start, sel_end)) = app.visual_selection_range() {
+            let start_cur = app.buffer().char_idx_to_cursor(sel_start);
+            let end_cur = app.buffer().char_idx_to_cursor(sel_end);
+            let lines = end_cur.row.saturating_sub(start_cur.row) + 1;
+            let chars = sel_end.saturating_sub(sel_start);
+            if lines > 1 {
+                format!(" {} lines selected │", lines)
+            } else {
+                format!(" {} char{} selected │", chars, if chars == 1 { "" } else { "s" })
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+    let right = format!(
+        "{} {}:{} ",
+        selection_info,
+        app.cursor().row + 1,
+        app.cursor().col + 1,
+    );
 
     let padding = area
         .width

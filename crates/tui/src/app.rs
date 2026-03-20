@@ -225,6 +225,8 @@ pub struct App {
     pub file_tree_rect: Rect,
     /// Cached conversation history panel rect from the last render frame.
     pub conv_history_rect: Rect,
+    /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
+    pub tab_bar_rect: Rect,
 }
 
 /// A tool call pending execution or approval.
@@ -433,6 +435,7 @@ impl App {
             terminal_rect: Rect::default(),
             file_tree_rect: Rect::default(),
             conv_history_rect: Rect::default(),
+            tab_bar_rect: Rect::default(),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -491,6 +494,21 @@ impl App {
         while !self.should_quit {
             if self.tab().highlights_dirty {
                 self.refresh_highlights();
+            }
+            // Update live selection context indicator for the chat panel.
+            if self.chat_panel.visible {
+                self.chat_panel.selection_context =
+                    self.visual_selection_range().map(|(sel_start, sel_end)| {
+                        let tab = self.tab();
+                        let start_cur = tab.buffer.char_idx_to_cursor(sel_start);
+                        let end_cur = tab.buffer.char_idx_to_cursor(sel_end);
+                        let lines = end_cur.row.saturating_sub(start_cur.row) + 1;
+                        let file_name = tab.file_name().to_string();
+                        format!(
+                            "{lines} line{} from {file_name}",
+                            if lines == 1 { "" } else { "s" }
+                        )
+                    });
             }
             terminal.draw(|frame| crate::render::draw(frame, self))?;
 
@@ -2459,6 +2477,34 @@ impl App {
                 && row >= r.y && row < r.y + r.height
         };
 
+        // Tab bar: clicking a tab switches to it.
+        if self.tabs.count() > 1 && point_in(self.tab_bar_rect) {
+            let click_x = (col - self.tab_bar_rect.x) as usize;
+            let max_width = self.tab_bar_rect.width as usize;
+            let mut x = 0usize;
+            for (i, tab) in self.tabs.tabs().iter().enumerate() {
+                let label = if i < 9 {
+                    format!(" {}:{} ", i + 1, tab.title())
+                } else {
+                    format!(" {} ", tab.title())
+                };
+                let label_len = label.len();
+                if x + label_len + 1 > max_width {
+                    break;
+                }
+                if click_x >= x && click_x < x + label_len {
+                    self.tabs.switch_to(i);
+                    return;
+                }
+                x += label_len;
+                // Separator character.
+                if i + 1 < self.tabs.count() {
+                    x += 1;
+                }
+            }
+            return;
+        }
+
         if self.terminal.visible && point_in(self.terminal_rect) {
             self.terminal_focused = true;
             self.file_tree_focused = false;
@@ -2589,6 +2635,19 @@ impl App {
             if let Err(e) = store.add_message(conv_id, MessageRole::HumanIntent, &text, None) {
                 tracing::warn!("Failed to persist chat user message: {e}");
             }
+        }
+
+        // Capture selection context for the chat indicator.
+        if let Some((sel_start, sel_end)) = self.visual_selection_range() {
+            let tab = self.tab();
+            let start_cur = tab.buffer.char_idx_to_cursor(sel_start);
+            let end_cur = tab.buffer.char_idx_to_cursor(sel_end);
+            let lines = end_cur.row.saturating_sub(start_cur.row) + 1;
+            let file_name = tab.file_name();
+            self.chat_panel.selection_context =
+                Some(format!("{lines} line{} from {file_name}", if lines == 1 { "" } else { "s" }));
+        } else {
+            self.chat_panel.selection_context = None;
         }
 
         // Build system prompt with editor context.
@@ -2892,18 +2951,36 @@ impl App {
         prompt.push_str(&format!("Current file: {file_path}\n"));
         prompt.push_str(&format!("Lines: {line_count}, Cursor: {cursor_row}:{cursor_col}\n"));
 
-        // Include a snippet of surrounding code for context.
-        let start = cursor_row.saturating_sub(6);
-        let end = (cursor_row + 5).min(line_count);
-        if start < end {
-            prompt.push_str("\nCode around cursor:\n```\n");
-            for i in start..end {
-                if let Some(line) = tab.buffer.line(i) {
-                    let marker = if i + 1 == cursor_row { ">" } else { " " };
-                    prompt.push_str(&format!("{marker}{:4} | {}\n", i + 1, line));
+        // Include selected text if there is an active visual selection.
+        if let Some((sel_start, sel_end)) = self.visual_selection_range() {
+            let selected_text = tab.buffer.rope().slice(sel_start..sel_end).to_string();
+            let start_cursor = tab.buffer.char_idx_to_cursor(sel_start);
+            let end_cursor = tab.buffer.char_idx_to_cursor(sel_end);
+            let sel_lines = end_cursor.row.saturating_sub(start_cursor.row) + 1;
+            prompt.push_str(&format!(
+                "\nThe user has selected {} line{} (L{}:{} to L{}:{}):\n```\n{}\n```\n",
+                sel_lines,
+                if sel_lines == 1 { "" } else { "s" },
+                start_cursor.row + 1,
+                start_cursor.col + 1,
+                end_cursor.row + 1,
+                end_cursor.col + 1,
+                selected_text,
+            ));
+        } else {
+            // No selection — include a snippet of surrounding code for context.
+            let start = cursor_row.saturating_sub(6);
+            let end = (cursor_row + 5).min(line_count);
+            if start < end {
+                prompt.push_str("\nCode around cursor:\n```\n");
+                for i in start..end {
+                    if let Some(line) = tab.buffer.line(i) {
+                        let marker = if i + 1 == cursor_row { ">" } else { " " };
+                        prompt.push_str(&format!("{marker}{:4} | {}\n", i + 1, line));
+                    }
                 }
+                prompt.push_str("```\n");
             }
-            prompt.push_str("```\n");
         }
 
         // Include diagnostics if any.
