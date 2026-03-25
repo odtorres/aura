@@ -13,6 +13,80 @@ use aura_core::{Buffer, Cursor};
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// Detected indentation style for a buffer.
+#[derive(Debug, Clone, Copy)]
+pub enum IndentStyle {
+    /// Tab characters for indentation.
+    Tabs,
+    /// Spaces for indentation, with the given width.
+    Spaces(u8),
+}
+
+impl IndentStyle {
+    /// Return the string representation of one indentation level.
+    pub fn unit(&self) -> String {
+        match self {
+            IndentStyle::Tabs => "\t".to_string(),
+            IndentStyle::Spaces(w) => " ".repeat(*w as usize),
+        }
+    }
+}
+
+/// Detect the indent style of a buffer by scanning the first 100 non-empty lines.
+///
+/// Returns `Spaces(4)` as default if the buffer is empty or ambiguous.
+pub fn detect_indent_style(buffer: &Buffer) -> IndentStyle {
+    let mut tab_count = 0u32;
+    let mut space_count = 0u32;
+    let mut space_widths = [0u32; 9]; // index 0 unused, 1..=8
+
+    let line_limit = buffer.line_count().min(100);
+    let mut prev_indent = 0usize;
+
+    for i in 0..line_limit {
+        if let Some(line) = buffer.line_text(i) {
+            let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+            if trimmed.is_empty() {
+                continue;
+            }
+            let leading: String = trimmed.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+            if leading.is_empty() {
+                prev_indent = 0;
+                continue;
+            }
+            if leading.starts_with('\t') {
+                tab_count += 1;
+            } else {
+                space_count += 1;
+                let indent = leading.len();
+                let delta = if indent > prev_indent {
+                    indent - prev_indent
+                } else {
+                    0
+                };
+                if delta >= 1 && delta <= 8 {
+                    space_widths[delta] += 1;
+                }
+                prev_indent = indent;
+            }
+        }
+    }
+
+    if tab_count > space_count {
+        return IndentStyle::Tabs;
+    }
+
+    // Find the most common space indent width.
+    let best_width = space_widths[1..]
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, &count)| count)
+        .map(|(idx, _)| idx + 1)
+        .unwrap_or(4);
+
+    IndentStyle::Spaces(best_width as u8)
+}
+
 /// Per-buffer state held by a single editor tab.
 pub struct EditorTab {
     /// The text buffer.
@@ -51,6 +125,8 @@ pub struct EditorTab {
     pub semantic_info: Option<String>,
     /// Cached line ranges that have conversation history.
     pub conversation_lines: Vec<(usize, usize)>,
+    /// Detected indent style for this buffer.
+    pub indent_style: IndentStyle,
 }
 
 impl EditorTab {
@@ -97,6 +173,8 @@ impl EditorTab {
             Vec::new()
         };
 
+        let indent_style = detect_indent_style(&buffer);
+
         let mut tab = Self {
             buffer,
             cursor: Cursor::origin(),
@@ -116,6 +194,7 @@ impl EditorTab {
             semantic_dirty: true,
             semantic_info: None,
             conversation_lines,
+            indent_style,
         };
         tab.refresh_semantic_index();
         tab

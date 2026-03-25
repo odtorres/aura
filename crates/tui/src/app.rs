@@ -227,6 +227,24 @@ pub struct App {
     pub conv_history_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
     pub tab_bar_rect: Rect,
+
+    // --- Bracket matching ---
+    /// Position (row, col) of the matching bracket for the char under cursor.
+    pub matching_bracket: Option<(usize, usize)>,
+
+    // --- Find & Replace ---
+    /// Confirmed search query (after pressing Enter).
+    pub search_query: Option<String>,
+    /// Text being typed in the search bar (while search_active is true).
+    pub search_input: String,
+    /// Whether we are currently typing a search query (/ has been pressed).
+    pub search_active: bool,
+    /// Whether search direction is forward (/) or backward (?).
+    pub search_forward: bool,
+    /// All match positions as (start_char_idx, end_char_idx) pairs.
+    pub search_matches: Vec<(usize, usize)>,
+    /// Index into search_matches for the current/focused match.
+    pub search_current: usize,
 }
 
 /// A tool call pending execution or approval.
@@ -436,6 +454,13 @@ impl App {
             file_tree_rect: Rect::default(),
             conv_history_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
+            matching_bracket: None,
+            search_query: None,
+            search_input: String::new(),
+            search_active: false,
+            search_forward: true,
+            search_matches: Vec::new(),
+            search_current: 0,
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -510,6 +535,7 @@ impl App {
                         )
                     });
             }
+            self.update_matching_bracket();
             terminal.draw(|frame| crate::render::draw(frame, self))?;
 
             // Set blinking bar cursor when chat input is focused, block otherwise.
@@ -1416,6 +1442,93 @@ impl App {
             };
             tab.cursor.col = tab.cursor.col.min(max_col);
         }
+    }
+
+    /// Update the matching bracket position for the character under the cursor.
+    pub fn update_matching_bracket(&mut self) {
+        let tab = self.tab();
+        let char_idx = tab.buffer.cursor_to_char_idx(&tab.cursor);
+        self.matching_bracket = tab
+            .buffer
+            .find_matching_bracket(char_idx)
+            .map(|match_idx| {
+                let cursor = self.tab().buffer.char_idx_to_cursor(match_idx);
+                (cursor.row, cursor.col)
+            });
+    }
+
+    /// Populate search_matches from the current buffer using search_query.
+    pub fn execute_search(&mut self) {
+        if let Some(ref query) = self.search_query {
+            let matches = self.tab().buffer.find_all(query);
+            self.search_matches = matches;
+            // Find the match nearest to (and at or after) the cursor.
+            if !self.search_matches.is_empty() {
+                let cursor_char = self.tab().buffer.cursor_to_char_idx(&self.tab().cursor);
+                self.search_current = self
+                    .search_matches
+                    .iter()
+                    .position(|&(s, _)| s >= cursor_char)
+                    .unwrap_or(0);
+            }
+        } else {
+            self.search_matches.clear();
+            self.search_current = 0;
+        }
+    }
+
+    /// Jump to the next search match from the current position.
+    pub fn search_next(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        // Find the next match after the cursor.
+        let cursor_char = self.tab().buffer.cursor_to_char_idx(&self.tab().cursor);
+        if let Some(pos) = self
+            .search_matches
+            .iter()
+            .position(|&(s, _)| s > cursor_char)
+        {
+            self.search_current = pos;
+        } else {
+            // Wrap around.
+            self.search_current = 0;
+        }
+        let (start, _) = self.search_matches[self.search_current];
+        let new_cursor = self.tab().buffer.char_idx_to_cursor(start);
+        self.tab_mut().cursor = new_cursor;
+        self.clamp_cursor();
+    }
+
+    /// Jump to the previous search match from the current position.
+    pub fn search_prev(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        let cursor_char = self.tab().buffer.cursor_to_char_idx(&self.tab().cursor);
+        if let Some(pos) = self
+            .search_matches
+            .iter()
+            .rposition(|&(s, _)| s < cursor_char)
+        {
+            self.search_current = pos;
+        } else {
+            // Wrap around.
+            self.search_current = self.search_matches.len().saturating_sub(1);
+        }
+        let (start, _) = self.search_matches[self.search_current];
+        let new_cursor = self.tab().buffer.char_idx_to_cursor(start);
+        self.tab_mut().cursor = new_cursor;
+        self.clamp_cursor();
+    }
+
+    /// Clear all search state.
+    pub fn clear_search(&mut self) {
+        self.search_query = None;
+        self.search_input.clear();
+        self.search_active = false;
+        self.search_matches.clear();
+        self.search_current = 0;
     }
 
     /// Ensure the cursor is visible within the viewport.

@@ -547,6 +547,115 @@ impl Buffer {
         &self.history[..self.history_pos]
     }
 
+    // --- Bracket matching ---
+
+    /// Bracket pairs used for matching.
+    const BRACKET_PAIRS: &'static [(char, char)] = &[('(', ')'), ('{', '}'), ('[', ']')];
+
+    /// Find the matching bracket for the character at `char_idx`.
+    ///
+    /// Returns `Some(matching_char_idx)` if the character is one of `(){}[]`
+    /// and a matching counterpart is found. Handles nesting correctly.
+    pub fn find_matching_bracket(&self, char_idx: usize) -> Option<usize> {
+        if char_idx >= self.rope.len_chars() {
+            return None;
+        }
+        let ch = self.rope.char(char_idx);
+
+        // Check if it's an opening bracket.
+        for &(open, close) in Self::BRACKET_PAIRS {
+            if ch == open {
+                return self.scan_forward(char_idx, open, close);
+            }
+            if ch == close {
+                return self.scan_backward(char_idx, open, close);
+            }
+        }
+        None
+    }
+
+    /// Scan forward from `start` to find the matching closing bracket.
+    fn scan_forward(&self, start: usize, open: char, close: char) -> Option<usize> {
+        let len = self.rope.len_chars();
+        let mut depth: usize = 0;
+        for i in start..len {
+            let c = self.rope.char(i);
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
+    /// Scan backward from `start` to find the matching opening bracket.
+    fn scan_backward(&self, start: usize, open: char, close: char) -> Option<usize> {
+        let mut depth: usize = 0;
+        for i in (0..=start).rev() {
+            let c = self.rope.char(i);
+            if c == close {
+                depth += 1;
+            } else if c == open {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
+    // --- Search ---
+
+    /// Find all occurrences of `query` in the buffer.
+    ///
+    /// Returns a `Vec` of `(start_char_idx, end_char_idx)` pairs.
+    /// Non-overlapping matches only.
+    pub fn find_all(&self, query: &str) -> Vec<(usize, usize)> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let text = self.rope.to_string();
+        let query_char_len = query.chars().count();
+        text.match_indices(query)
+            .map(|(byte_offset, _)| {
+                let char_start = text[..byte_offset].chars().count();
+                (char_start, char_start + query_char_len)
+            })
+            .collect()
+    }
+
+    /// Replace all occurrences of `old` with `new` within the char range
+    /// `[range_start, range_end)`.
+    ///
+    /// Replacements are applied from the end backwards to preserve earlier
+    /// indices. Returns the number of replacements made.
+    pub fn replace_all(
+        &mut self,
+        old: &str,
+        new: &str,
+        range_start: usize,
+        range_end: usize,
+        author: AuthorId,
+    ) -> usize {
+        let matches = self.find_all(old);
+        let old_char_len = old.chars().count();
+        let mut count = 0;
+        // Apply from end to start so indices stay valid.
+        for &(start, _end) in matches.iter().rev() {
+            if start >= range_start && start + old_char_len <= range_end {
+                self.delete(start, start + old_char_len, author.clone());
+                self.insert(start, new, author.clone());
+                count += 1;
+            }
+        }
+        count
+    }
+
     /// Return a text representation of the undo history tree.
     ///
     /// Each entry shows: its index, the author, the edit type and size, and
@@ -712,6 +821,114 @@ mod tests {
         let deleted = buf.delete_line(1, human());
         assert_eq!(deleted, Some("line two\n".to_string()));
         assert_eq!(buf.text(), "line one\nline three");
+    }
+
+    // --- Bracket matching tests ---
+
+    #[test]
+    fn test_bracket_match_simple_parens() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "(hello)", human());
+        assert_eq!(buf.find_matching_bracket(0), Some(6)); // ( -> )
+        assert_eq!(buf.find_matching_bracket(6), Some(0)); // ) -> (
+    }
+
+    #[test]
+    fn test_bracket_match_nested() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "({[]})", human());
+        assert_eq!(buf.find_matching_bracket(0), Some(5)); // ( -> )
+        assert_eq!(buf.find_matching_bracket(1), Some(4)); // { -> }
+        assert_eq!(buf.find_matching_bracket(2), Some(3)); // [ -> ]
+        assert_eq!(buf.find_matching_bracket(3), Some(2)); // ] -> [
+        assert_eq!(buf.find_matching_bracket(4), Some(1)); // } -> {
+        assert_eq!(buf.find_matching_bracket(5), Some(0)); // ) -> (
+    }
+
+    #[test]
+    fn test_bracket_match_unmatched() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "(hello", human());
+        assert_eq!(buf.find_matching_bracket(0), None);
+    }
+
+    #[test]
+    fn test_bracket_match_not_a_bracket() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "hello", human());
+        assert_eq!(buf.find_matching_bracket(0), None);
+    }
+
+    #[test]
+    fn test_bracket_match_empty_buffer() {
+        let buf = Buffer::new();
+        assert_eq!(buf.find_matching_bracket(0), None);
+    }
+
+    #[test]
+    fn test_bracket_match_code() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "fn main() {\n    let x = vec![1, 2];\n}", human());
+        // The opening { is at char index 11
+        let text = buf.text();
+        let open_brace = text.find('{').unwrap();
+        let close_brace = text.rfind('}').unwrap();
+        assert_eq!(
+            buf.find_matching_bracket(open_brace),
+            Some(close_brace)
+        );
+        assert_eq!(
+            buf.find_matching_bracket(close_brace),
+            Some(open_brace)
+        );
+    }
+
+    // --- Search tests ---
+
+    #[test]
+    fn test_find_all_basic() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "hello hello hello", human());
+        let matches = buf.find_all("hello");
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0], (0, 5));
+        assert_eq!(matches[1], (6, 11));
+        assert_eq!(matches[2], (12, 17));
+    }
+
+    #[test]
+    fn test_find_all_no_match() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "hello world", human());
+        let matches = buf.find_all("xyz");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_find_all_empty_query() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "hello", human());
+        assert!(buf.find_all("").is_empty());
+    }
+
+    #[test]
+    fn test_replace_all_basic() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "foo bar foo baz foo", human());
+        let len = buf.len_chars();
+        let count = buf.replace_all("foo", "qux", 0, len, human());
+        assert_eq!(count, 3);
+        assert_eq!(buf.text(), "qux bar qux baz qux");
+    }
+
+    #[test]
+    fn test_replace_all_in_range() {
+        let mut buf = Buffer::new();
+        buf.insert(0, "foo\nfoo\nfoo", human());
+        // Replace only in the first line (chars 0..4 = "foo\n").
+        let count = buf.replace_all("foo", "bar", 0, 4, human());
+        assert_eq!(count, 1);
+        assert_eq!(buf.text(), "bar\nfoo\nfoo");
     }
 }
 

@@ -2044,8 +2044,40 @@ fn draw_editor(
                     .map(|(s, e)| char_abs >= s && char_abs < e)
                     .unwrap_or(false);
 
+                // Check bracket match highlight.
+                let is_bracket_match = app
+                    .matching_bracket
+                    .map(|(r, c)| r == line_idx && c == visible_start + col)
+                    .unwrap_or(false);
+
+                // Check search match highlight.
+                let is_current_search = app
+                    .search_matches
+                    .get(app.search_current)
+                    .map(|&(s, e)| char_abs >= s && char_abs < e)
+                    .unwrap_or(false);
+                let is_search_match = !is_current_search
+                    && app
+                        .search_matches
+                        .iter()
+                        .any(|&(s, e)| char_abs >= s && char_abs < e);
+
                 let style = if in_selection {
                     sel_style
+                } else if is_current_search {
+                    Style::default()
+                        .bg(Color::Yellow)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD)
+                } else if is_search_match {
+                    Style::default()
+                        .bg(Color::Rgb(100, 80, 0))
+                        .fg(Color::White)
+                } else if is_bracket_match {
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else if let Some(hl) = hl_line {
                     let char_idx = visible_start + col;
                     if let Some(&color) = hl.colors.get(char_idx) {
@@ -2231,8 +2263,22 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         String::new()
     };
+    let search_info = if let Some(ref q) = app.search_query {
+        if app.search_matches.is_empty() {
+            format!("/{q} ")
+        } else {
+            format!(
+                "/{q} {}/{} ",
+                app.search_current + 1,
+                app.search_matches.len()
+            )
+        }
+    } else {
+        String::new()
+    };
     let right = format!(
-        "{} {}:{} ",
+        "{}{} {}:{} ",
+        search_info,
         selection_info,
         app.cursor().row + 1,
         app.cursor().col + 1,
@@ -2260,7 +2306,24 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the command bar at the bottom.
 fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let content = match app.mode {
+    let content = if app.search_active {
+        // Show search input bar.
+        let match_info = if app.search_matches.is_empty() {
+            if app.search_input.is_empty() {
+                String::new()
+            } else {
+                " (no matches)".to_string()
+            }
+        } else {
+            format!(
+                " ({}/{})",
+                app.search_current + 1,
+                app.search_matches.len()
+            )
+        };
+        format!("/{}{}", app.search_input, match_info)
+    } else {
+        match app.mode {
         Mode::Command => format!(":{}", app.command_input),
         Mode::Intent => format!("intent> {}", app.intent_input),
         Mode::Review => {
@@ -2297,6 +2360,7 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .or_else(|| app.status_message.clone())
                 .unwrap_or_default()
         }
+    }
     };
 
     let style = match app.mode {

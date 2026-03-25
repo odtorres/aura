@@ -22,6 +22,56 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // When search bar is active, route keys to search input.
+    if app.search_active {
+        match code {
+            KeyCode::Esc => {
+                app.search_active = false;
+                app.search_input.clear();
+                // Keep previous search_query/matches for n/N.
+            }
+            KeyCode::Enter => {
+                app.search_active = false;
+                if app.search_input.is_empty() {
+                    // Repeat last search if input is empty.
+                    if app.search_query.is_some() {
+                        app.search_next();
+                    }
+                } else {
+                    app.search_query = Some(app.search_input.clone());
+                    app.execute_search();
+                    if app.search_matches.is_empty() {
+                        app.set_status(format!("Pattern not found: {}", app.search_input));
+                    } else {
+                        app.search_next();
+                        let total = app.search_matches.len();
+                        let cur = app.search_current + 1;
+                        app.set_status(format!("{cur}/{total}"));
+                    }
+                }
+                app.search_input.clear();
+            }
+            KeyCode::Backspace => {
+                app.search_input.pop();
+                // Incremental search.
+                if !app.search_input.is_empty() {
+                    app.search_query = Some(app.search_input.clone());
+                    app.execute_search();
+                } else {
+                    app.search_matches.clear();
+                }
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.search_input.push(c);
+                // Incremental search.
+                app.search_query = Some(app.search_input.clone());
+                app.execute_search();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // When the terminal pane is focused, route all keystrokes to the PTY.
     if app.terminal_focused {
         match code {
@@ -772,6 +822,45 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
 
+        // % — jump to matching bracket.
+        KeyCode::Char('%') => {
+            if let Some((row, col)) = app.matching_bracket {
+                let tab = app.tab_mut();
+                tab.cursor.row = row;
+                tab.cursor.col = col;
+                app.clamp_cursor();
+            }
+        }
+
+        // / — start forward search.
+        KeyCode::Char('/') => {
+            app.search_active = true;
+            app.search_input.clear();
+            app.search_forward = true;
+        }
+
+        // n — next search match (only when not leader-pending and not Ctrl).
+        KeyCode::Char('n')
+            if !modifiers.contains(KeyModifiers::CONTROL) && !app.leader_pending =>
+        {
+            if app.search_query.is_some() {
+                app.search_next();
+                let total = app.search_matches.len();
+                let cur = app.search_current + 1;
+                app.set_status(format!("{cur}/{total}"));
+            }
+        }
+
+        // N — previous search match.
+        KeyCode::Char('N') if !app.leader_pending => {
+            if app.search_query.is_some() {
+                app.search_prev();
+                let total = app.search_matches.len();
+                let cur = app.search_current + 1;
+                app.set_status(format!("{cur}/{total}"));
+            }
+        }
+
         // ? — open help overlay (vim convention).
         KeyCode::Char('?') => {
             app.help.open();
@@ -846,10 +935,87 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             let new_pos = tab.buffer.insert_char(&tab.cursor, c, AuthorId::human());
             tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.mark_highlights_dirty();
+
+            // Auto-dedent: if we just typed a closing bracket on an
+            // otherwise-blank line, match the opener's indentation.
+            if matches!(c, '}' | ')' | ']') {
+                let tab = app.tab_mut();
+                let line_text = tab
+                    .buffer
+                    .line_text(tab.cursor.row)
+                    .unwrap_or_default();
+                let trimmed = line_text.trim_end_matches('\n').trim_end_matches('\r');
+                let trimmed_content = trimmed.trim_start();
+                // Only auto-dedent if the line has just this bracket.
+                if trimmed_content.len() == 1 && trimmed_content.starts_with(c) {
+                    // Find the char index of the bracket we just inserted.
+                    let bracket_char_idx = tab
+                        .buffer
+                        .cursor_to_char_idx(&tab.cursor)
+                        .saturating_sub(1);
+                    if let Some(match_idx) =
+                        tab.buffer.find_matching_bracket(bracket_char_idx)
+                    {
+                        let match_cursor =
+                            tab.buffer.char_idx_to_cursor(match_idx);
+                        let match_line = tab
+                            .buffer
+                            .line_text(match_cursor.row)
+                            .unwrap_or_default();
+                        let target_indent: String = match_line
+                            .chars()
+                            .take_while(|ch| *ch == ' ' || *ch == '\t')
+                            .collect();
+                        let current_indent_len = trimmed.len() - trimmed_content.len();
+                        let line_start = tab.buffer.cursor_to_char_idx(
+                            &aura_core::Cursor::new(tab.cursor.row, 0),
+                        );
+                        // Remove old indent and insert new one.
+                        if current_indent_len > 0 {
+                            tab.buffer.delete(
+                                line_start,
+                                line_start + current_indent_len,
+                                AuthorId::human(),
+                            );
+                        }
+                        tab.buffer
+                            .insert(line_start, &target_indent, AuthorId::human());
+                        // Position cursor after the bracket.
+                        tab.cursor.col = target_indent.len();
+                        app.mark_highlights_dirty();
+                    }
+                }
+            }
         }
         KeyCode::Enter => {
             let tab = app.tab_mut();
-            let new_pos = tab.buffer.insert_char(&tab.cursor, '\n', AuthorId::human());
+            let current_line = tab
+                .buffer
+                .line_text(tab.cursor.row)
+                .unwrap_or_default();
+            // Get leading whitespace from the current line.
+            let base_indent: String = current_line
+                .chars()
+                .take_while(|c| (*c == ' ' || *c == '\t'))
+                .collect();
+            // Check if text before cursor ends with an opening bracket/colon.
+            let text_before_cursor: String =
+                current_line.chars().take(tab.cursor.col).collect();
+            let trimmed = text_before_cursor.trim_end();
+            let increase_indent = trimmed.ends_with('{')
+                || trimmed.ends_with('(')
+                || trimmed.ends_with('[')
+                || trimmed.ends_with(':');
+            let indent_unit = tab.indent_style.unit();
+            let new_indent = if increase_indent {
+                format!("{}{}", base_indent, indent_unit)
+            } else {
+                base_indent
+            };
+            let insert_text = format!("\n{}", new_indent);
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            tab.buffer.insert(pos, &insert_text, AuthorId::human());
+            let new_pos = pos + insert_text.chars().count();
             tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             app.mark_highlights_dirty();
         }
@@ -1507,6 +1673,61 @@ fn execute_command(app: &mut App, cmd: &str) {
                     ));
                 }
             }
+        }
+        // :%s/old/new/g — global search and replace.
+        // :s/old/new/g — replace on current line only.
+        _ if cmd.trim().starts_with("%s/") || cmd.trim().starts_with("s/") => {
+            let trimmed = cmd.trim();
+            let is_global = trimmed.starts_with("%s/");
+            let pattern_str = if is_global {
+                &trimmed[3..]
+            } else {
+                &trimmed[2..]
+            };
+            // Parse old/new from the pattern (split on unescaped /).
+            let parts: Vec<&str> = pattern_str.splitn(3, '/').collect();
+            if parts.len() >= 2 && !parts[0].is_empty() {
+                let old = parts[0];
+                let new_text = parts[1];
+                let (range_start, range_end) = if is_global {
+                    (0, app.tab().buffer.len_chars())
+                } else {
+                    let row = app.tab().cursor.row;
+                    let start =
+                        app.tab().buffer.cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
+                    let end = if row + 1 < app.tab().buffer.line_count() {
+                        app.tab()
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(row + 1, 0))
+                    } else {
+                        app.tab().buffer.len_chars()
+                    };
+                    (start, end)
+                };
+                let count = app.tab_mut().buffer.replace_all(
+                    old,
+                    new_text,
+                    range_start,
+                    range_end,
+                    AuthorId::human(),
+                );
+                app.mark_highlights_dirty();
+                app.set_status(format!(
+                    "{count} replacement{}",
+                    if count == 1 { "" } else { "s" }
+                ));
+                // Update search highlights if active.
+                if app.search_query.is_some() {
+                    app.execute_search();
+                }
+            } else {
+                app.set_status("Usage: :%s/old/new/g or :s/old/new/g");
+            }
+        }
+        // :noh / :nohlsearch — clear search highlights.
+        "noh" | "nohlsearch" => {
+            app.clear_search();
+            app.set_status("Search cleared");
         }
         other => {
             app.set_status(format!("Unknown command: {}", other));
