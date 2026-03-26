@@ -66,10 +66,15 @@ fn highlight_color(idx: usize, theme: Option<&Theme>) -> Color {
 /// Supported languages for syntax highlighting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
+    /// Rust language.
     Rust,
+    /// Python language.
     Python,
+    /// TypeScript language.
     TypeScript,
+    /// TSX (TypeScript JSX) language.
     Tsx,
+    /// Go language.
     Go,
 }
 

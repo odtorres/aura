@@ -25,11 +25,19 @@ pub struct Edit {
 #[derive(Debug, Clone)]
 pub enum EditKind {
     /// Inserted text at a character index.
-    Insert { pos: usize, text: String },
+    Insert {
+        /// Character index where text was inserted.
+        pos: usize,
+        /// The text that was inserted.
+        text: String,
+    },
     /// Deleted a range of characters.
     Delete {
+        /// Start character index of the deleted range.
         start: usize,
+        /// End character index of the deleted range.
         end: usize,
+        /// The text that was deleted.
         deleted: String,
     },
 }

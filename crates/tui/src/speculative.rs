@@ -159,9 +159,13 @@ fn hash_content(content: &str) -> u64 {
 pub enum SpecEvent {
     /// Analysis produced suggestions for a region.
     Suggestions {
+        /// Path of the file the suggestions apply to.
         file_path: String,
+        /// First line of the analysed region.
         start_line: usize,
+        /// Last line of the analysed region.
         end_line: usize,
+        /// Suggested ghost-text edits.
         suggestions: Vec<GhostSuggestion>,
     },
     /// Multi-file changeset proposed.

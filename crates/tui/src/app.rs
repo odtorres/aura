@@ -1499,7 +1499,7 @@ impl App {
     ///
     /// Diagnostics on the current line are forwarded as context so the server
     /// can offer targeted quick-fixes. The result is handled asynchronously
-    /// in [`poll_lsp_events`] via [`lsp::LspEvent::CodeActions`].
+    /// in `poll_lsp_events` via `LspEvent::CodeActions`.
     pub fn lsp_request_code_actions(&mut self) {
         let tab = self.tab();
         let row = tab.cursor.row as u32;
@@ -1731,6 +1731,7 @@ impl App {
         }
     }
 
+    /// Set a transient status message shown in the command bar.
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some(msg.into());
     }
@@ -3971,6 +3972,7 @@ impl App {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// Open the file currently selected in the file-tree sidebar.
     pub fn open_file_tree_selection(&mut self) {
         if self.file_tree.entries.is_empty() {
             return;

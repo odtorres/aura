@@ -172,8 +172,11 @@ pub enum LspEvent {
 /// How to spawn a particular language server.
 #[derive(Debug, Clone)]
 pub struct LspServerConfig {
+    /// Command to run (e.g. `"rust-analyzer"`).
     pub command: String,
+    /// Arguments passed to the command.
     pub args: Vec<String>,
+    /// Language identifier sent to the server (e.g. `"rust"`).
     pub language_id: String,
 }
 

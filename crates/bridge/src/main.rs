@@ -17,7 +17,7 @@ use anyhow::{bail, Context, Result};
 /// Discover the running AURA instance's MCP server address.
 ///
 /// Resolution order:
-/// 1. `AURA_MCP_PORT` env var (connects to 127.0.0.1:<port>)
+/// 1. `AURA_MCP_PORT` env var (connects to `127.0.0.1:<port>`)
 /// 2. `~/.aura/mcp.json` discovery file written by AURA on startup
 fn discover_aura() -> Result<(String, u16)> {
     // 1. Explicit env override.

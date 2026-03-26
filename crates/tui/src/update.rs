@@ -36,10 +36,15 @@ pub enum UpdateStatus {
 /// How AURA was installed — used to tailor upgrade instructions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallMethod {
+    /// Installed via Homebrew.
     Homebrew,
+    /// Installed via `cargo install`.
     CargoInstall,
+    /// Installed from the AUR.
     Aur,
+    /// Installed via the shell installer script.
     ShellInstaller,
+    /// Unknown installation method.
     Unknown,
 }
 

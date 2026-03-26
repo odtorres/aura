@@ -29,9 +29,12 @@ pub struct McpServerConfig {
 /// A tool definition from an external MCP server.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExternalTool {
+    /// Unique name of the tool.
     pub name: String,
+    /// Human-readable description of the tool.
     #[serde(default)]
     pub description: String,
+    /// JSON Schema describing the tool's input parameters.
     #[serde(default, rename = "inputSchema")]
     pub input_schema: serde_json::Value,
 }
@@ -41,12 +44,16 @@ pub struct ExternalTool {
 pub enum McpClientEvent {
     /// Server initialized successfully.
     Initialized {
+        /// Name of the server that was initialized.
         server_name: String,
+        /// List of tools provided by the server.
         tools: Vec<ExternalTool>,
     },
     /// Result from a tool call.
     ToolResult {
+        /// ID of the original request that produced this result.
         request_id: u64,
+        /// Tool execution result, or an error message.
         result: Result<serde_json::Value, String>,
     },
     /// Server error.

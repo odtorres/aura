@@ -63,9 +63,13 @@ pub struct Author {
 /// Simple color enum — the TUI layer maps these to actual terminal colors.
 #[derive(Debug, Clone, Copy)]
 pub enum AuthorColor {
-    Green,  // Default for human
-    Blue,   // Default for AI
-    Purple, // Additional agents
+    /// Green — default for human authors.
+    Green,
+    /// Blue — default for AI authors.
+    Blue,
+    /// Purple — for additional agents.
+    Purple,
+    /// Yellow — extra author slot.
     Yellow,
 }
 

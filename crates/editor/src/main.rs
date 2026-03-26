@@ -2,7 +2,7 @@
 //!
 //! Usage:
 //!   aura              # Open scratch buffer
-//!   aura <file>       # Open a file
+//!   aura `<file>`     # Open a file
 
 use aura_core::Buffer;
 use aura_tui::app::App;

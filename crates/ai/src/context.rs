@@ -43,6 +43,7 @@ pub struct EditorContext {
     pub content: String,
     /// Current cursor position (1-indexed for display).
     pub cursor_line: usize,
+    /// Current cursor column (1-indexed for display).
     pub cursor_col: usize,
     /// The line at the cursor.
     pub current_line: String,

@@ -14,8 +14,11 @@ use std::thread;
 /// An MCP tool definition exposed to clients.
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolDefinition {
+    /// The tool name used to invoke it.
     pub name: String,
+    /// Human-readable description of what the tool does.
     pub description: String,
+    /// JSON Schema describing the tool's input parameters.
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
 }
@@ -23,9 +26,13 @@ pub struct ToolDefinition {
 /// An MCP resource definition.
 #[derive(Debug, Clone, Serialize)]
 pub struct ResourceDefinition {
+    /// URI identifying this resource (e.g. `editor://buffer`).
     pub uri: String,
+    /// Human-readable name of the resource.
     pub name: String,
+    /// Description of the resource content.
     pub description: String,
+    /// MIME type of the resource (e.g. `text/plain`).
     #[serde(rename = "mimeType")]
     pub mime_type: String,
 }
@@ -44,16 +51,24 @@ pub struct McpAppRequest {
 pub enum McpAction {
     /// Read the full buffer content or specific lines.
     ReadBuffer {
+        /// Optional first line to read (0-indexed).
         start_line: Option<usize>,
+        /// Optional last line to read (exclusive).
         end_line: Option<usize>,
     },
     /// Edit the buffer: insert or replace text.
     EditBuffer {
+        /// Line where the edit begins (0-indexed).
         start_line: usize,
+        /// Column where the edit begins (0-indexed).
         start_col: usize,
+        /// Optional line where the edit ends (for replacements).
         end_line: Option<usize>,
+        /// Optional column where the edit ends (for replacements).
         end_col: Option<usize>,
+        /// The replacement or insertion text.
         text: String,
+        /// Identifier of the agent making the edit.
         agent_id: String,
     },
     /// Get current diagnostics.
@@ -64,28 +79,52 @@ pub enum McpAction {
     GetCursorContext,
     /// Get conversation history for a file/range.
     GetConversationHistory {
+        /// Optional first line of the range to query.
         start_line: Option<usize>,
+        /// Optional last line of the range to query.
         end_line: Option<usize>,
     },
     /// Get the list of connected agents.
     ListAgents,
     /// Register a new agent.
-    RegisterAgent { name: String },
+    RegisterAgent {
+        /// Name of the agent to register.
+        name: String,
+    },
     /// Register a new agent with an optional role.
-    RegisterAgentWithRole { name: String, role: Option<String> },
+    RegisterAgentWithRole {
+        /// Name of the agent to register.
+        name: String,
+        /// Optional role to assign at registration time.
+        role: Option<String>,
+    },
     /// Assign a role to an already-registered agent.
-    AssignRole { name: String, role: String },
+    AssignRole {
+        /// Name of the target agent.
+        name: String,
+        /// Role to assign (e.g. "tests", "review").
+        role: String,
+    },
     /// Unregister an agent.
-    UnregisterAgent { name: String },
+    UnregisterAgent {
+        /// Name of the agent to remove.
+        name: String,
+    },
     /// Get buffer metadata (file path, language, line count, modified state).
     GetBufferInfo,
     /// Log a conversation message from an external tool (e.g. Claude Code).
     LogConversation {
+        /// Identifier of the agent logging the message.
         agent_id: String,
+        /// The conversation message text.
         message: String,
+        /// Role of the speaker (e.g. "user", "assistant").
         role: String,
+        /// Optional additional context for the message.
         context: Option<String>,
+        /// Optional start line the message relates to.
         line_start: Option<usize>,
+        /// Optional end line the message relates to.
         line_end: Option<usize>,
     },
 }
@@ -93,7 +132,9 @@ pub enum McpAction {
 /// Response from the App event loop back to the MCP server thread.
 #[derive(Debug, Clone, Serialize)]
 pub struct McpAppResponse {
+    /// Whether the requested action succeeded.
     pub success: bool,
+    /// JSON payload with the action result or error details.
     pub data: serde_json::Value,
 }
 
@@ -142,6 +183,7 @@ pub struct AgentInfo {
 /// Tracks connected MCP agents.
 #[derive(Debug, Clone, Default)]
 pub struct AgentRegistry {
+    /// Map from agent name to its connection info.
     pub agents: HashMap<String, AgentInfo>,
 }
 
