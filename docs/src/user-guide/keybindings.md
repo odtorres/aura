@@ -65,8 +65,9 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 |-----|--------|
 | `Ctrl+S` | Save file |
 | `Ctrl+N` | Toggle file tree sidebar (and focus) |
-| `Ctrl+J` | Toggle terminal pane (and focus) |
-| `` Ctrl+` `` | Toggle terminal pane (alternate) |
+| `Ctrl+T` | Toggle terminal pane (and focus) |
+| `Ctrl+J` | Toggle chat panel (and focus) |
+| `Ctrl+H` | Toggle conversation history panel |
 
 ## Leader Key Sequences (`Space` + key)
 
@@ -188,6 +189,23 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `Ctrl+K` / `Up` | Select previous match |
 | `Ctrl+J` / `Down` | Select next match |
 | Characters | Type to filter files |
+
+## Chat Panel (focused)
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Esc` | Unfocus (return to editor) |
+| `Ctrl+J` | Close chat panel |
+| `Ctrl+H` | Switch to conversation history |
+| `Ctrl+Up` | Scroll messages up |
+| `Ctrl+Down` | Scroll messages down |
+| `PageUp` / `PageDown` | Scroll by page |
+| `Up` / `Down` | Move cursor in input |
+| `Left` / `Right` | Move cursor in input |
+| `Home` / `End` | Jump to input start/end |
+| `Y` | Approve pending tool call |
+| `N` | Deny pending tool call |
 
 ## Conversation Panel
 

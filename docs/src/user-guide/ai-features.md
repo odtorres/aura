@@ -96,6 +96,18 @@ Every AI edit carries an `AuthorId` (e.g., `ai:claude`). This enables:
 - **Toggle**: `<Space>a` shows/hides authorship markers
 - **Status bar**: Shows who made the last change and how recently
 
+## Interactive Chat Panel
+
+For free-form conversation with the AI (rather than targeted code edits), use the chat panel:
+
+- Press `Ctrl+J` to open the chat panel on the right side
+- Type messages and press `Enter` to send
+- Responses stream in real time with full multi-turn context
+- Select code in Visual mode to include it as context automatically
+- The AI can execute tools (read/edit buffer, get diagnostics) with your approval
+
+See [Chat Panel](chat-panel.md) for the full reference.
+
 ## Conversation History
 
 Every AI interaction is stored in a local SQLite database:

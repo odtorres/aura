@@ -2233,8 +2233,15 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ""
     };
 
+    let update_indicator = match &app.update_status {
+        Some(crate::update::UpdateStatus::Available { version, .. }) => {
+            format!(" │ \u{2191} v{}", version)
+        }
+        _ => String::new(),
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -2243,7 +2250,8 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         diag_str,
         lsp_indicator,
         mcp_indicator,
-        experiment_indicator
+        experiment_indicator,
+        update_indicator
     );
     // Show selection info when in visual mode.
     let selection_info = if matches!(app.mode, Mode::Visual | Mode::VisualLine) {

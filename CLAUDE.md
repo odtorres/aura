@@ -135,7 +135,11 @@ aura-editor/
     │       ├── speculative.rs          # Background AI analysis/ghost suggestions
     │       ├── semantic_index.rs       # Semantic indexer
     │       ├── plugin.rs               # Plugin trait and PluginManager
-    │       └── embedded_terminal.rs    # PTY terminal (portable-pty + VTE)
+    │       ├── embedded_terminal.rs    # PTY terminal (portable-pty + VTE)
+    │       ├── chat_panel.rs           # Interactive AI chat panel
+    │       ├── chat_tools.rs           # Tool execution for chat panel
+    │       ├── session.rs              # Session persistence (save/restore)
+    │       └── help.rs                 # In-editor help overlay
     ├── ai/
     │   └── src/
     │       ├── lib.rs      # Config, re-exports

@@ -146,3 +146,11 @@ url = "ws://localhost:9001"
 ```
 
 AURA also runs its own MCP server, exposing editor tools and resources. See [MCP Protocol](../architecture/mcp.md) for details.
+
+## Session Persistence
+
+AURA automatically saves editor state to `.aura/session.json` in the project root on exit and restores it on the next launch. This includes open tabs, cursor positions, scroll offsets, active tab, and panel visibility.
+
+Session restore runs when AURA is launched without a file argument (`aura`). When a specific file is given (`aura file.rs`), the session is skipped.
+
+See [Session Persistence](../user-guide/session.md) for full details.

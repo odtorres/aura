@@ -17,6 +17,8 @@
 - [AI Features](user-guide/ai-features.md)
 - [Git Integration](user-guide/git.md)
 - [LSP](user-guide/lsp.md)
+- [Chat Panel](user-guide/chat-panel.md)
+- [Session Persistence](user-guide/session.md)
 - [Plugins](user-guide/plugins.md)
 - [Claude Code Integration](user-guide/claude-code.md)
 

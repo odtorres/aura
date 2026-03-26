@@ -10,6 +10,7 @@ use crate::help::HelpOverlay;
 use crate::git::{GitRepo, LineStatus};
 use crate::lsp::{Diagnostic, LspEvent};
 use crate::conversation_history::ConversationHistoryPanel;
+use crate::session::{self, Session, TabState, UiState};
 use crate::source_control::{SidebarView, SourceControlPanel};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
@@ -18,6 +19,7 @@ use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
 use crate::tab::{EditorTab, TabManager};
 use crate::chat_panel::ToolCallStatus;
 use crate::chat_tools;
+use crate::update::{self, UpdateStatus};
 use aura_ai::{
     estimate_tokens, editor_tools, tool_permission, AiBackend, AiConfig, AiEvent, ContentBlock,
     EditorContext, Message, ToolPermission,
@@ -245,6 +247,12 @@ pub struct App {
     pub search_matches: Vec<(usize, usize)>,
     /// Index into search_matches for the current/focused match.
     pub search_current: usize,
+
+    // --- Update checker ---
+    /// Receiver for background update check results.
+    update_receiver: Option<mpsc::Receiver<UpdateStatus>>,
+    /// Latest update status (displayed in status bar).
+    pub update_status: Option<UpdateStatus>,
 }
 
 /// A tool call pending execution or approval.
@@ -461,9 +469,18 @@ impl App {
             search_forward: true,
             search_matches: Vec::new(),
             search_current: 0,
+            update_receiver: None,
+            update_status: None,
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
+
+        // Spawn background update checker.
+        if config.update.check_for_updates {
+            let (tx, rx) = mpsc::channel();
+            update::spawn_update_check(tx, config.update.check_interval_hours);
+            app.update_receiver = Some(rx);
+        }
 
         // Show AI backend status on startup.
         if let Some(ref backend) = app.ai_client {
@@ -569,6 +586,9 @@ impl App {
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
 
+            // Poll for update check result.
+            self.poll_update_check();
+
             // Poll speculative engine and trigger analysis if idle.
             self.poll_speculative();
             self.maybe_trigger_analysis();
@@ -594,16 +614,35 @@ impl App {
             if event::poll(Duration::from_millis(50))? {
                 match event::read()? {
                     Event::Key(key) => self.handle_key(key.code, key.modifiers),
-                    Event::Mouse(mouse) => {
-                        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                    Event::Mouse(mouse) => match mouse.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
                             self.handle_mouse_click(mouse.column, mouse.row);
                         }
-                    }
+                        MouseEventKind::Drag(MouseButton::Left) => {
+                            self.handle_mouse_drag(mouse.column, mouse.row);
+                        }
+                        MouseEventKind::Up(MouseButton::Left) => {
+                            // Clear the drag anchor if no selection was made.
+                            if self.mode != Mode::Visual && self.mode != Mode::VisualLine {
+                                self.tab_mut().visual_anchor = None;
+                            }
+                        }
+                        MouseEventKind::ScrollUp => {
+                            self.handle_mouse_scroll(mouse.column, mouse.row, true);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            self.handle_mouse_scroll(mouse.column, mouse.row, false);
+                        }
+                        _ => {}
+                    },
                     Event::Resize(_, _) => {}
                     _ => {}
                 }
             }
         }
+
+        // Save session before shutting down.
+        self.save_session();
 
         // Shutdown MCP server on exit.
         if let Some(server) = &self.mcp_server {
@@ -624,6 +663,149 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Determine the project root for session storage.
+    ///
+    /// Uses the git workdir if available, otherwise the current directory.
+    fn session_project_root(&self) -> Option<PathBuf> {
+        self.git_repo
+            .as_ref()
+            .map(|r| r.workdir().to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+    }
+
+    /// Save the current session state to disk.
+    fn save_session(&self) {
+        let root = match self.session_project_root() {
+            Some(r) => r,
+            None => return,
+        };
+        let path = session::session_path(&root);
+
+        let tabs: Vec<TabState> = self
+            .tabs
+            .tabs()
+            .iter()
+            .map(|tab| TabState {
+                file_path: tab.buffer.file_path().map(|p| p.to_path_buf()),
+                cursor_row: tab.cursor.row,
+                cursor_col: tab.cursor.col,
+                scroll_row: tab.scroll_row,
+                scroll_col: tab.scroll_col,
+            })
+            .collect();
+
+        let sidebar_view = match self.sidebar_view {
+            SidebarView::Files => "files",
+            SidebarView::Git => "git",
+        };
+
+        let session = Session {
+            working_directory: root.clone(),
+            tabs,
+            active_tab: self.tabs.active_index(),
+            ui: UiState {
+                file_tree_visible: self.file_tree.visible,
+                chat_panel_visible: self.chat_panel.visible,
+                terminal_visible: self.terminal.visible,
+                sidebar_view: sidebar_view.into(),
+            },
+        };
+
+        if let Err(e) = session::save_session(&session, &path) {
+            tracing::warn!("Failed to save session: {}", e);
+        }
+    }
+
+    /// Restore a previously saved session.
+    ///
+    /// Opens all tabs from the session file, restoring cursor and scroll
+    /// positions.  Called from `main.rs` after `App::new` when no explicit
+    /// file argument was given.
+    pub fn restore_session(&mut self) {
+        let root = match self.session_project_root() {
+            Some(r) => r,
+            None => return,
+        };
+        let path = session::session_path(&root);
+        let session = match session::load_session(&path) {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Only restore if there are file-backed tabs to reopen.
+        let file_tabs: Vec<&TabState> = session
+            .tabs
+            .iter()
+            .filter(|t| t.file_path.is_some())
+            .collect();
+        if file_tabs.is_empty() {
+            return;
+        }
+
+        // Open each saved tab, skipping files that no longer exist.
+        let mut opened = false;
+        for tab_state in &session.tabs {
+            let file_path = match &tab_state.file_path {
+                Some(p) if p.exists() => p,
+                _ => continue,
+            };
+            let buffer = match Buffer::from_file(file_path.to_str().unwrap_or_default()) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("Session restore: could not open {:?}: {}", file_path, e);
+                    continue;
+                }
+            };
+            let mut tab = EditorTab::new(
+                buffer,
+                self.conversation_store.as_ref(),
+                &self.theme,
+            );
+            // Restore cursor and scroll, clamped to buffer bounds.
+            let max_row = tab.buffer.line_count().saturating_sub(1);
+            tab.cursor.row = tab_state.cursor_row.min(max_row);
+            let line_len = tab
+                .buffer
+                .line_text(tab.cursor.row)
+                .map(|l| l.trim_end_matches('\n').len())
+                .unwrap_or(0);
+            tab.cursor.col = tab_state.cursor_col.min(line_len);
+            tab.scroll_row = tab_state.scroll_row.min(max_row);
+            tab.scroll_col = tab_state.scroll_col;
+
+            if !opened {
+                // Replace the initial scratch tab with the first restored tab.
+                self.tabs = TabManager::new(tab);
+                opened = true;
+            } else {
+                self.tabs.open(tab);
+            }
+        }
+
+        if !opened {
+            return;
+        }
+
+        // Restore active tab index.
+        let max_idx = self.tabs.count().saturating_sub(1);
+        self.tabs.switch_to(session.active_tab.min(max_idx));
+
+        // Restore UI state.
+        self.file_tree.visible = session.ui.file_tree_visible;
+        self.chat_panel.visible = session.ui.chat_panel_visible;
+        self.terminal.visible = session.ui.terminal_visible;
+        self.sidebar_view = match session.ui.sidebar_view.as_str() {
+            "git" => SidebarView::Git,
+            _ => SidebarView::Files,
+        };
+
+        self.set_status(format!(
+            "Session restored ({} tab{})",
+            self.tabs.count(),
+            if self.tabs.count() == 1 { "" } else { "s" }
+        ));
     }
 
     /// Route key events based on the current mode.
@@ -1533,8 +1715,8 @@ impl App {
 
     /// Ensure the cursor is visible within the viewport.
     pub fn scroll_to_cursor(&mut self, viewport_height: usize, viewport_width: usize) {
+        let margin = self.config.editor.scroll_margin;
         let tab = self.tab_mut();
-        let margin = 5;
         if tab.cursor.row < tab.scroll_row + margin {
             tab.scroll_row = tab.cursor.row.saturating_sub(margin);
         }
@@ -2078,6 +2260,23 @@ impl App {
     /// Get count of connected external MCP servers.
     pub fn mcp_client_count(&self) -> usize {
         self.mcp_clients.len()
+    }
+
+    /// Poll the background update checker for results.
+    fn poll_update_check(&mut self) {
+        if let Some(ref rx) = self.update_receiver {
+            if let Ok(status) = rx.try_recv() {
+                if let UpdateStatus::Available { ref version, .. } = status {
+                    self.set_status(format!(
+                        "AURA v{} available \u{2014} :update for details",
+                        version
+                    ));
+                }
+                self.update_status = Some(status);
+                // Drop the receiver — we only need one result per session.
+                self.update_receiver = None;
+            }
+        }
     }
 
     /// Poll the speculative engine for completed analyses.
@@ -2626,12 +2825,37 @@ impl App {
         } else if self.file_tree.visible && point_in(self.file_tree_rect) {
             self.terminal_focused = false;
             self.conversation_history_focused = false;
+            self.chat_panel_focused = false;
             if self.sidebar_view == SidebarView::Git {
                 self.source_control_focused = true;
                 self.file_tree_focused = false;
             } else {
                 self.file_tree_focused = true;
                 self.source_control_focused = false;
+                // Map the click row to a file tree entry.
+                // Layout: file_tree_rect has a 1-cell border on all sides,
+                // then a 1-row tab header ("Files | Git").
+                // Entries start at file_tree_rect.y + 1 (border) + 1 (tab header) = +2.
+                let entries_start_y = self.file_tree_rect.y + 2;
+                if row >= entries_start_y {
+                    let visible_height = self
+                        .file_tree_rect
+                        .height
+                        .saturating_sub(3) as usize; // border top + tab header + border bottom
+                    let selected = self.file_tree.selected;
+                    let scroll_offset = if selected >= visible_height && visible_height > 0 {
+                        selected.saturating_sub(visible_height - 1)
+                    } else {
+                        0
+                    };
+                    let clicked_row = (row - entries_start_y) as usize;
+                    let clicked_idx = scroll_offset + clicked_row;
+                    if clicked_idx < self.file_tree.entries.len() {
+                        self.file_tree.selected = clicked_idx;
+                        // Open the entry (file or toggle dir).
+                        self.open_file_tree_selection();
+                    }
+                }
             }
         } else if self.conversation_history.visible && point_in(self.conv_history_rect) {
             self.conversation_history_focused = true;
@@ -2651,6 +2875,170 @@ impl App {
             self.source_control_focused = false;
             self.conversation_history_focused = false;
             self.chat_panel_focused = false;
+
+            // Move cursor and set visual anchor for potential drag selection.
+            if self.screen_to_cursor(col, row) {
+                // Clear any existing selection and record anchor for drag.
+                self.mode = Mode::Normal;
+                let cursor = self.tab().cursor;
+                self.tab_mut().visual_anchor = Some(cursor);
+            }
+        }
+    }
+
+    /// Handle mouse drag — extend visual selection while dragging.
+    fn handle_mouse_drag(&mut self, col: u16, row: u16) {
+        // Only start/extend selection if the drag is within the editor area.
+        let r = self.editor_rect;
+        let in_editor = r.width > 0
+            && r.height > 0
+            && col >= r.x
+            && col < r.x + r.width
+            && row >= r.y
+            && row < r.y + r.height;
+        if !in_editor {
+            return;
+        }
+
+        if self.screen_to_cursor(col, row) {
+            // Enter Visual mode on the first drag event if not already there.
+            if self.mode != Mode::Visual {
+                self.mode = Mode::Visual;
+            }
+        }
+    }
+
+    /// Translate screen coordinates to a buffer position and move the cursor.
+    ///
+    /// Returns `true` if the coordinates mapped to a valid editor text area
+    /// position and the cursor was moved.
+    fn screen_to_cursor(&mut self, col: u16, row: u16) -> bool {
+        let content_x = self.editor_rect.x + 1; // border
+        let content_y = self.editor_rect.y + 1; // border
+        let gutter_width: u16 = 6;
+        let text_start_x = content_x + gutter_width;
+
+        if col < text_start_x || row < content_y {
+            return false;
+        }
+
+        let clicked_row = (row - content_y) as usize;
+        let clicked_col = (col - text_start_x) as usize;
+        let is_insert = self.mode == Mode::Insert;
+        let tab = self.tab_mut();
+        let target_row = tab.scroll_row + clicked_row;
+        let target_col = tab.scroll_col + clicked_col;
+
+        let max_row = tab.buffer.line_count().saturating_sub(1);
+        tab.cursor.row = target_row.min(max_row);
+
+        let line_len = tab
+            .buffer
+            .line_text(tab.cursor.row)
+            .map(|l| {
+                let trimmed = l.trim_end_matches('\n').trim_end_matches('\r');
+                trimmed.len()
+            })
+            .unwrap_or(0);
+        let max_col = if is_insert {
+            line_len
+        } else {
+            line_len.saturating_sub(1)
+        };
+        tab.cursor.col = target_col.min(max_col);
+        true
+    }
+
+    /// Handle mouse scroll by scrolling the panel under the cursor.
+    ///
+    /// `up` is `true` for scroll-up (content moves down), `false` for scroll-down.
+    fn handle_mouse_scroll(&mut self, col: u16, row: u16, up: bool) {
+        let point_in = |r: Rect| {
+            r.width > 0
+                && r.height > 0
+                && col >= r.x
+                && col < r.x + r.width
+                && row >= r.y
+                && row < r.y + r.height
+        };
+
+        let scroll_lines: usize = 3;
+
+        if point_in(self.editor_rect) {
+            // Scroll the editor viewport and keep cursor within the visible area
+            // so that scroll_to_cursor (called every frame) does not reset the scroll.
+            let viewport_h = self.editor_rect.height.saturating_sub(2) as usize; // borders
+            let margin = self.config.editor.scroll_margin;
+            {
+                let tab = self.tab_mut();
+                let max_scroll = tab.buffer.line_count().saturating_sub(1);
+                if up {
+                    tab.scroll_row = tab.scroll_row.saturating_sub(scroll_lines);
+                } else {
+                    tab.scroll_row = (tab.scroll_row + scroll_lines).min(max_scroll);
+                }
+                // Clamp cursor row to stay inside the visible viewport, accounting
+                // for the scroll margin so that scroll_to_cursor does not undo
+                // the scroll on the next frame.
+                if viewport_h > margin * 2 {
+                    let safe_start = tab.scroll_row + margin;
+                    let safe_end = tab.scroll_row + viewport_h.saturating_sub(1).saturating_sub(margin);
+                    if tab.cursor.row < safe_start {
+                        tab.cursor.row = safe_start;
+                    } else if tab.cursor.row > safe_end {
+                        tab.cursor.row = safe_end;
+                    }
+                }
+            }
+            self.clamp_cursor();
+        } else if self.file_tree.visible && point_in(self.file_tree_rect) {
+            // Scroll the file tree / source control sidebar.
+            if self.sidebar_view == SidebarView::Files {
+                for _ in 0..scroll_lines {
+                    if up {
+                        self.file_tree.select_up();
+                    } else {
+                        self.file_tree.select_down();
+                    }
+                }
+            } else {
+                for _ in 0..scroll_lines {
+                    if up {
+                        self.source_control.select_up();
+                    } else {
+                        self.source_control.select_down();
+                    }
+                }
+            }
+        } else if self.terminal.visible && point_in(self.terminal_rect) {
+            // Scroll the terminal scrollback.
+            for _ in 0..scroll_lines {
+                if up {
+                    self.terminal.scroll_up();
+                } else {
+                    self.terminal.scroll_down();
+                }
+            }
+        } else if self.chat_panel.visible && point_in(self.chat_panel_rect) {
+            // Scroll the chat panel.
+            if up {
+                for _ in 0..scroll_lines {
+                    self.chat_panel.scroll_up();
+                }
+            } else {
+                for _ in 0..scroll_lines {
+                    self.chat_panel.scroll_down();
+                }
+            }
+        } else if self.conversation_history.visible && point_in(self.conv_history_rect) {
+            // Scroll the conversation history panel.
+            for _ in 0..scroll_lines {
+                if up {
+                    self.conversation_history.select_up();
+                } else {
+                    self.conversation_history.select_down();
+                }
+            }
         }
     }
 

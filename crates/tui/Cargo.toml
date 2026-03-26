@@ -23,6 +23,8 @@ gix.workspace = true
 portable-pty.workspace = true
 vte.workspace = true
 arboard.workspace = true
+ureq.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

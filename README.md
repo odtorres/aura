@@ -15,6 +15,8 @@ Current editors treat AI as a plugin — a guest in a house built for a single h
 - **Conversation as history**: The conversation that led to every piece of code is recorded and queryable. Six months later, ask "why was this written this way?"
 - **Multi-agent collaboration**: Multiple AI agents can work simultaneously via CRDT, with conflict-free concurrent editing.
 - **Speculative execution**: The AI thinks ahead in the background, offering improvement suggestions as ghost text overlays.
+- **Interactive chat panel**: Conversational AI with tool execution and approval flow, right inside the editor.
+- **Session persistence**: Open tabs, cursor positions, and UI layout are saved on exit and restored on reopen.
 
 <!-- ANCHOR: overview-end -->
 
@@ -117,7 +119,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `]` / `[` | Next / previous diagnostic |
 | `Ctrl+S` | Save |
 | `Ctrl+N` | Toggle file tree sidebar |
-| `Ctrl+J` / `` Ctrl+` `` | Toggle terminal pane |
+| `Ctrl+T` | Toggle terminal pane |
+| `Ctrl+J` | Toggle chat panel |
+| `Ctrl+H` | Toggle conversation history |
 
 ### Leader Key (`Space`)
 
@@ -182,6 +186,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `:term` / `:terminal` | Toggle terminal pane |
 | `:tree` | Toggle file tree |
 | `:term-height <N>` / `:th <N>` | Set terminal height |
+| `:chat` | Toggle chat panel |
 
 ### Review Mode (AI Proposals)
 
@@ -196,7 +201,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 
 | Key | Action |
 |-----|--------|
-| `Esc` / `Ctrl+J` / `` Ctrl+` `` | Return focus to editor |
+| `Esc` / `Ctrl+T` | Return focus to editor |
 | `Ctrl+Shift+Up/Down` | Resize terminal pane |
 | `Ctrl+C` | Send interrupt |
 | `Ctrl+D` | Send EOF |

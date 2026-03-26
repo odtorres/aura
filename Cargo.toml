@@ -53,6 +53,10 @@ uuid = { version = "1", features = ["v4"] }
 # Clipboard
 arboard = "3"
 
+# Update checking
+ureq = { version = "3", features = ["json"] }
+semver = "1"
+
 # Terminal emulation
 portable-pty = "0.8"
 vte = "0.13"

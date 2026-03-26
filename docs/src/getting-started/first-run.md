@@ -21,6 +21,8 @@ Launch AURA without arguments to open an empty scratch buffer:
 aura
 ```
 
+If you previously had files open in this project, AURA automatically restores your session — reopening tabs, cursor positions, and UI layout. See [Session Persistence](../user-guide/session.md) for details.
+
 ## Basic Editing Workflow
 
 1. **Navigate** using `h`/`j`/`k`/`l` (or arrow keys)
@@ -49,7 +51,9 @@ With an API key configured:
 | Shortcut | What it opens |
 |----------|---------------|
 | `Ctrl+N` | File tree sidebar |
-| `Ctrl+J` or `` Ctrl+` `` | Embedded terminal |
+| `Ctrl+T` | Embedded terminal |
+| `Ctrl+J` | AI chat panel |
+| `Ctrl+H` | Conversation history |
 | `<Space>p` | Fuzzy file picker |
 | `K` | LSP hover info |
 | `<Space>b` | Inline git blame |

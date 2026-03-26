@@ -24,6 +24,9 @@ pub struct AuraConfig {
     /// MCP server connections (handled by mcp_client module).
     #[serde(default)]
     pub mcp_servers: HashMap<String, toml::Value>,
+    /// Update checker settings.
+    #[serde(default)]
+    pub update: UpdateConfig,
 }
 
 impl Default for AuraConfig {
@@ -34,6 +37,26 @@ impl Default for AuraConfig {
             theme: "dark".to_string(),
             keybindings: KeybindingConfig::default(),
             mcp_servers: HashMap::new(),
+            update: UpdateConfig::default(),
+        }
+    }
+}
+
+/// Update checker settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct UpdateConfig {
+    /// Whether to check for updates on startup.
+    pub check_for_updates: bool,
+    /// Minimum hours between API checks (cached locally).
+    pub check_interval_hours: u64,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            check_for_updates: true,
+            check_interval_hours: 24,
         }
     }
 }

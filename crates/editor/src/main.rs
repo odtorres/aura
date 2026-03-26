@@ -19,7 +19,8 @@ fn main() -> anyhow::Result<()> {
 
     // Parse CLI args.
     let args: Vec<String> = std::env::args().collect();
-    let buffer = if args.len() > 1 {
+    let explicit_file = args.len() > 1;
+    let buffer = if explicit_file {
         Buffer::from_file(&args[1])?
     } else {
         Buffer::new()
@@ -35,6 +36,12 @@ fn main() -> anyhow::Result<()> {
 
     // Run the editor.
     let mut app = App::new(buffer);
+
+    // When launched without a specific file, restore the previous session.
+    if !explicit_file {
+        app.restore_session();
+    }
+
     let result = app.run(&mut terminal);
 
     // Restore the terminal.

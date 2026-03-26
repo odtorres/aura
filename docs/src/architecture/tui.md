@@ -25,6 +25,9 @@ The TUI crate handles everything the user sees and interacts with: rendering, in
 | `diff_view` | Side-by-side diff rendering for AI proposals |
 | `conversation_history` | Conversation history panel |
 | `source_control` | Source control sidebar (git staging, commits) |
+| `chat_panel` | Interactive AI chat panel with multi-turn conversations |
+| `chat_tools` | Tool execution engine for chat panel (read, edit, diagnostics) |
+| `session` | Session persistence — save/restore tabs, cursors, UI state |
 
 ## App State Machine
 
@@ -58,6 +61,7 @@ pub enum Mode {
     VisualLine,
     Intent,
     Review,
+    Diff,
 }
 ```
 

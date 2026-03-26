@@ -1081,7 +1081,7 @@ pub fn handle_command(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
 }
 
 /// Handle keys in Visual / Visual-Line mode.
-pub fn handle_visual(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
+pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
@@ -1155,8 +1155,28 @@ pub fn handle_visual(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
         KeyCode::Char('y') => {
             if let Some((start, end)) = app.visual_selection_range() {
                 let text = app.tab().buffer.rope().slice(start..end).to_string();
-                app.register = Some(text);
+                app.register = Some(text.clone());
+                // Also copy to system clipboard.
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(&text);
+                }
                 app.set_status("Yanked selection");
+            }
+            app.mode = Mode::Normal;
+            app.tab_mut().visual_anchor = None;
+        }
+        // Ctrl+C / Cmd+C — copy selection to system clipboard.
+        KeyCode::Char('c')
+            if modifiers.contains(KeyModifiers::CONTROL)
+                || modifiers.contains(KeyModifiers::SUPER) =>
+        {
+            if let Some((start, end)) = app.visual_selection_range() {
+                let text = app.tab().buffer.rope().slice(start..end).to_string();
+                app.register = Some(text.clone());
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(&text);
+                }
+                app.set_status("Copied to clipboard");
             }
             app.mode = Mode::Normal;
             app.tab_mut().visual_anchor = None;
@@ -1728,6 +1748,42 @@ fn execute_command(app: &mut App, cmd: &str) {
         "noh" | "nohlsearch" => {
             app.clear_search();
             app.set_status("Search cleared");
+        }
+        // :version — display current AURA version.
+        "version" | "ver" => {
+            app.set_status(format!("AURA v{}", crate::update::CURRENT_VERSION));
+        }
+        // :update / :check-update — show update info and upgrade instructions.
+        "update" | "check-update" => {
+            use crate::update::{self, UpdateStatus};
+            match &app.update_status {
+                Some(UpdateStatus::Available { version, url }) => {
+                    let method = update::detect_install_method();
+                    let instr = update::upgrade_instructions(&method, version);
+                    app.set_status(format!(
+                        "v{} \u{2192} v{} | {} | {}",
+                        update::CURRENT_VERSION,
+                        version,
+                        instr,
+                        url
+                    ));
+                }
+                Some(UpdateStatus::UpToDate) => {
+                    app.set_status(format!(
+                        "AURA v{} is up to date",
+                        update::CURRENT_VERSION
+                    ));
+                }
+                Some(UpdateStatus::Error(e)) => {
+                    app.set_status(format!("Update check failed: {}", e));
+                }
+                None => {
+                    app.set_status(format!(
+                        "AURA v{} (update check pending or disabled)",
+                        update::CURRENT_VERSION
+                    ));
+                }
+            }
         }
         other => {
             app.set_status(format!("Unknown command: {}", other));
