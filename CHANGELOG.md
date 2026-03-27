@@ -5,6 +5,20 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-03-27
+
+### Added
+
+- **Conversation compaction** — Configurable retention policies for the conversation database via `[conversations]` in `aura.toml`. Auto-compact on startup, `:compact` command for manual cleanup. Deletes old messages, trims per-conversation history, removes excess conversations.
+- **AI conversation summarization** — Long conversations are automatically summarized by Claude in the background. Summaries replace old messages as context for future AI calls.
+- **Context window management** — Chat panel caps context messages sent to AI per turn (default: 40), preventing unbounded memory and token growth.
+- **AI commit message button** — Sparkle (`✨`) button on the "Commit Message" header in the git panel. Generates commit messages from staged diff with streaming preview.
+- **Stage all button** — Green `+` button on the "Changes" header in the git panel. Also available via `Shift+S`.
+
+### Fixed
+
+- **Update checker** — `:update` command now forces a fresh GitHub API check instead of returning stale cached results.
+
 ## [0.1.3] - 2026-03-27
 
 ### Added
