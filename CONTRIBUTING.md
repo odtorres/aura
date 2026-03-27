@@ -63,6 +63,12 @@ cargo run -p aura -- --join 127.0.0.1:<port>
 
 Both instances will sync edits in real-time. The collab module (`crates/tui/src/collab.rs`) uses the same thread + mpsc channel pattern as the MCP server — see `mcp_server.rs` for reference.
 
+## Code Quality
+
+- **No `unwrap()` in library code** — use `?`, `if let Ok(...)`, or `.expect("reason")` for provably-safe operations. `unwrap()` is only acceptable in `#[cfg(test)]` modules.
+- The `CrdtDoc` API returns `Result` for all operations. Buffer callers log CRDT errors rather than panicking.
+- Mutex locks in thread code use `.expect("lock poisoned")` — poisoning means a prior thread panicked and there's no meaningful recovery.
+
 ## Submitting Changes
 
 - Small, focused commits — one logical change per commit

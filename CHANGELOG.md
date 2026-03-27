@@ -15,9 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AI commit message button** — Sparkle (`✨`) button on the "Commit Message" header in the git panel. Generates commit messages from staged diff with streaming preview.
 - **Stage all button** — Green `+` button on the "Changes" header in the git panel. Also available via `Shift+S`.
 
+### Changed
+
+- **CrdtDoc API** — `new()`, `splice()`, and `text()` now return `Result` instead of panicking on error. All buffer operations gracefully handle CRDT failures.
+
 ### Fixed
 
 - **Update checker** — `:update` command now forces a fresh GitHub API check instead of returning stale cached results.
+- **Code quality** — Removed all `unwrap()` calls from library code (convention: unwrap only in tests). Replaced with proper error handling, `Result` propagation, or descriptive `expect()` for provably-safe operations. Affected: crdt.rs, buffer.rs, app.rs, collab.rs, mcp_server.rs, mcp_client.rs, chat_panel.rs, client.rs.
 
 ## [0.1.3] - 2026-03-27
 

@@ -44,8 +44,9 @@ The `Buffer` type wraps a `ropey::Rope` for efficient text manipulation on large
 
 `CrdtDoc` wraps Automerge for conflict-free concurrent editing:
 
+- `new()`, `splice()`, `text()` all return `Result` — no panics in the CRDT layer
 - Each author gets a unique actor ID in the CRDT
-- Edits are applied to both the rope (for rendering) and the CRDT (for conflict resolution)
+- Edits are applied to both the rope (for rendering) and the CRDT (for conflict resolution). CRDT errors are logged but don't crash — the rope is the source of truth
 - When multiple agents edit simultaneously, the CRDT ensures convergence
 - Sync API: `generate_sync_message()` / `receive_sync_message()` for real-time collaboration
 - `save_bytes()` / `load_bytes()` for document snapshots; `fork()` for creating peer copies
