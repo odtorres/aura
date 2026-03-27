@@ -195,7 +195,9 @@ impl McpClientConnection {
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
         });
-        let _ = self.writer_tx.send(serde_json::to_string(&msg).unwrap());
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = self.writer_tx.send(json);
+        }
     }
 
     /// List available tools (cached from initialization).
@@ -210,7 +212,9 @@ impl McpClientConnection {
             "id": 999999,
             "method": "shutdown"
         });
-        let _ = self.writer_tx.send(serde_json::to_string(&msg).unwrap());
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = self.writer_tx.send(json);
+        }
     }
 }
 

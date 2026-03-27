@@ -283,9 +283,10 @@ impl McpServer {
             .name("mcp-accept".to_string())
             .spawn(move || {
                 // Set a timeout so we can check the shutdown flag periodically.
-                listener
-                    .set_nonblocking(false)
-                    .expect("set_nonblocking failed");
+                if let Err(e) = listener.set_nonblocking(false) {
+                    tracing::warn!("MCP: set_nonblocking failed: {e}");
+                    return;
+                }
                 let _ = listener
                     .incoming()
                     .try_for_each(|stream_result| -> std::io::Result<()> {
@@ -340,7 +341,14 @@ impl McpServer {
 
 /// Handle a single MCP client connection.
 fn handle_connection(stream: TcpStream, request_tx: mpsc::Sender<McpAppRequest>) {
-    let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+    let cloned = match stream.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("MCP: stream clone failed: {e}");
+            return;
+        }
+    };
+    let mut reader = BufReader::new(cloned);
     let mut writer = stream;
 
     let mut initialized = false;

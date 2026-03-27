@@ -384,7 +384,10 @@ impl ChatPanel {
             self.input_cursor = self.input_cursor.saturating_sub(1);
             let byte_pos = self.byte_offset_of_cursor();
             if byte_pos < self.input.len() {
-                let ch = self.input[byte_pos..].chars().next().unwrap();
+                let ch = self.input[byte_pos..]
+                    .chars()
+                    .next()
+                    .expect("valid UTF-8 boundary");
                 self.input
                     .replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
             }
@@ -395,7 +398,10 @@ impl ChatPanel {
     pub fn input_delete(&mut self) {
         let byte_pos = self.byte_offset_of_cursor();
         if byte_pos < self.input.len() {
-            let ch = self.input[byte_pos..].chars().next().unwrap();
+            let ch = self.input[byte_pos..]
+                .chars()
+                .next()
+                .expect("valid UTF-8 boundary");
             self.input
                 .replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
         }

@@ -327,7 +327,7 @@ impl CollabSession {
             .name("collab-accept".to_string())
             .spawn(move || {
                 for stream_result in listener.incoming() {
-                    if *shutdown_accept.lock().unwrap() {
+                    if *shutdown_accept.lock().expect("lock poisoned") {
                         break;
                     }
                     let stream = match stream_result {
@@ -338,7 +338,7 @@ impl CollabSession {
 
                     let event_tx = event_tx_accept.clone();
                     let clients = clients_for_accept.clone();
-                    let snaps = file_snaps_for_accept.lock().unwrap().clone();
+                    let snaps = file_snaps_for_accept.lock().expect("lock poisoned").clone();
                     let shutdown_peer = shutdown_accept.clone();
 
                     thread::Builder::new()
@@ -356,7 +356,7 @@ impl CollabSession {
             .name("collab-cmd".to_string())
             .spawn(move || {
                 while let Ok(cmd) = command_rx.recv() {
-                    if *shutdown_cmd.lock().unwrap() {
+                    if *shutdown_cmd.lock().expect("lock poisoned") {
                         break;
                     }
                     match cmd {
@@ -375,7 +375,7 @@ impl CollabSession {
                             snapshot,
                         } => {
                             // Add to the snapshots list for future joiners.
-                            file_snaps_for_cmd.lock().unwrap().push((
+                            file_snaps_for_cmd.lock().expect("lock poisoned").push((
                                 file_id,
                                 path.clone(),
                                 snapshot.clone(),
@@ -466,10 +466,10 @@ impl CollabSession {
             .name("collab-writer".to_string())
             .spawn(move || {
                 while let Ok(cmd) = command_rx.recv() {
-                    if *shutdown_cmd.lock().unwrap() {
+                    if *shutdown_cmd.lock().expect("lock poisoned") {
                         break;
                     }
-                    let mut w = writer_for_cmd.lock().unwrap();
+                    let mut w = writer_for_cmd.lock().expect("lock poisoned");
                     match cmd {
                         CollabCommand::BroadcastSync { file_id, data } => {
                             let payload = prepend_file_id(file_id, &data);
@@ -620,7 +620,7 @@ impl CollabSession {
 
     /// Shut down the session.
     pub fn shutdown(&self) {
-        *self.shutdown.lock().unwrap() = true;
+        *self.shutdown.lock().expect("lock poisoned") = true;
         let _ = self.command_tx.send(CollabCommand::Shutdown);
         // Poke the listener to unblock the accept loop (host only).
         if let Some(port) = self.port {
@@ -641,7 +641,13 @@ fn host_handle_peer(
     file_snapshots: Vec<(u64, String, Vec<u8>)>,
     shutdown: Arc<Mutex<bool>>,
 ) {
-    let mut reader = stream.try_clone().expect("clone stream");
+    let mut reader = match stream.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = event_tx.send(CollabEvent::Error(format!("stream clone failed: {e}")));
+            return;
+        }
+    };
     let writer = Arc::new(Mutex::new(stream));
 
     // Wait for the PeerJoined message.
@@ -661,7 +667,7 @@ fn host_handle_peer(
 
     // Send all document snapshots (one per file).
     {
-        let mut w = writer.lock().unwrap();
+        let mut w = writer.lock().expect("lock poisoned");
         for (file_id, path, snapshot) in &file_snapshots {
             let payload = encode_snapshot_payload(*file_id, path, snapshot);
             if write_wire(&mut *w, MSG_DOC_SNAPSHOT, &payload).is_err() {
@@ -671,11 +677,14 @@ fn host_handle_peer(
     }
 
     // Register this client for broadcasting.
-    clients.lock().unwrap().push((peer_id, writer));
+    clients
+        .lock()
+        .expect("lock poisoned")
+        .push((peer_id, writer));
 
     // Read loop: receive messages from the peer.
     loop {
-        if *shutdown.lock().unwrap() {
+        if *shutdown.lock().expect("lock poisoned") {
             break;
         }
         match read_wire(&mut reader) {
@@ -710,7 +719,7 @@ fn host_handle_peer(
 
     // Peer disconnected — clean up.
     let _ = event_tx.send(CollabEvent::PeerLeft { peer_id });
-    let mut cl = clients.lock().unwrap();
+    let mut cl = clients.lock().expect("lock poisoned");
     cl.retain(|(id, _)| *id != peer_id);
 }
 
@@ -763,7 +772,7 @@ fn client_reader_loop(
     loop {
         // Read messages until disconnected.
         loop {
-            if *shutdown.lock().unwrap() {
+            if *shutdown.lock().expect("lock poisoned") {
                 return;
             }
             match read_wire(&mut reader) {
@@ -774,7 +783,7 @@ fn client_reader_loop(
                     }
                 }
                 Err(_) => {
-                    if *shutdown.lock().unwrap() {
+                    if *shutdown.lock().expect("lock poisoned") {
                         return;
                     }
                     break; // Disconnected — enter reconnect loop.
@@ -785,7 +794,7 @@ fn client_reader_loop(
         // Reconnection loop with exponential backoff.
         let mut attempt = 0u32;
         loop {
-            if *shutdown.lock().unwrap() {
+            if *shutdown.lock().expect("lock poisoned") {
                 return;
             }
 
@@ -796,7 +805,7 @@ fn client_reader_loop(
             let delay = Duration::from_secs((1u64 << attempt.min(5)).min(30));
             thread::sleep(delay);
 
-            if *shutdown.lock().unwrap() {
+            if *shutdown.lock().expect("lock poisoned") {
                 return;
             }
 
@@ -822,7 +831,7 @@ fn client_reader_loop(
                     }
 
                     // Swap the writer so command dispatch uses the new connection.
-                    *writer.lock().unwrap() = new_writer;
+                    *writer.lock().expect("lock poisoned") = new_writer;
                     reader = stream;
 
                     let _ = event_tx.send(CollabEvent::Reconnected);
@@ -906,9 +915,9 @@ fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
 
 /// Broadcast a wire message to all connected clients.
 fn broadcast(clients: &ClientList, msg_type: u8, payload: &[u8]) {
-    let cl = clients.lock().unwrap();
+    let cl = clients.lock().expect("lock poisoned");
     for (_, stream) in cl.iter() {
-        let mut s = stream.lock().unwrap();
+        let mut s = stream.lock().expect("lock poisoned");
         let _ = write_wire(&mut *s, msg_type, payload);
     }
 }
@@ -1028,7 +1037,7 @@ mod tests {
     #[test]
     fn test_host_client_sync() {
         // Start a host with a simple document.
-        let mut doc = aura_core::CrdtDoc::with_text("hello");
+        let mut doc = aura_core::CrdtDoc::with_text("hello").unwrap();
         let snapshot = doc.save_bytes();
         let files = vec![(42u64, "/tmp/test.rs".to_string(), snapshot)];
         let session = CollabSession::host("host", 0, files).unwrap();
@@ -1069,8 +1078,8 @@ mod tests {
     #[test]
     fn test_host_multi_file_snapshots() {
         // Host with two files.
-        let mut doc1 = aura_core::CrdtDoc::with_text("file one");
-        let mut doc2 = aura_core::CrdtDoc::with_text("file two");
+        let mut doc1 = aura_core::CrdtDoc::with_text("file one").unwrap();
+        let mut doc2 = aura_core::CrdtDoc::with_text("file two").unwrap();
         let files = vec![
             (1u64, "/tmp/one.rs".to_string(), doc1.save_bytes()),
             (2u64, "/tmp/two.rs".to_string(), doc2.save_bytes()),

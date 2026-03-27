@@ -70,7 +70,7 @@ impl Buffer {
     pub fn new() -> Self {
         Self {
             rope: Rope::new(),
-            crdt: CrdtDoc::new(),
+            crdt: CrdtDoc::default(),
             file_path: None,
             modified: false,
             history: Vec::new(),
@@ -90,7 +90,8 @@ impl Buffer {
         let rope = Rope::from_reader(file)?;
         let line_count = rope.len_lines();
         // Initialize CRDT with the file contents.
-        let crdt = CrdtDoc::with_text(&rope.to_string());
+        let crdt = CrdtDoc::with_text(&rope.to_string())
+            .map_err(|e| anyhow::anyhow!("CRDT init failed: {e}"))?;
         Ok(Self {
             rope,
             crdt,
@@ -125,8 +126,10 @@ impl Buffer {
         let clamped = char_idx.min(self.rope.len_chars());
         self.rope.insert(clamped, text);
 
-        // Mirror to CRDT.
-        self.crdt.splice(clamped, 0, text, &author);
+        // Mirror to CRDT (log errors but don't fail — rope is the source of truth).
+        if let Err(e) = self.crdt.splice(clamped, 0, text, &author) {
+            tracing::warn!("CRDT splice failed during insert: {e}");
+        }
 
         self.modified = true;
         let now = std::time::Instant::now();
@@ -177,9 +180,13 @@ impl Buffer {
 
         self.rope.remove(start..end);
 
-        // Mirror to CRDT.
-        self.crdt
-            .splice(start, end.saturating_sub(start), "", &author);
+        // Mirror to CRDT (log errors but don't fail — rope is the source of truth).
+        if let Err(e) = self
+            .crdt
+            .splice(start, end.saturating_sub(start), "", &author)
+        {
+            tracing::warn!("CRDT splice failed during delete: {e}");
+        }
 
         self.modified = true;
         let now = std::time::Instant::now();
@@ -240,11 +247,11 @@ impl Buffer {
                 let char_count = text.chars().count();
                 let end = *pos + char_count;
                 self.rope.remove(*pos..end);
-                self.crdt.splice(*pos, char_count, "", &edit.author);
+                let _ = self.crdt.splice(*pos, char_count, "", &edit.author);
             }
             EditKind::Delete { start, deleted, .. } => {
                 self.rope.insert(*start, deleted);
-                self.crdt.splice(*start, 0, deleted, &edit.author);
+                let _ = self.crdt.splice(*start, 0, deleted, &edit.author);
             }
         }
         self.modified = true;
@@ -262,11 +269,11 @@ impl Buffer {
                         let char_count = text.chars().count();
                         let end = *pos + char_count;
                         self.rope.remove(*pos..end);
-                        self.crdt.splice(*pos, char_count, "", &edit.author);
+                        let _ = self.crdt.splice(*pos, char_count, "", &edit.author);
                     }
                     EditKind::Delete { start, deleted, .. } => {
                         self.rope.insert(*start, deleted);
-                        self.crdt.splice(*start, 0, deleted, &edit.author);
+                        let _ = self.crdt.splice(*start, 0, deleted, &edit.author);
                     }
                 }
                 self.history.remove(i);
@@ -567,7 +574,7 @@ impl Buffer {
         self.crdt.receive_sync_message(sync_state, msg)?;
 
         // Get the CRDT text as the source of truth.
-        let new_text = self.crdt.text();
+        let new_text = self.crdt.text()?;
         let old_text = self.rope.to_string();
 
         if new_text == old_text {
@@ -648,7 +655,7 @@ impl Buffer {
     /// Replaces both the CRDT and rope with the snapshot content.
     pub fn load_remote_snapshot(&mut self, bytes: &[u8]) -> Result<(), automerge::AutomergeError> {
         let new_crdt = CrdtDoc::load_bytes(bytes)?;
-        let text = new_crdt.text();
+        let text = new_crdt.text()?;
         let line_count = text.lines().count().max(1);
 
         self.crdt = new_crdt;

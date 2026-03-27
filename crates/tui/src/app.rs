@@ -1012,7 +1012,10 @@ impl App {
         // Ensure conversation store is ready before we borrow ai_client.
         self.ensure_conversation_store();
 
-        let client = self.ai_client.as_ref().unwrap();
+        let client = match self.ai_client.as_ref() {
+            Some(c) => c,
+            None => return, // Already guarded above, but be safe.
+        };
 
         // Build context with semantic info and LSP diagnostics.
         let selection = self.visual_selection_range();

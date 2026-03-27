@@ -385,10 +385,16 @@ impl AnthropicClient {
         let base_url = self.config.base_url.clone();
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("Failed to create tokio runtime");
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = tx.send(AiEvent::Error(format!("Failed to create runtime: {e}")));
+                    return;
+                }
+            };
 
             rt.block_on(async {
                 let result = Self::do_stream_request(&http, &base_url, &request, &tx).await;
