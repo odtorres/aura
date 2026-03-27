@@ -136,6 +136,11 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `:term` | `:terminal` | Toggle terminal pane |
 | `:tree` | | Toggle file tree sidebar |
 | `:term-height <N>` | `:th <N>` | Set terminal pane height |
+| `:compact` | | Compact conversation database |
+| `:update` | `:check-update` | Force check for updates |
+| `:host` | | Start hosting a collab session |
+| `:join <addr:port>` | | Join a collab session |
+| `:collab-stop` | | End the collab session |
 
 ## Review Mode
 

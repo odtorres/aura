@@ -37,6 +37,14 @@ t = "test"
 [keybindings.normal_map]
 # Custom normal mode key → action mappings
 
+[conversations]
+max_message_age_days = 90
+max_messages_per_conversation = 200
+max_conversations = 500
+keep_recent_messages = 10
+auto_compact = true
+max_context_messages = 40
+
 [collab]
 display_name = "alice"
 default_port = 0
@@ -150,6 +158,20 @@ url = "ws://localhost:9001"
 ```
 
 AURA also runs its own MCP server, exposing editor tools and resources. See [MCP Protocol](../architecture/mcp.md) for details.
+
+## Conversations
+
+```toml
+[conversations]
+max_message_age_days = 90       # Delete messages older than this (0 = no limit)
+max_messages_per_conversation = 200  # Max messages per conversation (0 = no limit)
+max_conversations = 500         # Max total conversations to retain (0 = no limit)
+keep_recent_messages = 10       # Always preserve this many recent messages when compacting
+auto_compact = true             # Auto-compact the database on startup
+max_context_messages = 40       # Max messages sent to AI per chat turn
+```
+
+Use `:compact` to manually trigger database compaction. When AI is configured, long conversations are automatically summarized — the summary replaces old messages as context for future AI calls.
 
 ## Collaboration
 

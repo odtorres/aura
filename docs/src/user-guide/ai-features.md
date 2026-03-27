@@ -129,3 +129,42 @@ Every AI interaction is stored in a local SQLite database:
 - `<Space>d` / `:decisions` — View recent accept/reject decisions
 
 Conversations are linked to file paths, line ranges, and git commits, so you can always trace "why was this written this way?"
+
+## Conversation Compaction
+
+The conversation database grows over time. AURA provides automatic and manual compaction to keep it manageable.
+
+### Auto-Compact on Startup
+
+When `auto_compact = true` (default), AURA cleans up the database on every launch:
+
+- Deletes messages older than `max_message_age_days` (default: 90 days)
+- Trims conversations to `max_messages_per_conversation` (default: 200)
+- Removes excess conversations beyond `max_conversations` (default: 500)
+- Always preserves the `keep_recent_messages` most recent messages per conversation
+
+### Manual Compaction
+
+```
+:compact
+```
+
+Runs the same cleanup immediately and reports how many messages and conversations were deleted.
+
+### AI Summarization
+
+When an AI client is configured, long conversations (those with more messages than `keep_recent_messages` and no existing summary) are automatically summarized in the background:
+
+1. AURA sends the conversation transcript to Claude
+2. Claude generates a 2-4 sentence summary
+3. The summary is stored in the conversation's `summary` field
+4. Old messages are thinned, keeping only the most recent ones plus the summary
+5. When the conversation is loaded later, the summary is prepended as context so the AI remembers what was discussed
+
+### Context Window Management
+
+The chat panel limits how many messages are sent to the AI per turn (`max_context_messages`, default: 40). This prevents unbounded memory growth and API token waste during long sessions. The oldest messages are dropped first, but the initial context message is always preserved.
+
+### Configuration
+
+See [Configuration](../getting-started/configuration.md) for the full `[conversations]` settings reference.

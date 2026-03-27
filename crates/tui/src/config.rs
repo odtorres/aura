@@ -30,6 +30,9 @@ pub struct AuraConfig {
     /// Collaboration settings.
     #[serde(default)]
     pub collab: CollabConfig,
+    /// Conversation storage settings.
+    #[serde(default)]
+    pub conversations: ConversationConfig,
 }
 
 impl Default for AuraConfig {
@@ -42,6 +45,7 @@ impl Default for AuraConfig {
             mcp_servers: HashMap::new(),
             update: UpdateConfig::default(),
             collab: CollabConfig::default(),
+            conversations: ConversationConfig::default(),
         }
     }
 }
@@ -83,6 +87,37 @@ impl Default for CollabConfig {
         Self {
             display_name,
             default_port: 0,
+        }
+    }
+}
+
+/// Conversation storage and compaction settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ConversationConfig {
+    /// Maximum age in days for conversation messages (0 = no limit).
+    pub max_message_age_days: u32,
+    /// Maximum messages to keep per conversation (0 = no limit).
+    pub max_messages_per_conversation: usize,
+    /// Maximum total conversations to retain (0 = no limit).
+    pub max_conversations: usize,
+    /// Number of recent messages to always preserve when compacting.
+    pub keep_recent_messages: usize,
+    /// Whether to auto-compact on startup.
+    pub auto_compact: bool,
+    /// Maximum context messages sent to the AI API per chat turn.
+    pub max_context_messages: usize,
+}
+
+impl Default for ConversationConfig {
+    fn default() -> Self {
+        Self {
+            max_message_age_days: 90,
+            max_messages_per_conversation: 200,
+            max_conversations: 500,
+            keep_recent_messages: 10,
+            auto_compact: true,
+            max_context_messages: 40,
         }
     }
 }

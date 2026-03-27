@@ -444,4 +444,4 @@ When working on this project with Claude Code:
 - [x] Lua vs WASM for the future plugin system — Lua is simpler, WASM is more universal → **Decided: Rust trait-based plugin system** (`plugin.rs`)
 - [x] How aggressive should the speculative execution be by default? → **Decided: Configurable via `<leader>g`** (minimal/moderate/proactive)
 - [x] Should AURA support Vim emulation deeply, or define its own keybinding paradigm? → **Decided: Vim-inspired essentials**, not full emulation
-- [ ] How to handle very long conversations — summarize and compact, or paginate?
+- [x] How to handle very long conversations — auto-compact with configurable retention, AI summarization, context window capping

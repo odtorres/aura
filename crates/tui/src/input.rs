@@ -1813,6 +1813,10 @@ fn execute_command(app: &mut App, cmd: &str) {
             // Force a fresh check (bypasses cache).
             app.force_update_check();
         }
+        // --- Conversation compaction ---
+        "compact" => {
+            app.compact_conversations();
+        }
         // --- Collaboration commands ---
         "host" => {
             app.start_collab_host();

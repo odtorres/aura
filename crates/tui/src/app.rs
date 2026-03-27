@@ -231,6 +231,8 @@ pub struct App {
     pub ai_commit_btn_rect: Rect,
     /// Receiver for streaming AI-generated commit message tokens.
     commit_msg_receiver: Option<mpsc::Receiver<AiEvent>>,
+    /// Receiver for background conversation summarization (conversation_id, receiver).
+    summarize_receiver: Option<(String, mpsc::Receiver<AiEvent>)>,
     /// Cached conversation history panel rect from the last render frame.
     pub conv_history_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
@@ -381,6 +383,29 @@ impl App {
                 ),
                 Err(e) => tracing::warn!("Conversation store opened but query failed: {e}"),
             }
+            // Auto-compact on startup if enabled.
+            if config.conversations.auto_compact {
+                let compact_config = aura_core::CompactConfig {
+                    max_message_age_days: config.conversations.max_message_age_days,
+                    max_messages_per_conversation: config
+                        .conversations
+                        .max_messages_per_conversation,
+                    max_conversations: config.conversations.max_conversations,
+                    keep_recent_messages: config.conversations.keep_recent_messages,
+                };
+                match store.compact(&compact_config) {
+                    Ok(stats) => {
+                        if stats.messages_deleted > 0 || stats.conversations_deleted > 0 {
+                            tracing::info!(
+                                "Auto-compact: deleted {} messages, {} conversations",
+                                stats.messages_deleted,
+                                stats.conversations_deleted
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!("Auto-compact failed: {e}"),
+                }
+            }
         } else {
             tracing::warn!("No conversation store available — AI history will not be recorded");
         }
@@ -495,6 +520,7 @@ impl App {
             stage_all_btn_rect: Rect::default(),
             ai_commit_btn_rect: Rect::default(),
             commit_msg_receiver: None,
+            summarize_receiver: None,
             conv_history_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
             tab_close_btn_ranges: Vec::new(),
@@ -518,6 +544,10 @@ impl App {
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
+        app.chat_panel.max_context_messages = config.conversations.max_context_messages;
+
+        // Kick off background summarization for eligible conversations.
+        app.maybe_summarize_next();
 
         // Spawn background update checker.
         if config.update.check_for_updates {
@@ -630,8 +660,9 @@ impl App {
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
 
-            // Poll for AI commit message tokens.
+            // Poll for AI commit message tokens and conversation summarization.
             self.poll_commit_msg();
+            self.poll_summarize();
 
             // Poll for collaboration events and broadcast awareness.
             self.poll_collab_events();
@@ -2780,6 +2811,120 @@ impl App {
         }
     }
 
+    /// Summarize a long conversation using AI.
+    fn summarize_conversation(&mut self, conversation_id: &str) {
+        let client = match &self.ai_client {
+            Some(c) => c,
+            None => return,
+        };
+        let store = match &self.conversation_store {
+            Some(s) => s,
+            None => return,
+        };
+        let messages = match store.messages_for_conversation(conversation_id) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+
+        let threshold = self.config.conversations.keep_recent_messages;
+        if messages.len() <= threshold {
+            return;
+        }
+
+        // Build transcript from messages (truncated to ~4000 chars for the AI).
+        let mut transcript = String::new();
+        for msg in &messages {
+            let role_label = match msg.role {
+                aura_core::conversation::MessageRole::HumanIntent => "Human",
+                aura_core::conversation::MessageRole::AiResponse => "AI",
+                aura_core::conversation::MessageRole::System => "System",
+            };
+            transcript.push_str(&format!("{role_label}: {}\n\n", msg.content));
+            if transcript.len() > 4000 {
+                transcript.push_str("... (truncated)");
+                break;
+            }
+        }
+
+        let system = "Summarize this conversation between a developer and AI assistant. \
+                      Focus on: what was discussed, what decisions were made, what code was \
+                      changed. Be concise (2-4 sentences). Output ONLY the summary."
+            .to_string();
+        let msgs = vec![Message::text("user", &transcript)];
+        let rx = client.stream_completion(&system, msgs);
+        self.summarize_receiver = Some((conversation_id.to_string(), rx));
+    }
+
+    /// Poll for background conversation summarization results.
+    fn poll_summarize(&mut self) {
+        let (conv_id, rx) = match &self.summarize_receiver {
+            Some((id, rx)) => (id.clone(), rx),
+            None => return,
+        };
+
+        let mut summary = String::new();
+        let mut done = false;
+        loop {
+            match rx.try_recv() {
+                Ok(AiEvent::Token(t)) => summary.push_str(&t),
+                Ok(AiEvent::Done(full)) => {
+                    summary = full.trim().to_string();
+                    done = true;
+                    break;
+                }
+                Ok(AiEvent::Error(_)) => {
+                    done = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+            }
+        }
+
+        if done {
+            self.summarize_receiver = None;
+            if !summary.is_empty() {
+                if let Some(store) = &self.conversation_store {
+                    let _ = store.update_summary(&conv_id, &summary);
+                    // Insert the summary as a system message for future context.
+                    let _ = store.add_message(
+                        &conv_id,
+                        aura_core::conversation::MessageRole::System,
+                        &format!("[Summary] {summary}"),
+                        None,
+                    );
+                    // Thin old messages, keeping recent ones + the new summary.
+                    let keep = self.config.conversations.keep_recent_messages;
+                    let _ = store.delete_messages_except_recent(&conv_id, keep + 1);
+                    tracing::info!("Summarized conversation {conv_id}");
+                }
+            }
+
+            // Check for more conversations needing summarization.
+            self.maybe_summarize_next();
+        }
+    }
+
+    /// Find the next conversation needing summarization and start it.
+    fn maybe_summarize_next(&mut self) {
+        if self.summarize_receiver.is_some() || self.ai_client.is_none() {
+            return;
+        }
+        if let Some(store) = &self.conversation_store {
+            let threshold = self.config.conversations.keep_recent_messages;
+            if let Ok(ids) = store.conversations_needing_summary(threshold) {
+                if let Some(id) = ids.first() {
+                    let id = id.clone();
+                    self.summarize_conversation(&id);
+                }
+            }
+        }
+    }
+
     /// List git branches.
     pub fn git_list_branches(&self) -> Vec<crate::git::BranchInfo> {
         self.git_repo
@@ -4356,6 +4501,35 @@ impl App {
             }
             Err(e) => self.set_status(format!("Failed to join: {e}")),
         }
+    }
+
+    /// Stop the current collaboration session.
+    /// Manually compact the conversation database.
+    pub fn compact_conversations(&mut self) {
+        let store = match &self.conversation_store {
+            Some(s) => s,
+            None => {
+                self.set_status("No conversation store available");
+                return;
+            }
+        };
+        let compact_config = aura_core::CompactConfig {
+            max_message_age_days: self.config.conversations.max_message_age_days,
+            max_messages_per_conversation: self.config.conversations.max_messages_per_conversation,
+            max_conversations: self.config.conversations.max_conversations,
+            keep_recent_messages: self.config.conversations.keep_recent_messages,
+        };
+        match store.compact(&compact_config) {
+            Ok(stats) => {
+                self.set_status(format!(
+                    "Compacted: {} messages, {} conversations deleted",
+                    stats.messages_deleted, stats.conversations_deleted
+                ));
+            }
+            Err(e) => self.set_status(format!("Compact failed: {e}")),
+        }
+        // Also trigger AI summarization for eligible conversations.
+        self.maybe_summarize_next();
     }
 
     /// Stop the current collaboration session.

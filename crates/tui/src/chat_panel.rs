@@ -115,6 +115,8 @@ pub struct ChatPanel {
     pub tool_loop_count: usize,
     /// Description of attached selection context (e.g. "12 lines from main.rs").
     pub selection_context: Option<String>,
+    /// Maximum context messages to keep for API calls (0 = no limit).
+    pub max_context_messages: usize,
 }
 
 impl ChatPanel {
@@ -136,6 +138,31 @@ impl ChatPanel {
             in_tool_loop: false,
             tool_loop_count: 0,
             selection_context: None,
+            max_context_messages: 40,
+        }
+    }
+
+    /// Trim context_messages to the configured maximum, preserving the
+    /// first message (often system/setup context) and the most recent ones.
+    fn trim_context(&mut self) {
+        if self.max_context_messages == 0
+            || self.context_messages.len() <= self.max_context_messages
+        {
+            return;
+        }
+        // Don't trim during active tool loops — the full exchange is needed.
+        if self.in_tool_loop {
+            return;
+        }
+        let keep = self.max_context_messages;
+        if self.context_messages.len() > keep {
+            // Keep the first message + the last (keep - 1) messages.
+            let tail_start = self.context_messages.len() - (keep - 1);
+            let first = self.context_messages[0].clone();
+            let tail: Vec<_> = self.context_messages[tail_start..].to_vec();
+            self.context_messages.clear();
+            self.context_messages.push(first);
+            self.context_messages.extend(tail);
         }
     }
 
@@ -158,6 +185,7 @@ impl ChatPanel {
             timestamp,
         });
         self.context_messages.push(Message::text("user", text));
+        self.trim_context();
         self.scroll_to_bottom();
     }
 
@@ -192,6 +220,7 @@ impl ChatPanel {
             self.context_messages
                 .push(Message::text("assistant", &text));
         }
+        self.trim_context();
         self.scroll_to_bottom();
     }
 
@@ -459,7 +488,28 @@ impl ChatPanel {
             Ok(msgs) => {
                 self.messages.clear();
                 self.context_messages.clear();
-                for msg in &msgs {
+
+                // If there's a summary, prepend it as system context so the AI
+                // has history without needing hundreds of old messages.
+                if let Ok(Some(summary)) = store.get_summary(conv_id) {
+                    self.context_messages.push(Message::text(
+                        "user",
+                        &format!(
+                            "[Previous conversation summary]: {summary}\n\n\
+                             Continue from where we left off."
+                        ),
+                    ));
+                }
+
+                // Only load the last N messages into context to avoid
+                // unbounded growth, but show all in the display.
+                let context_start = if self.max_context_messages > 0 {
+                    msgs.len().saturating_sub(self.max_context_messages)
+                } else {
+                    0
+                };
+
+                for (i, msg) in msgs.iter().enumerate() {
                     let (role, api_role) = match msg.role {
                         MessageRole::HumanIntent => (ChatRole::User, "user"),
                         MessageRole::AiResponse => (ChatRole::Assistant, "assistant"),
@@ -470,8 +520,8 @@ impl ChatPanel {
                         content: msg.content.clone(),
                         timestamp: msg.created_at.clone(),
                     });
-                    // Only add user/assistant to context (skip system for API).
-                    if role != ChatRole::System {
+                    // Add to context only recent messages (and skip system).
+                    if i >= context_start && role != ChatRole::System {
                         self.context_messages
                             .push(Message::text(api_role, &msg.content));
                     }

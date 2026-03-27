@@ -14,7 +14,7 @@ pub mod sync;
 
 pub use author::{Author, AuthorColor, AuthorId};
 pub use buffer::Buffer;
-pub use conversation::ConversationStore;
+pub use conversation::{CompactConfig, CompactStats, ConversationStore};
 pub use crdt::CrdtDoc;
 pub use cursor::Cursor;
 pub use semantic::SemanticGraph;

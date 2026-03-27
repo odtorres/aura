@@ -26,9 +26,9 @@ editor → tui → core
 
 ## Current Phase
 
-**Phase 10: Real-Time Collaborative Editing**
+**Post-Phase 10: Polish & Features**
 
-AURA is a fully-featured terminal editor with vim-like modal editing, AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting, LSP integration, MCP server/client, embedded terminal, git integration, plugin system, and semantic indexing. Phase 10 adds real-time collaborative editing using the existing automerge CRDT. Phase 10 (collaborative editing) is complete: CRDT sync, TCP networking, peer awareness (cursors/selections), reconnection with exponential backoff, incremental rope reconciliation, and multi-file sessions (all open files shared with per-file sync routing).
+AURA is a fully-featured terminal editor with vim-like modal editing, AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting, LSP integration, MCP server/client, embedded terminal, git integration, plugin system, semantic indexing, and real-time multi-file collaborative editing. Recent additions include conversation compaction (configurable retention, AI summarization, context window caps), git panel UI improvements (stage-all button, AI commit message generation), and tab close buttons.
 
 See `TODO.md` for the full roadmap.
 

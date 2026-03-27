@@ -248,6 +248,7 @@ impl ConversationStore {
             CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_decisions_created ON edit_decisions(created_at);
             CREATE INDEX IF NOT EXISTS idx_intents_conv ON intents(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_msg_created ON messages(created_at);
             ",
         )?;
 
@@ -702,6 +703,169 @@ impl ConversationStore {
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    // ── Compaction ───────────────────────────────────────────────
+
+    /// Compact the conversation database by deleting old messages and excess conversations.
+    pub fn compact(&self, config: &CompactConfig) -> Result<CompactStats> {
+        let mut messages_deleted = 0usize;
+        let mut conversations_deleted = 0usize;
+
+        let tx = self.conn.unchecked_transaction()?;
+
+        // 1. Delete messages older than max_message_age_days, preserving keep_recent per conversation.
+        if config.max_message_age_days > 0 {
+            let age_cutoff = format!("-{} days", config.max_message_age_days);
+            let count = tx.execute(
+                "DELETE FROM messages WHERE id IN (
+                    SELECT m.id FROM messages m
+                    WHERE m.created_at < datetime('now', ?1)
+                    AND m.id NOT IN (
+                        SELECT m2.id FROM messages m2
+                        WHERE m2.conversation_id = m.conversation_id
+                        ORDER BY m2.created_at DESC
+                        LIMIT ?2
+                    )
+                )",
+                params![age_cutoff, config.keep_recent_messages as i64],
+            )?;
+            messages_deleted += count;
+        }
+
+        // 2. Trim per-conversation messages to max_messages_per_conversation.
+        if config.max_messages_per_conversation > 0 {
+            // Find conversations that exceed the limit.
+            let mut stmt = tx.prepare(
+                "SELECT conversation_id, COUNT(*) as cnt FROM messages
+                 GROUP BY conversation_id HAVING cnt > ?1",
+            )?;
+            let over_limit: Vec<String> = stmt
+                .query_map(
+                    params![config.max_messages_per_conversation as i64],
+                    |row| row.get(0),
+                )?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            for conv_id in &over_limit {
+                let count = tx.execute(
+                    "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
+                        SELECT id FROM messages WHERE conversation_id = ?1
+                        ORDER BY created_at DESC LIMIT ?2
+                    )",
+                    params![conv_id, config.max_messages_per_conversation as i64],
+                )?;
+                messages_deleted += count;
+            }
+        }
+
+        // 3. Delete excess conversations (oldest first).
+        if config.max_conversations > 0 {
+            let total: i64 =
+                tx.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?;
+            let excess = total - config.max_conversations as i64;
+            if excess > 0 {
+                let count = tx.execute(
+                    "DELETE FROM conversations WHERE id IN (
+                        SELECT id FROM conversations ORDER BY updated_at ASC LIMIT ?1
+                    )",
+                    params![excess],
+                )?;
+                conversations_deleted += count;
+
+                // Cascade-delete orphaned records.
+                messages_deleted += tx.execute(
+                    "DELETE FROM messages WHERE conversation_id NOT IN (SELECT id FROM conversations)",
+                    [],
+                )?;
+                tx.execute(
+                    "DELETE FROM intents WHERE conversation_id NOT IN (SELECT id FROM conversations)",
+                    [],
+                )?;
+                tx.execute(
+                    "DELETE FROM edit_decisions WHERE conversation_id NOT IN (SELECT id FROM conversations)",
+                    [],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+
+        Ok(CompactStats {
+            messages_deleted,
+            conversations_deleted,
+        })
+    }
+
+    /// Get the summary for a conversation, if one exists.
+    pub fn get_summary(&self, conversation_id: &str) -> Result<Option<String>> {
+        let summary: Option<String> = self.conn.query_row(
+            "SELECT summary FROM conversations WHERE id = ?1",
+            params![conversation_id],
+            |row| row.get(0),
+        )?;
+        Ok(summary.filter(|s| !s.is_empty()))
+    }
+
+    /// Get the message count for a conversation.
+    pub fn message_count(&self, conversation_id: &str) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
+            params![conversation_id],
+            |r| r.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
+    /// Delete all but the N most recent messages for a conversation.
+    /// Returns the number of messages deleted.
+    pub fn delete_messages_except_recent(
+        &self,
+        conversation_id: &str,
+        keep: usize,
+    ) -> Result<usize> {
+        let count = self.conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
+                SELECT id FROM messages WHERE conversation_id = ?1
+                ORDER BY created_at DESC LIMIT ?2
+            )",
+            params![conversation_id, keep as i64],
+        )?;
+        Ok(count)
+    }
+
+    /// Find conversations eligible for summarization (no summary, many messages).
+    pub fn conversations_needing_summary(&self, min_messages: usize) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id FROM conversations c
+             WHERE c.summary IS NULL
+             AND (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) > ?1
+             ORDER BY c.updated_at DESC
+             LIMIT 10",
+        )?;
+        let rows = stmt.query_map(params![min_messages as i64], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
+/// Configuration for conversation compaction.
+pub struct CompactConfig {
+    /// Maximum age in days for messages (0 = no limit).
+    pub max_message_age_days: u32,
+    /// Maximum messages per conversation (0 = no limit).
+    pub max_messages_per_conversation: usize,
+    /// Maximum total conversations (0 = no limit).
+    pub max_conversations: usize,
+    /// Number of recent messages to always preserve.
+    pub keep_recent_messages: usize,
+}
+
+/// Statistics from a compaction run.
+pub struct CompactStats {
+    /// Number of messages deleted.
+    pub messages_deleted: usize,
+    /// Number of conversations deleted.
+    pub conversations_deleted: usize,
 }
 
 // ── Helper functions ──────────────────────────────────────────────

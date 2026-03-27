@@ -65,6 +65,8 @@ The `Buffer` type wraps a `ropey::Rope` for efficient text manipulation on large
 - **Messages**: Human intents and AI responses within a conversation
 - **Decisions**: Accept/reject records with full context
 - **Full-text search**: Query across all conversation history
+- **Compaction**: `compact()` deletes old messages, trims per-conversation history, removes excess conversations. Configured via `CompactConfig` (max age, max per conversation, max total, keep recent)
+- **AI summarization**: `get_summary()` / `update_summary()` for AI-generated conversation summaries. `conversations_needing_summary()` finds eligible conversations. `delete_messages_except_recent()` thins old messages after summarization
 
 ## Semantic Graph
 
