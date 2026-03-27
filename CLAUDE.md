@@ -28,7 +28,7 @@ editor → tui → core
 
 **Post-Phase 10: Polish & Features**
 
-AURA is a fully-featured terminal editor with vim-like modal editing, AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting, LSP integration, MCP server/client, embedded terminal, git integration, plugin system, semantic indexing, and real-time multi-file collaborative editing. Recent additions include conversation compaction (configurable retention, AI summarization, context window caps), git panel UI improvements (stage-all button, AI commit message generation), and tab close buttons.
+AURA is a fully-featured terminal editor with vim-like modal editing, AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting, LSP integration, MCP server/client, embedded terminal, git integration, plugin system, semantic indexing, real-time multi-file collaborative editing, split panes, and a settings modal. Recent additions include split panes (vertical/horizontal), settings modal (Ctrl+,), optional minimap, conversation compaction, git panel UI improvements (stage-all button, AI commit message generation), and code quality sweep (no unwrap in library code).
 
 See `TODO.md` for the full roadmap.
 

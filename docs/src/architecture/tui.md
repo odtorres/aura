@@ -85,16 +85,18 @@ The `render` module draws the UI using ratatui's immediate-mode rendering:
 2. **Line numbers**: In the gutter column
 3. **Status bar**: Mode indicator, filename, cursor position, git branch, agent count
 4. **Command bar**: Command input (in Command mode) or intent input (in Intent mode)
-5. **Panels**: File tree (left), terminal (bottom), conversation panel (floating)
-6. **Peer cursors**: Colored blocks with name labels for collaborative editing peers
-7. **Overlays**: File picker, hover info, ghost suggestions, diagnostic popups
+5. **Split panes**: Optional vertical/horizontal split, each pane rendered independently via `draw_editor_pane()`
+6. **Panels**: File tree (left), terminal (bottom), conversation panel (floating)
+7. **Peer cursors**: Colored blocks with name labels for collaborative editing peers
+8. **Overlays**: File picker, hover info, ghost suggestions, settings modal, diagnostic popups
 
 ## Input Handling
 
 `input.rs` dispatches key events based on the current state:
 
-1. Check for focused panels (terminal, file tree, file picker, conversation)
-2. If no panel is focused, check for leader key sequences
+1. Check for global keys (Ctrl+W for split focus, Ctrl+, for settings, F1 for help)
+2. Check for focused panels (settings modal, terminal, file tree, file picker, conversation)
+3. If no panel is focused, check for leader key sequences
 3. Dispatch to mode-specific handler: `handle_normal`, `handle_insert`, `handle_command`, `handle_visual`, `handle_intent`, `handle_review`
 
 ## Configuration & Themes

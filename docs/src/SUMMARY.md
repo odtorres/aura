@@ -20,6 +20,7 @@
 - [Chat Panel](user-guide/chat-panel.md)
 - [Session Persistence](user-guide/session.md)
 - [Plugins](user-guide/plugins.md)
+- [Split Panes](user-guide/split-panes.md)
 - [Collaborative Editing](user-guide/collaborative-editing.md)
 - [Claude Code Integration](user-guide/claude-code.md)
 
