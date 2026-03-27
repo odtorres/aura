@@ -5,6 +5,16 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-27
+
+### Changed
+
+- **CrdtDoc API** — `new()`, `splice()`, and `text()` now return `Result` instead of panicking. Buffer operations gracefully handle CRDT failures.
+
+### Fixed
+
+- **Code quality** — Removed all `unwrap()` from library code. Replaced with proper error handling, `Result` propagation, or descriptive `expect()` for provably-safe operations across 8 files.
+
 ## [0.1.4] - 2026-03-27
 
 ### Added
