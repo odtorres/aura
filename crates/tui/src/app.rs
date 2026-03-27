@@ -227,6 +227,10 @@ pub struct App {
     pub file_tree_rect: Rect,
     /// Cached rect for the "stage all" button in the git panel (for mouse clicks).
     pub stage_all_btn_rect: Rect,
+    /// Cached rect for the AI commit message button (for mouse clicks).
+    pub ai_commit_btn_rect: Rect,
+    /// Receiver for streaming AI-generated commit message tokens.
+    commit_msg_receiver: Option<mpsc::Receiver<AiEvent>>,
     /// Cached conversation history panel rect from the last render frame.
     pub conv_history_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
@@ -489,6 +493,8 @@ impl App {
             terminal_rect: Rect::default(),
             file_tree_rect: Rect::default(),
             stage_all_btn_rect: Rect::default(),
+            ai_commit_btn_rect: Rect::default(),
+            commit_msg_receiver: None,
             conv_history_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
             tab_close_btn_ranges: Vec::new(),
@@ -623,6 +629,9 @@ impl App {
             // Poll for MCP server requests and external MCP client events.
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
+
+            // Poll for AI commit message tokens.
+            self.poll_commit_msg();
 
             // Poll for collaboration events and broadcast awareness.
             self.poll_collab_events();
@@ -1574,6 +1583,11 @@ impl App {
     /// Check if an LSP client is active.
     pub fn has_lsp(&self) -> bool {
         self.tab().lsp_client.is_some()
+    }
+
+    /// Check if an AI commit message is currently being generated.
+    pub fn is_generating_commit_msg(&self) -> bool {
+        self.commit_msg_receiver.is_some()
     }
 
     /// Get diagnostics for a specific line.
@@ -2682,73 +2696,86 @@ impl App {
             }
         };
 
-        let diff_summary = self
+        // Get the full staged diff for better AI context.
+        let diff_stat = self
             .git_repo
             .as_ref()
-            .and_then(|repo| {
-                let fp = self.tab().buffer.file_path()?;
-                repo.diff_summary(fp).ok()
-            })
+            .and_then(|repo| repo.staged_diff_summary().ok())
             .unwrap_or_default();
 
-        if diff_summary.trim().is_empty() {
+        if diff_stat.trim().is_empty() {
             self.set_status("No staged changes to describe");
             return;
         }
 
-        let file_path_str = self
-            .tab()
-            .buffer
-            .file_path()
-            .map(|p| p.display().to_string())
+        let diff_patch = self
+            .git_repo
+            .as_ref()
+            .and_then(|repo| repo.staged_diff_patch(4000).ok())
             .unwrap_or_default();
+
         let system = "You are generating a git commit message. \
-                      Write a concise, conventional commit message (type: description). \
-                      Output ONLY the commit message, no explanations."
+                      Write a concise, conventional commit message \
+                      (type: description, e.g. 'feat: add login page'). \
+                      If there are multiple changes, add bullet points in the body. \
+                      Output ONLY the commit message, no explanations or markdown fences."
             .to_string();
         let messages = vec![Message::text(
             "user",
             &format!(
-                "Generate a commit message for these changes:\n\n{}\n\nFile: {}",
-                diff_summary, file_path_str
+                "Generate a commit message for these staged changes:\n\n\
+                 Summary:\n{diff_stat}\n\nDiff:\n{diff_patch}"
             ),
         )];
 
         let rx = client.stream_completion(&system, messages);
-        // Collect synchronously in a background thread, then apply.
-        let (result_tx, result_rx) = mpsc::channel::<String>();
-        std::thread::Builder::new()
-            .name("commit-msg".to_string())
-            .spawn(move || {
-                let mut msg = String::new();
-                loop {
-                    match rx.recv() {
-                        Ok(AiEvent::Token(t)) => msg.push_str(&t),
-                        Ok(AiEvent::Done(t)) => {
-                            msg = t;
-                            break;
-                        }
-                        Ok(AiEvent::ToolUse { .. })
-                        | Ok(AiEvent::ToolUseComplete { .. })
-                        | Ok(AiEvent::Activity(_)) => {}
-                        Ok(AiEvent::Error(_)) | Err(_) => break,
-                    }
-                }
-                let _ = result_tx.send(msg);
-            })
-            .ok();
 
-        // Store the receiver; we'll poll it. For now, use blocking with timeout.
-        match result_rx.recv_timeout(Duration::from_secs(10)) {
-            Ok(msg) if !msg.is_empty() => {
-                let trimmed = msg.trim().to_string();
-                self.set_status(format!("Commit msg: {trimmed}"));
-                // Auto-commit with the generated message.
-                self.git_commit(&trimmed);
-                self.set_status(format!("Committed: {trimmed}"));
+        // Clear the commit message and start streaming into it.
+        self.source_control.commit_message.clear();
+        self.source_control.editing_commit_message = false;
+        self.source_control.focused_section = crate::source_control::GitPanelSection::CommitMessage;
+        self.commit_msg_receiver = Some(rx);
+        self.set_status("Generating commit message...");
+    }
+
+    /// Poll for streaming AI commit message tokens.
+    fn poll_commit_msg(&mut self) {
+        let rx = match &self.commit_msg_receiver {
+            Some(r) => r,
+            None => return,
+        };
+
+        let mut done = false;
+        loop {
+            match rx.try_recv() {
+                Ok(AiEvent::Token(t)) => {
+                    self.source_control.commit_message.push_str(&t);
+                }
+                Ok(AiEvent::Done(full)) => {
+                    self.source_control.commit_message = full.trim().to_string();
+                    done = true;
+                    break;
+                }
+                Ok(AiEvent::Error(e)) => {
+                    self.set_status(format!("AI error: {e}"));
+                    done = true;
+                    break;
+                }
+                Ok(_) => {} // Ignore tool use events.
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
             }
-            _ => {
+        }
+
+        if done {
+            self.commit_msg_receiver = None;
+            if self.source_control.commit_message.is_empty() {
                 self.set_status("Failed to generate commit message");
+            } else {
+                self.set_status("Commit message ready — review and press c to commit");
             }
         }
     }
@@ -2997,14 +3024,24 @@ impl App {
             } else if self.sidebar_view == SidebarView::Git {
                 self.source_control_focused = true;
                 self.file_tree_focused = false;
+                // Check if click is on the AI commit message button.
+                let ai_btn = self.ai_commit_btn_rect;
+                let on_ai_btn = ai_btn.width > 0
+                    && col >= ai_btn.x
+                    && col < ai_btn.x + ai_btn.width
+                    && row >= ai_btn.y
+                    && row < ai_btn.y + ai_btn.height;
                 // Check if click is on the "stage all" button.
                 let btn = self.stage_all_btn_rect;
-                if btn.width > 0
+                let on_stage_btn = btn.width > 0
                     && col >= btn.x
                     && col < btn.x + btn.width
                     && row >= btn.y
-                    && row < btn.y + btn.height
-                {
+                    && row < btn.y + btn.height;
+
+                if on_ai_btn {
+                    self.generate_commit_message();
+                } else if on_stage_btn {
                     self.sc_stage_all();
                 } else if row >= entries_start_y {
                     // Map click to a git panel entry.

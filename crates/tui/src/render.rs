@@ -1526,15 +1526,47 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        let label = if sc.editing_commit_message {
+        let is_generating = app.is_generating_commit_msg();
+        let label = if is_generating {
+            " Commit Message (AI...)"
+        } else if sc.editing_commit_message {
             " Commit Message (editing)"
         } else {
             " Commit Message"
         };
-        frame.render_widget(
-            Paragraph::new(Span::styled(label, header_style)),
-            Rect::new(inner.x, y, inner.width, 1),
-        );
+
+        // Show AI button when there are staged files and AI is available.
+        let has_staged = !sc.staged.is_empty();
+        let has_ai = app.has_ai();
+        if has_staged && has_ai && !is_generating {
+            let label_len = label.len() as u16;
+            let btn_text = " \u{2728} ";
+            let btn_x = inner.x + inner.width.saturating_sub(btn_text.len() as u16 + 1);
+            app.ai_commit_btn_rect = Rect::new(btn_x, y, btn_text.len() as u16, 1);
+            let btn_style = Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD);
+            let line = ratatui::text::Line::from(vec![
+                Span::styled(label, header_style),
+                Span::styled(
+                    " ".repeat(
+                        (inner
+                            .width
+                            .saturating_sub(label_len + btn_text.len() as u16))
+                            as usize,
+                    ),
+                    Style::default(),
+                ),
+                Span::styled(btn_text, btn_style),
+            ]);
+            frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+        } else {
+            app.ai_commit_btn_rect = Rect::default();
+            frame.render_widget(
+                Paragraph::new(Span::styled(label, header_style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        }
         y += 1;
     }
 

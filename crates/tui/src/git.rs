@@ -711,6 +711,23 @@ impl GitRepo {
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+
+    /// Get the full staged diff patch, truncated to a reasonable size for AI context.
+    pub fn staged_diff_patch(&self, max_bytes: usize) -> anyhow::Result<String> {
+        let output = std::process::Command::new("git")
+            .args(["diff", "--cached"])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        let full = String::from_utf8_lossy(&output.stdout).to_string();
+        if full.len() <= max_bytes {
+            Ok(full)
+        } else {
+            let mut truncated = full[..max_bytes].to_string();
+            truncated.push_str("\n\n... (diff truncated)");
+            Ok(truncated)
+        }
+    }
 }
 
 /// Simple line diff using a longest common subsequence approach.
