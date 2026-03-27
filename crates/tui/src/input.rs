@@ -980,7 +980,7 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             // Get leading whitespace from the current line.
             let base_indent: String = current_line
                 .chars()
-                .take_while(|c| (*c == ' ' || *c == '\t'))
+                .take_while(|c| *c == ' ' || *c == '\t')
                 .collect();
             // Check if text before cursor ends with an opening bracket/colon.
             let text_before_cursor: String = current_line.chars().take(tab.cursor.col).collect();
