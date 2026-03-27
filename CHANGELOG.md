@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Stage all button** — Green `+` button on the "Changes" header in the git source control panel. Click to stage all unstaged files at once. Also available via `Shift+S` keyboard shortcut.
+- **AI commit message button** — Sparkle (`✨`) button on the "Commit Message" header in the git panel. Click to generate a commit message from staged changes using AI. The message streams into the commit message box in real-time for review before committing. Also available via `:commit` / `:gc` commands.
 
 ### Fixed
 

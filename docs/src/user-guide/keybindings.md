@@ -207,6 +207,23 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `Y` | Approve pending tool call |
 | `N` | Deny pending tool call |
 
+## Git Panel (focused)
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Select next entry |
+| `k` / `Up` | Select previous entry |
+| `Tab` | Cycle to next section |
+| `BackTab` | Cycle to previous section |
+| `s` | Stage selected file |
+| `S` | Stage all changed files |
+| `u` | Unstage selected file |
+| `d` | Discard changes (with `y` confirmation) |
+| `c` | Commit staged changes |
+| `i` / `Enter` | Edit commit message (on Commit Message section) |
+| `Enter` | Open diff view (on file entry) |
+| `Esc` | Return focus to editor |
+
 ## Conversation Panel
 
 | Key | Action |

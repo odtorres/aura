@@ -87,6 +87,18 @@ AURA's speculative engine analyzes code in the background and offers ghost text 
 
 When you accept a change, the speculative engine checks related files via the semantic graph. Cross-file changes are proposed as atomic changesets that can be accepted or rejected per-file.
 
+## AI Commit Messages
+
+AURA can generate commit messages from your staged changes using AI.
+
+**From the git panel:** Click the `✨` button on the "Commit Message" header. The AI analyzes the staged diff (stat summary + patch content) and streams a conventional commit message into the message box.
+
+**From command mode:** `:commit` or `:gc`
+
+The generated message follows conventional commit format (`type: description`) and includes bullet points for multi-file changes. The message appears in the commit message box for you to review and edit before pressing `c` to commit.
+
+See [Git Integration](git.md) for the full source control panel reference.
+
 ## Authorship Tracking
 
 Every AI edit carries an `AuthorId` (e.g., `ai:claude`). This enables:

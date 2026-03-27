@@ -232,6 +232,24 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `Esc` | Return focus to editor |
 | `Ctrl+N` | Close file tree |
 
+### Git Panel (when focused)
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Select next entry |
+| `k` / `Up` | Select previous entry |
+| `Tab` | Cycle to next section |
+| `s` | Stage selected file |
+| `S` | Stage all changed files |
+| `u` | Unstage selected file |
+| `d` | Discard changes (with confirmation) |
+| `c` | Commit staged changes |
+| `i` / `Enter` | Edit commit message (on Commit Message section) |
+| `Enter` | Open diff view (on file entry) |
+| `Esc` | Return focus to editor |
+| Click `+` | Stage all changed files (on Changes header) |
+| Click `✨` | AI-generate commit message (on Commit Message header) |
+
 <!-- ANCHOR: keybindings-end -->
 
 <!-- ANCHOR: techstack-start -->
