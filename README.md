@@ -132,6 +132,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `Ctrl+T` | Toggle terminal pane |
 | `Ctrl+J` | Toggle chat panel |
 | `Ctrl+H` | Toggle conversation history |
+| `Ctrl+,` | Open settings |
 
 ### Leader Key (`Space`)
 
@@ -197,6 +198,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `:tree` | Toggle file tree |
 | `:term-height <N>` / `:th <N>` | Set terminal height |
 | `:chat` | Toggle chat panel |
+| `:settings` / `:prefs` | Open settings modal |
 | `:compact` | Compact conversation database |
 | `:host` | Start hosting a collab session |
 | `:join <addr:port>` | Join a collab session |

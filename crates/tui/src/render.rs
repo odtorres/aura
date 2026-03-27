@@ -159,13 +159,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let editor_inner = editor_block.inner(editor_area);
         frame.render_widget(editor_block, editor_area);
 
-        // Carve out 1 column on the right for the minimap scrollbar.
-        let (editor_content_area, minimap_area) = {
+        // Carve out 1 column on the right for the minimap scrollbar (if enabled).
+        let show_minimap = app.config.editor.show_minimap;
+        let (editor_content_area, minimap_area) = if show_minimap {
             let hsplit = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Min(1), Constraint::Length(1)])
                 .split(editor_inner);
-            (hsplit[0], hsplit[1])
+            (hsplit[0], Some(hsplit[1]))
+        } else {
+            (editor_inner, None)
         };
 
         // Adjust scroll so cursor is visible (using inner dimensions).
@@ -192,13 +195,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_editor(frame, app, editor_content_area, &git_status);
         draw_peer_cursors(frame, app, editor_content_area);
 
-        // Draw minimap with diagnostic markers.
-        {
+        // Draw minimap with diagnostic markers (if enabled).
+        if let Some(minimap_rect) = minimap_area {
             let theme = &app.theme;
             let total_lines = app.buffer().line_count();
             let scroll_row = app.tab().scroll_row;
 
-            // Collect diagnostic markers sorted by priority (info < warning < error).
             let mut markers: Vec<(usize, Color)> = Vec::new();
             for d in &app.tab().diagnostics {
                 let color = if d.is_error() {
@@ -208,19 +210,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 } else {
                     theme.info
                 };
-                let priority = if d.is_error() {
-                    2
-                } else if d.is_warning() {
-                    1
-                } else {
-                    0
-                };
                 markers.push((d.range.start.line as usize, color));
-                // Store priority for sorting — we use a stable sort so same-line
-                // markers with higher priority end up last (overwriting lower).
-                let _ = priority; // used implicitly by insertion order below
             }
-            // Sort: info first, then warnings, then errors so errors overwrite.
             markers.sort_by_key(|&(line, color)| {
                 let prio = match color {
                     c if c == theme.error => 2u8,
@@ -232,7 +223,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
             draw_minimap(
                 frame,
-                minimap_area,
+                minimap_rect,
                 &markers,
                 total_lines,
                 scroll_row,
@@ -280,6 +271,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // Render help overlay if visible.
         if app.help.visible {
             draw_help(frame, app, area);
+        }
+
+        // Render settings modal if visible.
+        if app.settings_modal.visible {
+            draw_settings_modal(frame, &app.settings_modal, area);
         }
 
         // Render update notification toast.
@@ -1895,6 +1891,105 @@ fn draw_file_picker(frame: &mut Frame, app: &App, area: Rect) {
         let display: String = entry.chars().take(inner.width as usize).collect();
         let line_widget = Paragraph::new(Span::styled(display, style));
         frame.render_widget(line_widget, Rect::new(inner.x, row_y, inner.width, 1));
+    }
+}
+
+/// Draw the settings modal (centered popup).
+fn draw_settings_modal(
+    frame: &mut Frame,
+    modal: &crate::settings_modal::SettingsModal,
+    area: Rect,
+) {
+    use crate::settings_modal::SettingValue;
+
+    let entry_count = modal.entries.len() as u16;
+    let width = 50u16.min(area.width.saturating_sub(4));
+    let height = (entry_count + 4).min(area.height.saturating_sub(2)); // title + entries + footer + borders
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Settings ")
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let mut row_y = inner.y;
+
+    for (i, entry) in modal.entries.iter().enumerate() {
+        if row_y >= inner.y + inner.height {
+            break;
+        }
+        let is_selected = i == modal.selected;
+
+        let value_str = match &entry.value {
+            SettingValue::Bool(true) => "[x]".to_string(),
+            SettingValue::Bool(false) => "[ ]".to_string(),
+            SettingValue::Number { current, .. } => format!("< {current} >"),
+        };
+
+        let label_width = inner.width.saturating_sub(value_str.len() as u16 + 2) as usize;
+        let label: String = entry.label.chars().take(label_width).collect();
+        let padding = label_width.saturating_sub(label.len());
+
+        let line = ratatui::text::Line::from(vec![
+            Span::styled(
+                format!(" {label}{}", " ".repeat(padding)),
+                if is_selected {
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ),
+            Span::styled(
+                format!("{value_str} "),
+                if is_selected {
+                    match &entry.value {
+                        SettingValue::Bool(true) => Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                        SettingValue::Bool(false) => Style::default().fg(Color::DarkGray),
+                        SettingValue::Number { .. } => Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    }
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                },
+            ),
+        ]);
+
+        let bg = if is_selected {
+            Style::default().bg(Color::Rgb(30, 30, 50))
+        } else {
+            Style::default()
+        };
+        frame.render_widget(
+            Paragraph::new(line).style(bg),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+        row_y += 1;
+    }
+
+    // Footer hint.
+    if row_y < inner.y + inner.height {
+        row_y = inner.y + inner.height - 1;
+        let hint = " j/k:navigate  Enter:toggle  Esc:close";
+        let hint: String = hint.chars().take(inner.width as usize).collect();
+        frame.render_widget(
+            Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
     }
 }
 

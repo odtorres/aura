@@ -130,6 +130,8 @@ pub struct EditorConfig {
     pub line_numbers: bool,
     /// Show authorship markers in the gutter.
     pub show_authorship: bool,
+    /// Show the minimap scrollbar on the right edge.
+    pub show_minimap: bool,
     /// Tab width in spaces.
     pub tab_width: usize,
     /// Use spaces instead of tabs.
@@ -145,6 +147,7 @@ impl Default for EditorConfig {
         Self {
             line_numbers: true,
             show_authorship: true,
+            show_minimap: true,
             tab_width: 4,
             spaces_for_tabs: true,
             scroll_margin: 5,

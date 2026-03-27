@@ -7,6 +7,8 @@ AURA is configured via `aura.toml`. It searches for configuration in:
 
 If no config file is found, sensible defaults are used.
 
+You can also change common settings interactively with the **Settings modal** (`Ctrl+,` or `:settings`). Changes apply immediately.
+
 ## Full Example
 
 ```toml
@@ -15,6 +17,7 @@ theme = "dark"
 [editor]
 line_numbers = true
 show_authorship = true
+show_minimap = true
 tab_width = 4
 spaces_for_tabs = true
 scroll_margin = 5
@@ -61,6 +64,7 @@ default_port = 0
 |-----|------|---------|-------------|
 | `line_numbers` | bool | `true` | Show line numbers in the gutter |
 | `show_authorship` | bool | `true` | Show authorship markers (human/AI) in the gutter |
+| `show_minimap` | bool | `true` | Show the minimap scrollbar on the right edge |
 | `tab_width` | int | `4` | Tab display width in spaces |
 | `spaces_for_tabs` | bool | `true` | Insert spaces when pressing Tab |
 | `scroll_margin` | int | `5` | Lines from edge before viewport scrolls |

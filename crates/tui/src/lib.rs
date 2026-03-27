@@ -25,6 +25,7 @@ pub mod plugin;
 pub mod render;
 pub mod semantic_index;
 pub mod session;
+pub mod settings_modal;
 pub mod source_control;
 pub mod speculative;
 pub mod tab;

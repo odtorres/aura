@@ -144,6 +144,7 @@ aura-editor/
     │       ├── chat_panel.rs           # Interactive AI chat panel
     │       ├── chat_tools.rs           # Tool execution for chat panel
     │       ├── collab.rs              # Real-time collaborative editing (TCP sync)
+    │       ├── settings_modal.rs        # Interactive settings overlay
     │       ├── session.rs              # Session persistence (save/restore)
     │       └── help.rs                 # In-editor help overlay
     ├── ai/

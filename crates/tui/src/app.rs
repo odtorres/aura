@@ -189,6 +189,8 @@ pub struct App {
     pub file_picker: FilePicker,
     /// In-editor help overlay.
     pub help: HelpOverlay,
+    /// Settings modal overlay.
+    pub settings_modal: crate::settings_modal::SettingsModal,
     /// File tree sidebar.
     pub file_tree: FileTree,
     /// Which sidebar view is active (Files or Git).
@@ -499,6 +501,7 @@ impl App {
             file_tree_focused: false,
             file_picker: FilePicker::new(terminal_cwd.clone()),
             help: HelpOverlay::new(),
+            settings_modal: crate::settings_modal::SettingsModal::new(),
             file_tree: FileTree::new(terminal_cwd),
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
@@ -4507,6 +4510,20 @@ impl App {
     }
 
     /// Stop the current collaboration session.
+    /// Open the settings modal.
+    pub fn open_settings(&mut self) {
+        self.settings_modal.open(&self.config);
+    }
+
+    /// Close the settings modal and apply changes.
+    pub fn close_settings(&mut self) {
+        self.settings_modal.apply_to_config(&mut self.config);
+        // Apply live settings that need immediate effect.
+        self.show_authorship = self.config.editor.show_authorship;
+        self.chat_panel.max_context_messages = self.config.conversations.max_context_messages;
+        self.settings_modal.close();
+    }
+
     /// Manually compact the conversation database.
     pub fn compact_conversations(&mut self) {
         let store = match &self.conversation_store {

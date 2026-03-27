@@ -509,6 +509,42 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Ctrl+, — open settings from any mode.
+    if code == KeyCode::Char(',') && modifiers.contains(KeyModifiers::CONTROL) {
+        app.open_settings();
+        return;
+    }
+
+    // Route keys to the settings modal when visible.
+    if app.settings_modal.visible {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.close_settings();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.settings_modal.select_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.settings_modal.select_up();
+            }
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Right | KeyCode::Char('l') => {
+                app.settings_modal.toggle_selected();
+                // Apply changes live.
+                app.settings_modal.apply_to_config(&mut app.config);
+                app.show_authorship = app.config.editor.show_authorship;
+                app.chat_panel.max_context_messages = app.config.conversations.max_context_messages;
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                app.settings_modal.decrement_selected();
+                app.settings_modal.apply_to_config(&mut app.config);
+                app.show_authorship = app.config.editor.show_authorship;
+                app.chat_panel.max_context_messages = app.config.conversations.max_context_messages;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // F1 — open help from any mode.
     if code == KeyCode::F(1) {
         app.help.open();
@@ -1812,6 +1848,10 @@ fn execute_command(app: &mut App, cmd: &str) {
         "update" | "check-update" => {
             // Force a fresh check (bypasses cache).
             app.force_update_check();
+        }
+        // --- Settings ---
+        "settings" | "preferences" | "prefs" => {
+            app.open_settings();
         }
         // --- Conversation compaction ---
         "compact" => {
