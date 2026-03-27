@@ -284,6 +284,16 @@ impl EditorTab {
             .file_path()
             .and_then(|p| std::fs::canonicalize(p).ok())
     }
+
+    /// Get the file identifier for collaborative editing.
+    ///
+    /// Returns a deterministic u64 hash of the canonical path, or 0 for
+    /// scratch buffers (which are excluded from multi-file collab).
+    pub fn file_id(&self) -> u64 {
+        self.canonical_path()
+            .map(|p| crate::collab::file_id_from_path(&p))
+            .unwrap_or(0)
+    }
 }
 
 /// Manages a collection of open editor tabs.

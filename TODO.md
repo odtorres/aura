@@ -383,8 +383,21 @@ Multiple AURA instances can collaborate on the same file in real-time using the 
 - [x] Replace full rope rebuild with incremental diff (O(delta + scan) instead of O(document))
 - [x] Update only affected line_authors for changed lines
 
+### 10.6 Multi-file sessions
+- [x] Wire protocol extended with `file_id` (u64 hash of canonical path) on all messages
+- [x] New message types: `MSG_FILE_OPENED` (0x06), `MSG_FILE_CLOSED` (0x07)
+- [x] Per-file sync state in `PeerInfo` (`HashMap<u64, SyncState>`)
+- [x] Per-file awareness in `PeerInfo` (`HashMap<u64, AwarenessUpdate>`)
+- [x] Host shares ALL open files on session start (multi-snapshot)
+- [x] Sync messages routed to correct tab by `file_id`
+- [x] Clients auto-open tabs for files received from host
+- [x] `EditorTab::file_id()` helper for deterministic file identification
+- [x] Peer cursors filtered to active tab's file only
+- [x] Snapshot payload encoding with file_id + path + data
+- [x] Backward compatible: `file_id=0` treated as legacy single-file mode
+
 ### Phase 10 Definition of Done
-> Two or more AURA instances can connect, see each other's cursors, and edit the same file in real-time with automatic conflict resolution via the CRDT.
+> Two or more AURA instances can connect, see each other's cursors, and edit multiple files in real-time with automatic conflict resolution via the CRDT.
 
 ---
 

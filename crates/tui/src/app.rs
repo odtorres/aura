@@ -4240,9 +4240,23 @@ impl App {
     pub fn start_collab_host(&mut self) {
         let name = self.config.collab.display_name.clone();
         let port = self.config.collab.default_port;
-        let snapshot = self.tab_mut().buffer.crdt_mut().save_bytes();
 
-        match crate::collab::CollabSession::host(&name, port, snapshot) {
+        // Collect snapshots for all open files (skip scratch buffers).
+        let mut files = Vec::new();
+        for tab in self.tabs.tabs_mut() {
+            if let Some(path) = tab.canonical_path() {
+                let file_id = crate::collab::file_id_from_path(&path);
+                let snapshot = tab.buffer.crdt_mut().save_bytes();
+                files.push((file_id, path.display().to_string(), snapshot));
+            }
+        }
+        if files.is_empty() {
+            // Fallback: share active buffer even if scratch.
+            let snapshot = self.tab_mut().buffer.crdt_mut().save_bytes();
+            files.push((0, String::new(), snapshot));
+        }
+
+        match crate::collab::CollabSession::host(&name, port, files) {
             Ok(session) => {
                 let port = session.port.unwrap_or(0);
                 self.collab = Some(session);
@@ -4282,7 +4296,11 @@ impl App {
 
         for event in events {
             match event {
-                crate::collab::CollabEvent::SyncMessage { peer_id, data } => {
+                crate::collab::CollabEvent::SyncMessage {
+                    peer_id,
+                    file_id,
+                    data,
+                } => {
                     // Decode the automerge sync message and apply it.
                     let msg = match aura_core::sync::SyncMessage::decode(&data) {
                         Ok(m) => m,
@@ -4292,71 +4310,129 @@ impl App {
                         }
                     };
 
+                    // Find the tab for this file_id.
+                    let tab_idx = self.find_tab_by_file_id(file_id);
+
                     // Take the sync state out to avoid borrow conflict.
                     let mut sync_state = if let Some(session) = &mut self.collab {
                         if !session.peers.contains_key(&peer_id) {
                             session.add_peer(peer_id, format!("peer-{peer_id}"));
                         }
-                        std::mem::take(&mut session.peers.get_mut(&peer_id).unwrap().sync_state)
+                        let peer = session.peers.get_mut(&peer_id).unwrap();
+                        std::mem::take(peer.sync_states.entry(file_id).or_default())
                     } else {
                         continue;
                     };
 
                     let remote_author =
                         aura_core::AuthorId::peer(format!("peer-{peer_id}"), peer_id);
-                    if let Err(e) = self.tab_mut().buffer.apply_remote_sync(
-                        &mut sync_state,
-                        msg,
-                        &remote_author,
-                    ) {
-                        tracing::warn!("Failed to apply sync message: {e}");
-                    } else {
-                        self.tab_mut().mark_highlights_dirty();
-                    }
 
-                    // Generate a response sync message.
-                    let reply = self
-                        .tabs
-                        .active_mut()
-                        .buffer
-                        .crdt_mut()
-                        .generate_sync_message(&mut sync_state);
-
-                    // Put the sync state back and send reply.
-                    if let Some(session) = &mut self.collab {
-                        if let Some(peer) = session.peers.get_mut(&peer_id) {
-                            peer.sync_state = sync_state;
+                    if let Some(idx) = tab_idx {
+                        let tab = &mut self.tabs.tabs_mut()[idx];
+                        if let Err(e) =
+                            tab.buffer
+                                .apply_remote_sync(&mut sync_state, msg, &remote_author)
+                        {
+                            tracing::warn!("Failed to apply sync message: {e}");
+                        } else {
+                            tab.mark_highlights_dirty();
                         }
-                        if let Some(reply_msg) = reply {
-                            session.broadcast_sync(reply_msg.encode());
+                        let reply = self.tabs.tabs_mut()[idx]
+                            .buffer
+                            .crdt_mut()
+                            .generate_sync_message(&mut sync_state);
+                        if let Some(session) = &mut self.collab {
+                            if let Some(peer) = session.peers.get_mut(&peer_id) {
+                                peer.sync_states.insert(file_id, sync_state);
+                            }
+                            if let Some(reply_msg) = reply {
+                                session.broadcast_sync(file_id, reply_msg.encode());
+                            }
+                        }
+                    } else if let Some(session) = &mut self.collab {
+                        if let Some(peer) = session.peers.get_mut(&peer_id) {
+                            peer.sync_states.insert(file_id, sync_state);
                         }
                     }
                 }
-                crate::collab::CollabEvent::DocSnapshot(data) => {
-                    // Client received initial snapshot from host.
-                    if let Err(e) = self.tab_mut().buffer.load_remote_snapshot(&data) {
-                        tracing::warn!("Failed to load snapshot: {e}");
-                        self.set_status(format!("Failed to load snapshot: {e}"));
+                crate::collab::CollabEvent::DocSnapshot {
+                    file_id,
+                    path,
+                    data,
+                } => {
+                    // Find or create a tab for this file.
+                    let tab_idx = if !path.is_empty() {
+                        let p = std::path::PathBuf::from(&path);
+                        if let Some(idx) = self.tabs.find_by_path(&p) {
+                            let tab = &mut self.tabs.tabs_mut()[idx];
+                            if let Err(e) = tab.buffer.load_remote_snapshot(&data) {
+                                tracing::warn!("Failed to load snapshot for {path}: {e}");
+                                continue;
+                            }
+                            Some(idx)
+                        } else {
+                            let mut buf = aura_core::Buffer::new();
+                            if let Err(e) = buf.load_remote_snapshot(&data) {
+                                tracing::warn!("Failed to load snapshot for {path}: {e}");
+                                continue;
+                            }
+                            let tab = crate::tab::EditorTab::new(
+                                buf,
+                                self.conversation_store.as_ref(),
+                                &self.theme,
+                            );
+                            self.tabs.open(tab);
+                            Some(self.tabs.count() - 1)
+                        }
                     } else {
-                        self.tab_mut().mark_highlights_dirty();
-                        self.set_status("Document synced from host");
+                        if let Err(e) = self.tab_mut().buffer.load_remote_snapshot(&data) {
+                            tracing::warn!("Failed to load snapshot: {e}");
+                            continue;
+                        }
+                        Some(self.tabs.active_index())
+                    };
 
-                        // Generate an initial sync message.
+                    if let Some(idx) = tab_idx {
+                        self.tabs.tabs_mut()[idx].mark_highlights_dirty();
+                        let tab_fid = self.tabs.tabs()[idx].file_id();
+                        let actual_fid = if file_id != 0 { file_id } else { tab_fid };
+
                         let mut state = aura_core::sync::SyncState::new();
-                        let msg = self
-                            .tabs
-                            .active_mut()
+                        let msg = self.tabs.tabs_mut()[idx]
                             .buffer
                             .crdt_mut()
                             .generate_sync_message(&mut state);
 
-                        // Store the sync state and send the message.
                         if let Some(session) = &mut self.collab {
-                            session.add_peer(0, "host".to_string());
-                            session.peers.get_mut(&0).unwrap().sync_state = state;
-                            if let Some(m) = msg {
-                                session.broadcast_sync(m.encode());
+                            if !session.peers.contains_key(&0) {
+                                session.add_peer(0, "host".to_string());
                             }
+                            session
+                                .peers
+                                .get_mut(&0)
+                                .unwrap()
+                                .sync_states
+                                .insert(actual_fid, state);
+                            if let Some(m) = msg {
+                                session.broadcast_sync(actual_fid, m.encode());
+                            }
+                        }
+                    }
+                    self.set_status(if path.is_empty() {
+                        "Document synced from host".to_string()
+                    } else {
+                        format!("Synced: {path}")
+                    });
+                }
+                crate::collab::CollabEvent::FileOpened { file_id: _, path } => {
+                    self.set_status(format!("Host opened: {path}"));
+                }
+                crate::collab::CollabEvent::FileClosed { file_id } => {
+                    if let Some(idx) = self.find_tab_by_file_id(file_id) {
+                        let name = self.tabs.tabs()[idx].file_name().to_string();
+                        if !self.tabs.tabs()[idx].is_modified() {
+                            self.tabs.close(idx);
+                            self.set_status(format!("Host closed: {name}"));
                         }
                     }
                 }
@@ -4412,12 +4488,13 @@ impl App {
         }
     }
 
-    /// Broadcast local CRDT changes to all peers.
+    /// Broadcast local CRDT changes for the active tab to all peers.
     fn broadcast_collab_sync(&mut self) {
         if self.collab.is_none() {
             return;
         }
-        // Collect peer IDs first.
+
+        let file_id = self.tab().file_id();
         let peer_ids: Vec<u64> = self
             .collab
             .as_ref()
@@ -4425,10 +4502,9 @@ impl App {
             .unwrap_or_default();
 
         for peer_id in peer_ids {
-            // Take the sync state out to avoid borrow conflict.
             let mut sync_state = if let Some(session) = &mut self.collab {
                 if let Some(peer) = session.peers.get_mut(&peer_id) {
-                    std::mem::take(&mut peer.sync_state)
+                    std::mem::take(peer.sync_states.entry(file_id).or_default())
                 } else {
                     continue;
                 }
@@ -4443,16 +4519,26 @@ impl App {
                 .crdt_mut()
                 .generate_sync_message(&mut sync_state);
 
-            // Put the sync state back and send.
             if let Some(session) = &mut self.collab {
                 if let Some(peer) = session.peers.get_mut(&peer_id) {
-                    peer.sync_state = sync_state;
+                    peer.sync_states.insert(file_id, sync_state);
                 }
                 if let Some(m) = msg {
-                    session.broadcast_sync(m.encode());
+                    session.broadcast_sync(file_id, m.encode());
                 }
             }
         }
+    }
+
+    /// Find a tab index by file_id.
+    fn find_tab_by_file_id(&self, file_id: u64) -> Option<usize> {
+        if file_id == 0 {
+            return Some(self.tabs.active_index());
+        }
+        self.tabs
+            .tabs()
+            .iter()
+            .position(|tab| tab.file_id() == file_id)
     }
 
     /// Send an awareness update if cursor/selection changed (throttled to 50ms).
@@ -4483,9 +4569,11 @@ impl App {
         self.collab_last_awareness = now;
 
         if let Some(session) = &self.collab {
+            let file_id = self.tab().file_id();
             let update = crate::collab::AwarenessUpdate {
                 peer_id: session.local_peer_id,
                 name: session.local_name.clone(),
+                file_id,
                 cursor: Some(cursor),
                 selection,
             };
@@ -4493,13 +4581,14 @@ impl App {
         }
     }
 
-    /// Get all peer awareness states for rendering.
+    /// Get peer awareness states for the currently active file.
     pub fn collab_peer_awareness(&self) -> Vec<&crate::collab::AwarenessUpdate> {
+        let file_id = self.tab().file_id();
         match &self.collab {
             Some(session) => session
                 .peers
                 .values()
-                .filter_map(|p| p.awareness.as_ref())
+                .filter_map(|p| p.awareness.get(&file_id))
                 .collect(),
             None => Vec::new(),
         }

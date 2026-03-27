@@ -5,6 +5,9 @@
 //! sync messages.  All network I/O happens on background threads, communicating
 //! with the main event loop via `std::sync::mpsc` channels — the same pattern
 //! used by `mcp_server.rs`, `lsp.rs`, and other subsystems.
+//!
+//! Supports multi-file sessions: each message carries a `file_id` (u64 hash of
+//! the canonical file path) so sync and awareness are routed to the correct buffer.
 
 use aura_core::sync::SyncState;
 use std::collections::HashMap;
@@ -28,6 +31,38 @@ const MSG_AWARENESS: u8 = 0x02;
 const MSG_PEER_JOINED: u8 = 0x03;
 const MSG_PEER_LEFT: u8 = 0x04;
 const MSG_DOC_SNAPSHOT: u8 = 0x05;
+const MSG_FILE_OPENED: u8 = 0x06;
+const MSG_FILE_CLOSED: u8 = 0x07;
+
+/// Compute a deterministic file identifier from a canonical path.
+///
+/// Uses `DefaultHasher` to produce a `u64` that is consistent across peers
+/// as long as the canonical path is the same.
+pub fn file_id_from_path(path: &std::path::Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.as_os_str().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Prepend an 8-byte big-endian file_id to a payload.
+fn prepend_file_id(file_id: u64, payload: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(8 + payload.len());
+    buf.extend_from_slice(&file_id.to_be_bytes());
+    buf.extend_from_slice(payload);
+    buf
+}
+
+/// Extract an 8-byte big-endian file_id from the start of a payload.
+/// Returns (file_id, remaining_payload). Falls back to file_id=0 for short payloads.
+fn extract_file_id(payload: &[u8]) -> (u64, Vec<u8>) {
+    if payload.len() >= 8 {
+        let file_id = u64::from_be_bytes(payload[..8].try_into().unwrap());
+        (file_id, payload[8..].to_vec())
+    } else {
+        (0, payload.to_vec())
+    }
+}
 
 /// Encode a wire message: 4-byte big-endian length + 1-byte type + payload.
 fn encode_wire(msg_type: u8, payload: &[u8]) -> Vec<u8> {
@@ -75,6 +110,9 @@ pub struct AwarenessUpdate {
     pub peer_id: u64,
     /// Display name.
     pub name: String,
+    /// Which file this awareness applies to (0 = legacy/default).
+    #[serde(default)]
+    pub file_id: u64,
     /// Cursor position as (row, col), if any.
     pub cursor: Option<(usize, usize)>,
     /// Selection range as ((start_row, start_col), (end_row, end_col)).
@@ -88,10 +126,12 @@ pub struct AwarenessUpdate {
 /// Events sent from network threads to the main event loop.
 #[derive(Debug)]
 pub enum CollabEvent {
-    /// A sync message arrived from a peer.
+    /// A sync message arrived from a peer for a specific file.
     SyncMessage {
         /// Which peer sent it.
         peer_id: u64,
+        /// Which file this sync applies to (0 = legacy/default).
+        file_id: u64,
         /// Raw automerge sync message bytes.
         data: Vec<u8>,
     },
@@ -109,8 +149,27 @@ pub enum CollabEvent {
         /// Which peer left.
         peer_id: u64,
     },
-    /// Full document snapshot received (client only, during initial sync).
-    DocSnapshot(Vec<u8>),
+    /// Document snapshot received for a specific file.
+    DocSnapshot {
+        /// Which file this snapshot is for.
+        file_id: u64,
+        /// File path (so the client can open the correct tab).
+        path: String,
+        /// Serialized automerge document.
+        data: Vec<u8>,
+    },
+    /// Host opened a new file.
+    FileOpened {
+        /// File identifier.
+        file_id: u64,
+        /// File path.
+        path: String,
+    },
+    /// Host closed a file.
+    FileClosed {
+        /// File identifier.
+        file_id: u64,
+    },
     /// Client is attempting to reconnect.
     Reconnecting {
         /// Current retry attempt number.
@@ -125,10 +184,29 @@ pub enum CollabEvent {
 /// Commands sent from the main event loop to the network threads.
 #[derive(Debug, Clone)]
 pub enum CollabCommand {
-    /// Broadcast a sync message to all peers.
-    BroadcastSync(Vec<u8>),
+    /// Broadcast a sync message for a specific file to all peers.
+    BroadcastSync {
+        /// Which file this sync applies to.
+        file_id: u64,
+        /// Raw automerge sync message bytes.
+        data: Vec<u8>,
+    },
     /// Broadcast an awareness update.
     BroadcastAwareness(AwarenessUpdate),
+    /// Notify peers that a file was opened (includes snapshot for new joiners).
+    NotifyFileOpened {
+        /// File identifier.
+        file_id: u64,
+        /// File path.
+        path: String,
+        /// Serialized automerge document snapshot.
+        snapshot: Vec<u8>,
+    },
+    /// Notify peers that a file was closed.
+    NotifyFileClosed {
+        /// File identifier.
+        file_id: u64,
+    },
     /// Shut down the collaboration session.
     Shutdown,
 }
@@ -143,10 +221,10 @@ pub struct PeerInfo {
     pub peer_id: u64,
     /// Display name.
     pub name: String,
-    /// Automerge sync state for this peer.
-    pub sync_state: SyncState,
-    /// Latest awareness (cursor, selection).
-    pub awareness: Option<AwarenessUpdate>,
+    /// Automerge sync states per file (file_id → SyncState).
+    pub sync_states: HashMap<u64, SyncState>,
+    /// Latest awareness per file (file_id → AwarenessUpdate).
+    pub awareness: HashMap<u64, AwarenessUpdate>,
     /// When we last heard from this peer.
     pub last_seen: std::time::Instant,
 }
@@ -206,16 +284,22 @@ pub struct CollabSession {
     pub reconnecting: bool,
     /// Current reconnect attempt number (client only).
     pub reconnect_attempt: u32,
-    /// Disconnected peers with retained sync state (host only).
-    /// Maps peer_id → (SyncState, disconnect_time).
-    disconnected_peers: HashMap<u64, (SyncState, std::time::Instant)>,
+    /// Disconnected peers with retained sync states (host only).
+    /// Maps peer_id → (per-file sync states, disconnect_time).
+    disconnected_peers: HashMap<u64, (HashMap<u64, SyncState>, std::time::Instant)>,
     /// Shutdown flag shared with threads.
     shutdown: Arc<Mutex<bool>>,
 }
 
 impl CollabSession {
     /// Start hosting a collaboration session on the given port (0 = random).
-    pub fn host(display_name: &str, port: u16, doc_snapshot: Vec<u8>) -> std::io::Result<Self> {
+    ///
+    /// `files` is a list of `(file_id, path, snapshot_bytes)` for each open file.
+    pub fn host(
+        display_name: &str,
+        port: u16,
+        files: Vec<(u64, String, Vec<u8>)>,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
         let actual_port = listener.local_addr()?.port();
         listener.set_nonblocking(false)?;
@@ -232,11 +316,13 @@ impl CollabSession {
         let clients: ClientList = Arc::new(Mutex::new(Vec::new()));
         let clients_for_accept = clients.clone();
         let clients_for_cmd = clients.clone();
-        let snapshot = Arc::new(Mutex::new(doc_snapshot));
+        let file_snapshots = Arc::new(Mutex::new(files));
 
         // Accept thread: listen for incoming connections.
         let event_tx_accept = event_tx.clone();
         let shutdown_accept = shutdown_clone.clone();
+        let file_snaps_for_accept = file_snapshots.clone();
+        let file_snaps_for_cmd = file_snapshots;
         thread::Builder::new()
             .name("collab-accept".to_string())
             .spawn(move || {
@@ -252,13 +338,13 @@ impl CollabSession {
 
                     let event_tx = event_tx_accept.clone();
                     let clients = clients_for_accept.clone();
-                    let snap = snapshot.lock().unwrap().clone();
+                    let snaps = file_snaps_for_accept.lock().unwrap().clone();
                     let shutdown_peer = shutdown_accept.clone();
 
                     thread::Builder::new()
                         .name("collab-peer".to_string())
                         .spawn(move || {
-                            host_handle_peer(stream, event_tx, clients, snap, shutdown_peer);
+                            host_handle_peer(stream, event_tx, clients, snaps, shutdown_peer);
                         })
                         .ok();
                 }
@@ -274,13 +360,38 @@ impl CollabSession {
                         break;
                     }
                     match cmd {
-                        CollabCommand::BroadcastSync(data) => {
-                            broadcast(&clients_for_cmd, MSG_SYNC, &data);
+                        CollabCommand::BroadcastSync { file_id, data } => {
+                            let payload = prepend_file_id(file_id, &data);
+                            broadcast(&clients_for_cmd, MSG_SYNC, &payload);
                         }
                         CollabCommand::BroadcastAwareness(update) => {
                             if let Ok(json) = serde_json::to_vec(&update) {
                                 broadcast(&clients_for_cmd, MSG_AWARENESS, &json);
                             }
+                        }
+                        CollabCommand::NotifyFileOpened {
+                            file_id,
+                            path,
+                            snapshot,
+                        } => {
+                            // Add to the snapshots list for future joiners.
+                            file_snaps_for_cmd.lock().unwrap().push((
+                                file_id,
+                                path.clone(),
+                                snapshot.clone(),
+                            ));
+                            // Broadcast snapshot to current clients.
+                            let payload = encode_snapshot_payload(file_id, &path, &snapshot);
+                            broadcast(&clients_for_cmd, MSG_DOC_SNAPSHOT, &payload);
+                        }
+                        CollabCommand::NotifyFileClosed { file_id } => {
+                            // Remove from snapshots.
+                            file_snaps_for_cmd
+                                .lock()
+                                .unwrap()
+                                .retain(|(id, _, _)| *id != file_id);
+                            let payload = file_id.to_be_bytes().to_vec();
+                            broadcast(&clients_for_cmd, MSG_FILE_CLOSED, &payload);
                         }
                         CollabCommand::Shutdown => break,
                     }
@@ -360,13 +471,18 @@ impl CollabSession {
                     }
                     let mut w = writer_for_cmd.lock().unwrap();
                     match cmd {
-                        CollabCommand::BroadcastSync(data) => {
-                            let _ = write_wire(&mut *w, MSG_SYNC, &data);
+                        CollabCommand::BroadcastSync { file_id, data } => {
+                            let payload = prepend_file_id(file_id, &data);
+                            let _ = write_wire(&mut *w, MSG_SYNC, &payload);
                         }
                         CollabCommand::BroadcastAwareness(update) => {
                             if let Ok(json) = serde_json::to_vec(&update) {
                                 let _ = write_wire(&mut *w, MSG_AWARENESS, &json);
                             }
+                        }
+                        CollabCommand::NotifyFileOpened { .. }
+                        | CollabCommand::NotifyFileClosed { .. } => {
+                            // Only host sends file open/close notifications.
                         }
                         CollabCommand::Shutdown => break,
                     }
@@ -406,14 +522,28 @@ impl CollabSession {
         let _ = self.command_tx.send(cmd);
     }
 
-    /// Broadcast a sync message to all peers.
-    pub fn broadcast_sync(&self, data: Vec<u8>) {
-        self.send_command(CollabCommand::BroadcastSync(data));
+    /// Broadcast a sync message for a specific file to all peers.
+    pub fn broadcast_sync(&self, file_id: u64, data: Vec<u8>) {
+        self.send_command(CollabCommand::BroadcastSync { file_id, data });
     }
 
     /// Broadcast an awareness update.
     pub fn broadcast_awareness(&self, update: AwarenessUpdate) {
         self.send_command(CollabCommand::BroadcastAwareness(update));
+    }
+
+    /// Notify peers that a file was opened (host only).
+    pub fn notify_file_opened(&self, file_id: u64, path: &str, snapshot: Vec<u8>) {
+        self.send_command(CollabCommand::NotifyFileOpened {
+            file_id,
+            path: path.to_string(),
+            snapshot,
+        });
+    }
+
+    /// Notify peers that a file was closed (host only).
+    pub fn notify_file_closed(&self, file_id: u64) {
+        self.send_command(CollabCommand::NotifyFileClosed { file_id });
     }
 
     /// Get the current collaboration status for UI display.
@@ -435,40 +565,39 @@ impl CollabSession {
         }
     }
 
-    /// Register a new peer. On the host, restores retained sync state if available.
+    /// Register a new peer. On the host, restores retained sync states if available.
     pub fn add_peer(&mut self, peer_id: u64, name: String) {
-        // Try to restore sync state from a previous connection.
-        let sync_state = self.restore_peer_state(peer_id).unwrap_or_default();
+        // Try to restore sync states from a previous connection.
+        let sync_states = self.restore_peer_states(peer_id).unwrap_or_default();
 
         self.peers.insert(
             peer_id,
             PeerInfo {
                 peer_id,
                 name,
-                sync_state,
-                awareness: None,
+                sync_states,
+                awareness: HashMap::new(),
                 last_seen: std::time::Instant::now(),
             },
         );
     }
 
-    /// Remove a peer. On the host, retains sync state for potential reconnection.
+    /// Remove a peer. On the host, retains sync states for potential reconnection.
     pub fn remove_peer(&mut self, peer_id: u64) {
         if let Some(peer) = self.peers.remove(&peer_id) {
             if self.is_host {
-                // Retain sync state for 5 minutes in case they reconnect.
+                // Retain sync states for 5 minutes in case they reconnect.
                 self.disconnected_peers
-                    .insert(peer_id, (peer.sync_state, std::time::Instant::now()));
+                    .insert(peer_id, (peer.sync_states, std::time::Instant::now()));
             }
         }
     }
 
-    /// Try to restore a disconnected peer's sync state (host only).
-    /// Returns the retained SyncState if the peer reconnected within the TTL.
-    pub fn restore_peer_state(&mut self, peer_id: u64) -> Option<SyncState> {
-        if let Some((state, disconnected_at)) = self.disconnected_peers.remove(&peer_id) {
+    /// Try to restore a disconnected peer's sync states (host only).
+    fn restore_peer_states(&mut self, peer_id: u64) -> Option<HashMap<u64, SyncState>> {
+        if let Some((states, disconnected_at)) = self.disconnected_peers.remove(&peer_id) {
             if disconnected_at.elapsed() < Duration::from_secs(300) {
-                return Some(state);
+                return Some(states);
             }
         }
         None
@@ -480,11 +609,12 @@ impl CollabSession {
             .retain(|_, (_, time)| time.elapsed() < Duration::from_secs(300));
     }
 
-    /// Update a peer's awareness.
+    /// Update a peer's awareness for a specific file.
     pub fn update_peer_awareness(&mut self, update: AwarenessUpdate) {
         if let Some(peer) = self.peers.get_mut(&update.peer_id) {
             peer.last_seen = std::time::Instant::now();
-            peer.awareness = Some(update);
+            let file_id = update.file_id;
+            peer.awareness.insert(file_id, update);
         }
     }
 
@@ -508,7 +638,7 @@ fn host_handle_peer(
     stream: TcpStream,
     event_tx: mpsc::Sender<CollabEvent>,
     clients: ClientList,
-    doc_snapshot: Vec<u8>,
+    file_snapshots: Vec<(u64, String, Vec<u8>)>,
     shutdown: Arc<Mutex<bool>>,
 ) {
     let mut reader = stream.try_clone().expect("clone stream");
@@ -529,11 +659,14 @@ fn host_handle_peer(
         _ => return,
     };
 
-    // Send the document snapshot.
+    // Send all document snapshots (one per file).
     {
         let mut w = writer.lock().unwrap();
-        if write_wire(&mut *w, MSG_DOC_SNAPSHOT, &doc_snapshot).is_err() {
-            return;
+        for (file_id, path, snapshot) in &file_snapshots {
+            let payload = encode_snapshot_payload(*file_id, path, snapshot);
+            if write_wire(&mut *w, MSG_DOC_SNAPSHOT, &payload).is_err() {
+                return;
+            }
         }
     }
 
@@ -548,10 +681,14 @@ fn host_handle_peer(
         match read_wire(&mut reader) {
             Ok((msg_type, payload)) => {
                 let event = match msg_type {
-                    MSG_SYNC => CollabEvent::SyncMessage {
-                        peer_id,
-                        data: payload,
-                    },
+                    MSG_SYNC => {
+                        let (file_id, data) = extract_file_id(&payload);
+                        CollabEvent::SyncMessage {
+                            peer_id,
+                            file_id,
+                            data,
+                        }
+                    }
                     MSG_AWARENESS => {
                         if let Ok(update) = serde_json::from_slice::<AwarenessUpdate>(&payload) {
                             CollabEvent::Awareness(update)
@@ -578,14 +715,40 @@ fn host_handle_peer(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Snapshot payload encoding
+// ---------------------------------------------------------------------------
+
+/// Encode a snapshot payload: [8-byte file_id][4-byte path_len][path_bytes][snapshot_bytes].
+fn encode_snapshot_payload(file_id: u64, path: &str, snapshot: &[u8]) -> Vec<u8> {
+    let path_bytes = path.as_bytes();
+    let mut buf = Vec::with_capacity(8 + 4 + path_bytes.len() + snapshot.len());
+    buf.extend_from_slice(&file_id.to_be_bytes());
+    buf.extend_from_slice(&(path_bytes.len() as u32).to_be_bytes());
+    buf.extend_from_slice(path_bytes);
+    buf.extend_from_slice(snapshot);
+    buf
+}
+
+/// Decode a snapshot payload. Returns (file_id, path, snapshot_bytes).
+fn decode_snapshot_payload(payload: &[u8]) -> Option<(u64, String, Vec<u8>)> {
+    if payload.len() < 12 {
+        return None;
+    }
+    let file_id = u64::from_be_bytes(payload[..8].try_into().ok()?);
+    let path_len = u32::from_be_bytes(payload[8..12].try_into().ok()?) as usize;
+    if payload.len() < 12 + path_len {
+        return None;
+    }
+    let path = String::from_utf8(payload[12..12 + path_len].to_vec()).ok()?;
+    let snapshot = payload[12 + path_len..].to_vec();
+    Some((file_id, path, snapshot))
+}
+
+// ---------------------------------------------------------------------------
+// Client reader loop with reconnection
 // ---------------------------------------------------------------------------
 
 /// Client reader loop with automatic reconnection on disconnect.
-///
-/// Reads messages from the host. On disconnect, retries with exponential
-/// backoff (1s, 2s, 4s, ... up to 30s). On successful reconnect, re-sends
-/// the PeerJoined message and resumes reading.
 fn client_reader_loop(
     initial_stream: TcpStream,
     event_tx: mpsc::Sender<CollabEvent>,
@@ -674,10 +837,14 @@ fn client_reader_loop(
 /// Decode a wire message into a CollabEvent.
 fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
     match msg_type {
-        MSG_SYNC => CollabEvent::SyncMessage {
-            peer_id: 0, // client doesn't know host's peer_id; uses 0
-            data: payload,
-        },
+        MSG_SYNC => {
+            let (file_id, data) = extract_file_id(&payload);
+            CollabEvent::SyncMessage {
+                peer_id: 0,
+                file_id,
+                data,
+            }
+        }
         MSG_AWARENESS => {
             if let Ok(update) = serde_json::from_slice::<AwarenessUpdate>(&payload) {
                 CollabEvent::Awareness(update)
@@ -702,7 +869,37 @@ fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
                 CollabEvent::Error("malformed peer-left message".to_string())
             }
         }
-        MSG_DOC_SNAPSHOT => CollabEvent::DocSnapshot(payload),
+        MSG_DOC_SNAPSHOT => {
+            if let Some((file_id, path, data)) = decode_snapshot_payload(&payload) {
+                CollabEvent::DocSnapshot {
+                    file_id,
+                    path,
+                    data,
+                }
+            } else {
+                // Legacy fallback: single-file snapshot without file_id.
+                CollabEvent::DocSnapshot {
+                    file_id: 0,
+                    path: String::new(),
+                    data: payload,
+                }
+            }
+        }
+        MSG_FILE_OPENED => {
+            if let Some((file_id, path, _)) = decode_snapshot_payload(&payload) {
+                CollabEvent::FileOpened { file_id, path }
+            } else {
+                CollabEvent::Error("malformed file-opened message".to_string())
+            }
+        }
+        MSG_FILE_CLOSED => {
+            if payload.len() >= 8 {
+                let file_id = u64::from_be_bytes(payload[..8].try_into().unwrap());
+                CollabEvent::FileClosed { file_id }
+            } else {
+                CollabEvent::Error("malformed file-closed message".to_string())
+            }
+        }
         _ => CollabEvent::Error(format!("unknown message type: 0x{msg_type:02x}")),
     }
 }
@@ -757,10 +954,57 @@ mod tests {
     }
 
     #[test]
+    fn test_file_id_determinism() {
+        let path = std::path::PathBuf::from("/tmp/test_file.rs");
+        let id1 = file_id_from_path(&path);
+        let id2 = file_id_from_path(&path);
+        assert_eq!(id1, id2, "same path must produce same file_id");
+
+        let other = std::path::PathBuf::from("/tmp/other_file.rs");
+        let id3 = file_id_from_path(&other);
+        assert_ne!(
+            id1, id3,
+            "different paths should produce different file_ids"
+        );
+    }
+
+    #[test]
+    fn test_file_id_in_sync_payload() {
+        let file_id: u64 = 0xDEAD_BEEF_CAFE_BABE;
+        let data = b"sync data here";
+        let payload = prepend_file_id(file_id, data);
+        let (extracted_id, extracted_data) = extract_file_id(&payload);
+        assert_eq!(extracted_id, file_id);
+        assert_eq!(extracted_data, data);
+    }
+
+    #[test]
+    fn test_file_id_legacy_fallback() {
+        // Short payload (< 8 bytes) should default to file_id=0.
+        let payload = b"short";
+        let (file_id, data) = extract_file_id(payload);
+        assert_eq!(file_id, 0);
+        assert_eq!(data, payload);
+    }
+
+    #[test]
+    fn test_snapshot_payload_roundtrip() {
+        let file_id: u64 = 42;
+        let path = "/tmp/test.rs";
+        let snapshot = b"crdt snapshot bytes";
+        let encoded = encode_snapshot_payload(file_id, path, snapshot);
+        let (dec_id, dec_path, dec_snap) = decode_snapshot_payload(&encoded).unwrap();
+        assert_eq!(dec_id, file_id);
+        assert_eq!(dec_path, path);
+        assert_eq!(dec_snap, snapshot);
+    }
+
+    #[test]
     fn test_awareness_serde_roundtrip() {
         let update = AwarenessUpdate {
             peer_id: 42,
             name: "alice".to_string(),
+            file_id: 123,
             cursor: Some((10, 5)),
             selection: None,
         };
@@ -768,8 +1012,17 @@ mod tests {
         let decoded: AwarenessUpdate = serde_json::from_slice(&json).unwrap();
         assert_eq!(decoded.peer_id, 42);
         assert_eq!(decoded.name, "alice");
+        assert_eq!(decoded.file_id, 123);
         assert_eq!(decoded.cursor, Some((10, 5)));
         assert!(decoded.selection.is_none());
+    }
+
+    #[test]
+    fn test_awareness_file_id_defaults_to_zero() {
+        // Deserializing JSON without file_id should default to 0.
+        let json = r#"{"peer_id":1,"name":"bob","cursor":[0,0],"selection":null}"#;
+        let decoded: AwarenessUpdate = serde_json::from_str(json).unwrap();
+        assert_eq!(decoded.file_id, 0);
     }
 
     #[test]
@@ -777,7 +1030,8 @@ mod tests {
         // Start a host with a simple document.
         let mut doc = aura_core::CrdtDoc::with_text("hello");
         let snapshot = doc.save_bytes();
-        let session = CollabSession::host("host", 0, snapshot).unwrap();
+        let files = vec![(42u64, "/tmp/test.rs".to_string(), snapshot)];
+        let session = CollabSession::host("host", 0, files).unwrap();
         let port = session.port.unwrap();
 
         // Give the listener a moment.
@@ -791,10 +1045,14 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
 
         let events = client.poll_events();
-        let has_snapshot = events
-            .iter()
-            .any(|e| matches!(e, CollabEvent::DocSnapshot(_)));
-        assert!(has_snapshot, "client should have received a snapshot");
+        let has_snapshot = events.iter().any(|e| {
+            matches!(e, CollabEvent::DocSnapshot { file_id, path, .. }
+                if *file_id == 42 && path == "/tmp/test.rs")
+        });
+        assert!(
+            has_snapshot,
+            "client should have received a snapshot with file_id and path"
+        );
 
         // Host should see the PeerJoined event.
         let host_events = session.poll_events();
@@ -804,6 +1062,36 @@ mod tests {
         assert!(has_join, "host should have received PeerJoined");
 
         // Clean up.
+        client.shutdown();
+        session.shutdown();
+    }
+
+    #[test]
+    fn test_host_multi_file_snapshots() {
+        // Host with two files.
+        let mut doc1 = aura_core::CrdtDoc::with_text("file one");
+        let mut doc2 = aura_core::CrdtDoc::with_text("file two");
+        let files = vec![
+            (1u64, "/tmp/one.rs".to_string(), doc1.save_bytes()),
+            (2u64, "/tmp/two.rs".to_string(), doc2.save_bytes()),
+        ];
+        let session = CollabSession::host("host", 0, files).unwrap();
+        let port = session.port.unwrap();
+
+        std::thread::sleep(Duration::from_millis(50));
+
+        let addr = format!("127.0.0.1:{port}");
+        let client = CollabSession::join("client", &addr).unwrap();
+
+        std::thread::sleep(Duration::from_millis(200));
+
+        let events = client.poll_events();
+        let snapshot_count = events
+            .iter()
+            .filter(|e| matches!(e, CollabEvent::DocSnapshot { .. }))
+            .count();
+        assert_eq!(snapshot_count, 2, "client should receive 2 snapshots");
+
         client.shutdown();
         session.shutdown();
     }

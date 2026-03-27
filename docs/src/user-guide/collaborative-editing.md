@@ -104,8 +104,17 @@ Under the hood, AURA's collaborative editing uses:
 3. **Binary wire protocol**: Messages are framed with a 4-byte length prefix + 1-byte type tag. Types include sync messages, awareness updates, peer join/leave notifications, and document snapshots.
 4. **Background threads**: All network I/O runs on background threads, communicating with the main event loop via channels. The editor never blocks on network operations.
 
+## Multi-File Sessions
+
+AURA supports multi-file collaboration in a single session. When the host starts a session, **all open files** are shared with peers:
+
+- Joining clients automatically receive snapshots for every file the host has open and open them in new tabs
+- Sync messages are routed to the correct buffer using a file identifier (a hash of the canonical file path)
+- Peer cursors and selections are filtered per file — you only see cursors for the file you're currently viewing
+- Scratch buffers (unsaved, no file path) are excluded from multi-file sharing
+
 ## Limitations
 
-- **Single file per session**: Each collaboration session edits one file. Multiple files require multiple sessions.
 - **Localhost only**: Currently limited to TCP on localhost. Remote collaboration over the internet requires manual port forwarding or a VPN.
 - **No authentication**: Any client that can reach the host's port can join. Use network-level access control for security.
+- **Scratch buffers excluded**: Unsaved buffers without a file path are not shared in multi-file sessions.
