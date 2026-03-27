@@ -11,20 +11,15 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Terminal color — supports default, ANSI 256, and true color (RGB).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TermColor {
     /// Default terminal color.
+    #[default]
     Default,
     /// ANSI 256-color palette index (0–255).
     Indexed(u8),
     /// 24-bit true color.
     Rgb(u8, u8, u8),
-}
-
-impl Default for TermColor {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 /// A single cell in the terminal screen grid.
