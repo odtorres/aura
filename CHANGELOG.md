@@ -5,6 +5,16 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-27
+
+### Added
+
+- **Real-time collaborative editing** — Multiple AURA instances can edit the same file over TCP with automerge CRDT conflict-free merging. Colored peer cursors with name labels, selection highlighting, automatic reconnection with exponential backoff, and incremental rope reconciliation. Start with `--host` / `--join` CLI flags or `:host` / `:join` commands.
+- **Multi-file collaborative sessions** — Host shares all open files in a single session. Clients auto-open tabs for each file. Sync messages routed by file identifier. Peer cursors filtered to the active tab.
+- **Tab close buttons** — Clickable `×` on each tab with save/discard/cancel confirmation dialog for unsaved changes. Tab bar now always visible.
+- **`AuthorId::Peer` variant** — Remote human peers tracked with unique colors (6-color rotating palette).
+- **Collaborative editing documentation** — New user guide page, updated architecture docs, README, and CONTRIBUTING.
+
 ## [0.1.1] - 2026-03-27
 
 ### Added
