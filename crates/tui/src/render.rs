@@ -1439,7 +1439,7 @@ fn format_tool_input(name: &str, input: &serde_json::Value) -> String {
     }
 }
 
-fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.source_control_focused;
     let (title, border_color) = if focused {
         (" Git [focused] ", Color::Yellow)
@@ -1630,10 +1630,38 @@ fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Red)
         };
         let header = format!(" Changes ({})", sc.changed.len());
-        frame.render_widget(
-            Paragraph::new(Span::styled(header, header_style)),
-            Rect::new(inner.x, y, inner.width, 1),
-        );
+
+        // Show "+" button when there are unstaged changes.
+        if sc.changed.is_empty() {
+            app.stage_all_btn_rect = Rect::default();
+            frame.render_widget(
+                Paragraph::new(Span::styled(header, header_style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        } else {
+            let header_len = header.len() as u16;
+            let btn_text = " + ";
+            let btn_x = inner.x + inner.width.saturating_sub(btn_text.len() as u16 + 1);
+            app.stage_all_btn_rect = Rect::new(btn_x, y, btn_text.len() as u16, 1);
+            let btn_style = Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD);
+
+            let line = ratatui::text::Line::from(vec![
+                Span::styled(header, header_style),
+                Span::styled(
+                    " ".repeat(
+                        (inner.width.saturating_sub(header_len + btn_text.len() as u16)) as usize,
+                    ),
+                    Style::default(),
+                ),
+                Span::styled(btn_text, btn_style),
+            ]);
+            frame.render_widget(
+                Paragraph::new(line),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+        }
         y += 1;
     }
 

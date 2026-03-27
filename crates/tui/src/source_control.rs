@@ -209,6 +209,19 @@ impl SourceControlPanel {
         }
     }
 
+    /// Stage all changed files at once.
+    pub fn stage_all(&mut self, git_repo: &GitRepo) {
+        let paths: Vec<String> = self.changed.iter().map(|e| e.rel_path.clone()).collect();
+        for path in &paths {
+            if let Err(e) = git_repo.stage_file(path) {
+                tracing::warn!("Failed to stage {}: {}", path, e);
+            }
+        }
+        if !paths.is_empty() {
+            self.refresh(git_repo);
+        }
+    }
+
     /// Unstage the currently selected staged file.
     pub fn unstage_selected(&mut self, git_repo: &GitRepo) {
         if self.focused_section != GitPanelSection::StagedFiles {

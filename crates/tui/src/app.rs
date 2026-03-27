@@ -225,6 +225,8 @@ pub struct App {
     pub terminal_rect: Rect,
     /// Cached file tree / source control sidebar rect from the last render frame.
     pub file_tree_rect: Rect,
+    /// Cached rect for the "stage all" button in the git panel (for mouse clicks).
+    pub stage_all_btn_rect: Rect,
     /// Cached conversation history panel rect from the last render frame.
     pub conv_history_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
@@ -486,6 +488,7 @@ impl App {
             editor_rect: Rect::default(),
             terminal_rect: Rect::default(),
             file_tree_rect: Rect::default(),
+            stage_all_btn_rect: Rect::default(),
             conv_history_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
             tab_close_btn_ranges: Vec::new(),
@@ -2827,6 +2830,13 @@ impl App {
         }
     }
 
+    /// Stage all changed files in the source control panel.
+    pub fn sc_stage_all(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            self.source_control.stage_all(repo);
+        }
+    }
+
     /// Unstage the selected file in the source control panel.
     pub fn sc_unstage_selected(&mut self) {
         if let Some(repo) = &self.git_repo {
@@ -2987,8 +2997,17 @@ impl App {
             } else if self.sidebar_view == SidebarView::Git {
                 self.source_control_focused = true;
                 self.file_tree_focused = false;
-                // Map click to a git panel entry.
-                if row >= entries_start_y {
+                // Check if click is on the "stage all" button.
+                let btn = self.stage_all_btn_rect;
+                if btn.width > 0
+                    && col >= btn.x
+                    && col < btn.x + btn.width
+                    && row >= btn.y
+                    && row < btn.y + btn.height
+                {
+                    self.sc_stage_all();
+                } else if row >= entries_start_y {
+                    // Map click to a git panel entry.
                     self.handle_git_panel_click(row, entries_start_y);
                 }
             } else {

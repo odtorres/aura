@@ -291,6 +291,9 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Char('s') => {
                 app.sc_stage_selected();
             }
+            KeyCode::Char('S') => {
+                app.sc_stage_all();
+            }
             KeyCode::Char('u') => {
                 app.sc_unstage_selected();
             }
