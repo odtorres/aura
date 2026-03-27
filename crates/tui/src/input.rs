@@ -1461,6 +1461,37 @@ fn execute_command(app: &mut App, cmd: &str) {
                 app.should_quit = true;
             }
         }
+        // :qa — quit all tabs (warns if any have unsaved changes).
+        "qa" => {
+            let has_unsaved = app.tabs.tabs().iter().any(|t| t.is_modified());
+            if has_unsaved {
+                app.set_status(
+                    "Unsaved changes! Use :qa! to force quit or :wqa to save all and quit",
+                );
+            } else {
+                app.should_quit = true;
+            }
+        }
+        // :qa! — force quit all tabs, discarding unsaved changes.
+        "qa!" => {
+            app.should_quit = true;
+        }
+        // :wqa — save all tabs and quit.
+        "wqa" => {
+            let mut save_failed = false;
+            for tab in app.tabs.tabs_mut() {
+                if tab.is_modified() {
+                    if let Err(e) = tab.buffer.save() {
+                        app.set_status(format!("Error saving: {}", e));
+                        save_failed = true;
+                        break;
+                    }
+                }
+            }
+            if !save_failed {
+                app.should_quit = true;
+            }
+        }
         "wq" => match app.tab_mut().buffer.save() {
             Ok(_) => {
                 if app.tabs.count() > 1 {
