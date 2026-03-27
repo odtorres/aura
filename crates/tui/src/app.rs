@@ -2844,17 +2844,38 @@ impl App {
             self.terminal_focused = false;
             self.conversation_history_focused = false;
             self.chat_panel_focused = false;
-            if self.sidebar_view == SidebarView::Git {
+
+            // Layout: border (1) + tab header row (1) + entries.
+            let tab_header_y = self.file_tree_rect.y + 1; // border
+            let entries_start_y = tab_header_y + 1;
+
+            // Click on the "Files | Git" tab header → switch sidebar view.
+            if row == tab_header_y {
+                let local_x = col.saturating_sub(self.file_tree_rect.x + 1);
+                // " Files | Git " — "Files" spans roughly cols 0..6, "Git" from ~9.
+                if local_x < 7 {
+                    // Clicked "Files".
+                    self.sidebar_view = SidebarView::Files;
+                    self.file_tree_focused = true;
+                    self.source_control_focused = false;
+                } else {
+                    // Clicked "Git" (or the separator area).
+                    self.sidebar_view = SidebarView::Git;
+                    self.source_control_focused = true;
+                    self.file_tree_focused = false;
+                    self.refresh_source_control();
+                }
+            } else if self.sidebar_view == SidebarView::Git {
                 self.source_control_focused = true;
                 self.file_tree_focused = false;
+                // Map click to a git panel entry.
+                if row >= entries_start_y {
+                    self.handle_git_panel_click(row, entries_start_y);
+                }
             } else {
                 self.file_tree_focused = true;
                 self.source_control_focused = false;
                 // Map the click row to a file tree entry.
-                // Layout: file_tree_rect has a 1-cell border on all sides,
-                // then a 1-row tab header ("Files | Git").
-                // Entries start at file_tree_rect.y + 1 (border) + 1 (tab header) = +2.
-                let entries_start_y = self.file_tree_rect.y + 2;
                 if row >= entries_start_y {
                     let visible_height = self.file_tree_rect.height.saturating_sub(3) as usize; // border top + tab header + border bottom
                     let selected = self.file_tree.selected;
@@ -2867,7 +2888,6 @@ impl App {
                     let clicked_idx = scroll_offset + clicked_row;
                     if clicked_idx < self.file_tree.entries.len() {
                         self.file_tree.selected = clicked_idx;
-                        // Open the entry (file or toggle dir).
                         self.open_file_tree_selection();
                     }
                 }
@@ -2898,6 +2918,78 @@ impl App {
                 let cursor = self.tab().cursor;
                 self.tab_mut().visual_anchor = Some(cursor);
             }
+        }
+    }
+
+    /// Map a click in the git source-control panel to entry selection.
+    ///
+    /// The git panel layout (below the tab header) is:
+    ///   branch line, blank, commit header, message lines (1-3), blank,
+    ///   staged header, staged entries, blank, changed header, changed entries.
+    fn handle_git_panel_click(&mut self, row: u16, entries_start_y: u16) {
+        use crate::source_control::GitPanelSection;
+
+        let mut y = entries_start_y as usize;
+
+        // Branch line.
+        y += 1;
+        // Blank separator.
+        y += 1;
+        // Commit message header.
+        y += 1;
+        // Commit message lines (1-3).
+        let msg_lines = if self.source_control.commit_message.is_empty() {
+            1
+        } else {
+            self.source_control.commit_message.lines().count().min(3)
+        };
+        y += msg_lines;
+        // Blank separator.
+        y += 1;
+
+        let click = row as usize;
+
+        // Staged header.
+        let staged_header_y = y;
+        y += 1;
+        let staged_start = y;
+        let staged_count = self.source_control.staged.len();
+        y += staged_count;
+
+        // Check if click is in staged entries.
+        if click >= staged_start && click < staged_start + staged_count {
+            let idx = click - staged_start;
+            self.source_control.focused_section = GitPanelSection::StagedFiles;
+            self.source_control.selected = idx;
+            return;
+        }
+        // Click on staged header → focus staged section.
+        if click == staged_header_y {
+            self.source_control.focused_section = GitPanelSection::StagedFiles;
+            self.source_control.selected = 0;
+            return;
+        }
+
+        // Blank separator.
+        y += 1;
+
+        // Changed header.
+        let changed_header_y = y;
+        y += 1;
+        let changed_start = y;
+        let changed_count = self.source_control.changed.len();
+
+        // Check if click is in changed entries.
+        if click >= changed_start && click < changed_start + changed_count {
+            let idx = click - changed_start;
+            self.source_control.focused_section = GitPanelSection::ChangedFiles;
+            self.source_control.selected = idx;
+            return;
+        }
+        // Click on changed header → focus changed section.
+        if click == changed_header_y {
+            self.source_control.focused_section = GitPanelSection::ChangedFiles;
+            self.source_control.selected = 0;
         }
     }
 
