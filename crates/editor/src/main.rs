@@ -45,10 +45,7 @@ fn main() -> anyhow::Result<()> {
     let result = app.run(&mut terminal);
 
     // Restore the terminal.
-    crossterm::execute!(
-        std::io::stdout(),
-        crossterm::event::DisableMouseCapture
-    )?;
+    crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture)?;
     ratatui::restore();
 
     result

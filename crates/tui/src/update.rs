@@ -114,10 +114,7 @@ fn now_unix() -> u64 {
 
 /// Spawn a background thread that performs the update check and sends the
 /// result on `sender`.
-pub fn spawn_update_check(
-    sender: mpsc::Sender<UpdateStatus>,
-    interval_hours: u64,
-) {
+pub fn spawn_update_check(sender: mpsc::Sender<UpdateStatus>, interval_hours: u64) {
     std::thread::Builder::new()
         .name("update-check".into())
         .spawn(move || {
@@ -188,8 +185,8 @@ fn fetch_latest_release() -> Result<(String, String), String> {
         .read_to_string()
         .map_err(|e| format!("Failed to read response: {e}"))?;
 
-    let body: serde_json::Value = serde_json::from_str(&body_str)
-        .map_err(|e| format!("Failed to parse JSON: {e}"))?;
+    let body: serde_json::Value =
+        serde_json::from_str(&body_str).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
     let tag = body["tag_name"]
         .as_str()

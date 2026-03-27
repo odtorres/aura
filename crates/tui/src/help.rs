@@ -80,6 +80,12 @@ pub struct HelpOverlay {
     search_index: Vec<(usize, String)>,
 }
 
+impl Default for HelpOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HelpOverlay {
     /// Build the help overlay with all embedded documentation topics.
     pub fn new() -> Self {
@@ -156,8 +162,7 @@ impl HelpOverlay {
         self.visible = true;
         let slug_lower = slug.to_lowercase();
         if let Some(idx) = self.topics.iter().position(|t| {
-            t.title.to_lowercase() == slug_lower
-                || t.title.to_lowercase().contains(&slug_lower)
+            t.title.to_lowercase() == slug_lower || t.title.to_lowercase().contains(&slug_lower)
         }) {
             self.current_topic = idx;
             self.scroll = 0;
@@ -484,7 +489,7 @@ fn render_inline(text: &str) -> Vec<Span<'static>> {
             spans.push(Span::styled(code, Style::default().fg(Color::Yellow)));
         } else if c == '*' && chars.peek() == Some(&'*') {
             chars.next(); // consume second *
-            // Flush current text.
+                          // Flush current text.
             if !current.is_empty() {
                 spans.push(Span::styled(
                     std::mem::take(&mut current),
@@ -563,7 +568,10 @@ mod tests {
         // "Keybindings" should be the top result.
         let top_idx = help.filtered[0];
         assert!(
-            help.topics[top_idx].title.to_lowercase().contains("keybind"),
+            help.topics[top_idx]
+                .title
+                .to_lowercase()
+                .contains("keybind"),
             "Expected Keybindings in top result, got: {}",
             help.topics[top_idx].title
         );

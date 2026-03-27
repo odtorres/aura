@@ -672,10 +672,7 @@ impl ConversationStore {
     ///
     /// Returns the most recent `__chat__` conversation, or creates a new one
     /// if none exists.
-    pub fn find_or_create_chat_conversation(
-        &self,
-        branch: Option<&str>,
-    ) -> Result<Conversation> {
+    pub fn find_or_create_chat_conversation(&self, branch: Option<&str>) -> Result<Conversation> {
         let mut stmt = self.conn.prepare(
             "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
              FROM conversations WHERE file_path = '__chat__'
@@ -802,7 +799,9 @@ mod tests {
     #[test]
     fn test_create_and_query_conversation() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 10, 20, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 10, 20, None, None)
+            .unwrap();
         assert_eq!(conv.file_path, "test.rs");
         assert_eq!(conv.start_line, 10);
 
@@ -814,7 +813,9 @@ mod tests {
     #[test]
     fn test_messages() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, None, None)
+            .unwrap();
 
         store
             .add_message(&conv.id, MessageRole::HumanIntent, "Fix the bug", None)
@@ -837,7 +838,9 @@ mod tests {
     #[test]
     fn test_intent_and_decision() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, None, None)
+            .unwrap();
         let intent = store
             .record_intent(&conv.id, "Fix error handling", "test.rs", 5, 8)
             .unwrap();
@@ -866,7 +869,9 @@ mod tests {
     #[test]
     fn test_search() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, None, None)
+            .unwrap();
         store
             .add_message(
                 &conv.id,
@@ -884,7 +889,9 @@ mod tests {
     #[test]
     fn test_conversation_for_code() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 5, 15, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 5, 15, None, None)
+            .unwrap();
         let intent = store
             .record_intent(&conv.id, "Refactor", "test.rs", 5, 15)
             .unwrap();
@@ -912,8 +919,12 @@ mod tests {
     #[test]
     fn test_lines_with_conversations() {
         let store = ConversationStore::in_memory().unwrap();
-        store.create_conversation("test.rs", 5, 15, None, None).unwrap();
-        store.create_conversation("test.rs", 30, 40, None, None).unwrap();
+        store
+            .create_conversation("test.rs", 5, 15, None, None)
+            .unwrap();
+        store
+            .create_conversation("test.rs", 30, 40, None, None)
+            .unwrap();
 
         let lines = store.lines_with_conversations("test.rs").unwrap();
         assert_eq!(lines.len(), 2);
@@ -924,8 +935,12 @@ mod tests {
         let store = ConversationStore::in_memory().unwrap();
 
         // Create two conversations.
-        let conv1 = store.create_conversation("foo.rs", 0, 10, None, None).unwrap();
-        let conv2 = store.create_conversation("bar.rs", 5, 20, None, None).unwrap();
+        let conv1 = store
+            .create_conversation("foo.rs", 0, 10, None, None)
+            .unwrap();
+        let conv2 = store
+            .create_conversation("bar.rs", 5, 20, None, None)
+            .unwrap();
 
         // Add messages to conv1.
         store
@@ -937,11 +952,33 @@ mod tests {
 
         // Add a decision to conv1 (file_path = "foo.rs").
         store
-            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "foo.rs", 0, 5, None, None)
+            .log_decision(
+                &conv1.id,
+                None,
+                Decision::Accepted,
+                None,
+                None,
+                "foo.rs",
+                0,
+                5,
+                None,
+                None,
+            )
             .unwrap();
         // Add another decision to conv1 with a different file path.
         store
-            .log_decision(&conv1.id, None, Decision::Accepted, None, None, "baz.rs", 0, 3, None, None)
+            .log_decision(
+                &conv1.id,
+                None,
+                Decision::Accepted,
+                None,
+                None,
+                "baz.rs",
+                0,
+                3,
+                None,
+                None,
+            )
             .unwrap();
 
         let results = store.all_conversations_with_stats(10).unwrap();
@@ -961,7 +998,9 @@ mod tests {
     #[test]
     fn test_decision_filter() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, None, None)
+            .unwrap();
         store
             .log_decision(
                 &conv.id,

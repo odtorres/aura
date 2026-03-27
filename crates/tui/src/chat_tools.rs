@@ -42,18 +42,15 @@ fn tool_read_file(input: &serde_json::Value, root: &Path) -> Result<String, Stri
         .ok_or("Missing 'path' parameter")?;
 
     let path = resolve_path(path_str, root);
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
 
     Ok(truncate_result(&content))
 }
 
 /// List files in a directory.
 fn tool_list_files(input: &serde_json::Value, root: &Path) -> Result<String, String> {
-    let path_str = input
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+    let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
     let recursive = input
         .get("recursive")
         .and_then(|v| v.as_bool())
@@ -68,8 +65,7 @@ fn tool_list_files(input: &serde_json::Value, root: &Path) -> Result<String, Str
     if recursive {
         list_recursive(&dir, root, &mut entries, 0, 500);
     } else {
-        let rd = std::fs::read_dir(&dir)
-            .map_err(|e| format!("Failed to read directory: {e}"))?;
+        let rd = std::fs::read_dir(&dir).map_err(|e| format!("Failed to read directory: {e}"))?;
         for entry in rd.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -128,13 +124,8 @@ fn tool_search_files(input: &serde_json::Value, root: &Path) -> Result<String, S
         .get("pattern")
         .and_then(|v| v.as_str())
         .ok_or("Missing 'pattern' parameter")?;
-    let path_str = input
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
-    let file_pattern = input
-        .get("file_pattern")
-        .and_then(|v| v.as_str());
+    let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+    let file_pattern = input.get("file_pattern").and_then(|v| v.as_str());
 
     let dir = resolve_path(path_str, root);
 
@@ -163,10 +154,7 @@ fn tool_search_files(input: &serde_json::Value, root: &Path) -> Result<String, S
         _ => {
             // Fallback: simple grep using grep command.
             let mut cmd = Command::new("grep");
-            cmd.arg("-rn")
-                .arg("--max-count=50")
-                .arg(pattern)
-                .arg(&dir);
+            cmd.arg("-rn").arg("--max-count=50").arg(pattern).arg(&dir);
             match cmd.output() {
                 Ok(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -205,8 +193,7 @@ fn tool_edit_file(input: &serde_json::Value, root: &Path) -> Result<String, Stri
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directories: {e}"))?;
         }
-        std::fs::write(&path, new_text)
-            .map_err(|e| format!("Failed to write file: {e}"))?;
+        std::fs::write(&path, new_text).map_err(|e| format!("Failed to write file: {e}"))?;
         Ok(format!("Created {}", path.display()))
     } else {
         // Read, replace, write.
@@ -300,10 +287,6 @@ fn truncate_result(s: &str) -> String {
         s.to_string()
     } else {
         let truncated = &s[..MAX_RESULT_BYTES];
-        format!(
-            "{}\n\n... (truncated, {} total bytes)",
-            truncated,
-            s.len()
-        )
+        format!("{}\n\n... (truncated, {} total bytes)", truncated, s.len())
     }
 }

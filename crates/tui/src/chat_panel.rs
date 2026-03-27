@@ -189,7 +189,8 @@ impl ChatPanel {
                 content: text.clone(),
                 timestamp,
             });
-            self.context_messages.push(Message::text("assistant", &text));
+            self.context_messages
+                .push(Message::text("assistant", &text));
         }
         self.scroll_to_bottom();
     }
@@ -283,12 +284,7 @@ impl ChatPanel {
     }
 
     /// Add a tool result to the context messages for the API.
-    pub fn add_tool_result_to_context(
-        &mut self,
-        tool_use_id: &str,
-        result: &str,
-        is_error: bool,
-    ) {
+    pub fn add_tool_result_to_context(&mut self, tool_use_id: &str, result: &str, is_error: bool) {
         self.context_messages.push(Message::blocks(
             "user",
             vec![ContentBlock::ToolResult {
@@ -360,7 +356,8 @@ impl ChatPanel {
             let byte_pos = self.byte_offset_of_cursor();
             if byte_pos < self.input.len() {
                 let ch = self.input[byte_pos..].chars().next().unwrap();
-                self.input.replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
+                self.input
+                    .replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
             }
         }
     }
@@ -370,7 +367,8 @@ impl ChatPanel {
         let byte_pos = self.byte_offset_of_cursor();
         if byte_pos < self.input.len() {
             let ch = self.input[byte_pos..].chars().next().unwrap();
-            self.input.replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
+            self.input
+                .replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
         }
     }
 
@@ -474,7 +472,8 @@ impl ChatPanel {
                     });
                     // Only add user/assistant to context (skip system for API).
                     if role != ChatRole::System {
-                        self.context_messages.push(Message::text(api_role, &msg.content));
+                        self.context_messages
+                            .push(Message::text(api_role, &msg.content));
                     }
                 }
                 self.conversation_id = Some(conv_id.to_string());
@@ -614,7 +613,9 @@ mod tests {
     fn test_build_messages() {
         let mut panel = ChatPanel::new(40);
         panel.push_user_message("hello");
-        panel.context_messages.push(Message::text("assistant", "hi there"));
+        panel
+            .context_messages
+            .push(Message::text("assistant", "hi there"));
         let msgs = panel.build_messages();
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "user");
@@ -656,7 +657,9 @@ mod tests {
     #[test]
     fn test_load_conversation() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("__chat__", 0, 0, None, None).unwrap();
+        let conv = store
+            .create_conversation("__chat__", 0, 0, None, None)
+            .unwrap();
         store
             .add_message(&conv.id, MessageRole::HumanIntent, "hi", None)
             .unwrap();

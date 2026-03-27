@@ -203,7 +203,9 @@ mod tests {
     #[test]
     fn test_expand_collapse() {
         let store = ConversationStore::in_memory().unwrap();
-        let conv = store.create_conversation("test.rs", 0, 10, None, None).unwrap();
+        let conv = store
+            .create_conversation("test.rs", 0, 10, None, None)
+            .unwrap();
         store
             .add_message(&conv.id, MessageRole::HumanIntent, "hello", None)
             .unwrap();

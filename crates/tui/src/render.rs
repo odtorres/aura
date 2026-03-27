@@ -99,10 +99,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let (editor_area, right_panel_area) = if let Some(width) = right_panel_width {
         let hsplit = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(width),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(width)])
             .split(editor_area_outer);
         (hsplit[0], Some(hsplit[1]))
     } else {
@@ -150,7 +147,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_command_bar(frame, app, command_area);
     } else {
         // Draw editor border with filename as title.
-        let border_color = if !app.terminal_focused && !app.file_tree_focused && !app.source_control_focused && !app.conversation_history_focused {
+        let border_color = if !app.terminal_focused
+            && !app.file_tree_focused
+            && !app.source_control_focused
+            && !app.conversation_history_focused
+        {
             Color::Cyan
         } else {
             Color::DarkGray
@@ -175,7 +176,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // Adjust scroll so cursor is visible (using inner dimensions).
         let gutter_width_usize = 6;
         let viewport_h = editor_content_area.height as usize;
-        let viewport_w = editor_content_area.width.saturating_sub(gutter_width_usize as u16) as usize;
+        let viewport_w = editor_content_area
+            .width
+            .saturating_sub(gutter_width_usize as u16) as usize;
         app.scroll_to_cursor(viewport_h, viewport_w);
 
         // Pre-compute git line status for visible lines.
@@ -231,7 +234,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 (prio, line)
             });
 
-            draw_minimap(frame, minimap_area, &markers, total_lines, scroll_row, viewport_h);
+            draw_minimap(
+                frame,
+                minimap_area,
+                &markers,
+                total_lines,
+                scroll_row,
+                viewport_h,
+            );
         }
 
         if has_proposal {
@@ -283,7 +293,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             // Chat input cursor is already set inside draw_chat_input — skip editor cursor.
         } else if app.terminal_focused && has_terminal {
             // Position the hardware cursor at the PTY cursor location.
-            let inner = terminal_area.inner(ratatui::layout::Margin { horizontal: 1, vertical: 1 });
+            let inner = terminal_area.inner(ratatui::layout::Margin {
+                horizontal: 1,
+                vertical: 1,
+            });
             let (_snap, t_cursor_row, t_cursor_col) = app.terminal.snapshot();
             let cx = inner.x + t_cursor_col as u16;
             let cy = inner.y + t_cursor_row as u16;
@@ -341,7 +354,9 @@ fn draw_minimap(
 
     // Compute viewport row range.
     let vp_row_start = map_line_to_row(viewport_start, total_lines, h).unwrap_or(0);
-    let vp_end_line = viewport_start.saturating_add(viewport_lines).min(total_lines);
+    let vp_end_line = viewport_start
+        .saturating_add(viewport_lines)
+        .min(total_lines);
     let vp_row_end = if vp_end_line == 0 {
         0
     } else {
@@ -448,7 +463,13 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let gutter_width: u16 = 5;
 
-    for (i, diff_line) in dv.lines.iter().skip(scroll).take(viewport_height).enumerate() {
+    for (i, diff_line) in dv
+        .lines
+        .iter()
+        .skip(scroll)
+        .take(viewport_height)
+        .enumerate()
+    {
         let y = left_inner.y + i as u16;
         let left_content_x = left_inner.x + gutter_width;
         let left_content_w = left_inner.width.saturating_sub(gutter_width) as usize;
@@ -463,27 +484,43 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 // Left gutter.
                 let left_gutter = format!("{:>4} ", old_line_no);
                 frame.render_widget(
-                    Paragraph::new(Span::styled(left_gutter, Style::default().fg(Color::DarkGray))),
+                    Paragraph::new(Span::styled(
+                        left_gutter,
+                        Style::default().fg(Color::DarkGray),
+                    )),
                     Rect::new(left_inner.x, y, gutter_width, 1),
                 );
                 // Left content.
                 let left_text: String = l.chars().take(left_content_w).collect();
                 frame.render_widget(
                     Paragraph::new(Span::raw(left_text)),
-                    Rect::new(left_content_x, y, left_inner.width.saturating_sub(gutter_width), 1),
+                    Rect::new(
+                        left_content_x,
+                        y,
+                        left_inner.width.saturating_sub(gutter_width),
+                        1,
+                    ),
                 );
 
                 // Right gutter.
                 let right_gutter = format!("{:>4} ", new_line_no);
                 frame.render_widget(
-                    Paragraph::new(Span::styled(right_gutter, Style::default().fg(Color::DarkGray))),
+                    Paragraph::new(Span::styled(
+                        right_gutter,
+                        Style::default().fg(Color::DarkGray),
+                    )),
                     Rect::new(right_inner.x, y, gutter_width, 1),
                 );
                 // Right content.
                 let right_text: String = l.chars().take(right_content_w).collect();
                 frame.render_widget(
                     Paragraph::new(Span::raw(right_text)),
-                    Rect::new(right_content_x, y, right_inner.width.saturating_sub(gutter_width), 1),
+                    Rect::new(
+                        right_content_x,
+                        y,
+                        right_inner.width.saturating_sub(gutter_width),
+                        1,
+                    ),
                 );
             }
             DiffLine::LeftOnly(l) => {
@@ -494,7 +531,10 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 // Left gutter.
                 let left_gutter = format!("{:>4} ", old_line_no);
                 frame.render_widget(
-                    Paragraph::new(Span::styled(left_gutter, Style::default().fg(Color::DarkGray).bg(Color::Red))),
+                    Paragraph::new(Span::styled(
+                        left_gutter,
+                        Style::default().fg(Color::DarkGray).bg(Color::Red),
+                    )),
                     Rect::new(left_inner.x, y, gutter_width, 1),
                 );
                 // Left content — red background, fill full width.
@@ -502,7 +542,12 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 let padded = format!("{:<width$}", left_text, width = left_content_w);
                 frame.render_widget(
                     Paragraph::new(Span::styled(padded, del_style)),
-                    Rect::new(left_content_x, y, left_inner.width.saturating_sub(gutter_width), 1),
+                    Rect::new(
+                        left_content_x,
+                        y,
+                        left_inner.width.saturating_sub(gutter_width),
+                        1,
+                    ),
                 );
 
                 // Right side: empty.
@@ -527,7 +572,10 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 // Right gutter.
                 let right_gutter = format!("{:>4} ", new_line_no);
                 frame.render_widget(
-                    Paragraph::new(Span::styled(right_gutter, Style::default().fg(Color::DarkGray).bg(Color::Green))),
+                    Paragraph::new(Span::styled(
+                        right_gutter,
+                        Style::default().fg(Color::DarkGray).bg(Color::Green),
+                    )),
                     Rect::new(right_inner.x, y, gutter_width, 1),
                 );
                 // Right content — green background, fill full width.
@@ -535,7 +583,12 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 let padded = format!("{:<width$}", right_text, width = right_content_w);
                 frame.render_widget(
                     Paragraph::new(Span::styled(padded, add_style)),
-                    Rect::new(right_content_x, y, right_inner.width.saturating_sub(gutter_width), 1),
+                    Rect::new(
+                        right_content_x,
+                        y,
+                        right_inner.width.saturating_sub(gutter_width),
+                        1,
+                    ),
                 );
             }
         }
@@ -795,7 +848,12 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // Adjust inner area below the tab header.
-    let tree_inner = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1));
+    let tree_inner = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
 
     if tree_inner.height == 0 || app.file_tree.entries.is_empty() {
         let empty = Paragraph::new(Span::styled(
@@ -837,7 +895,11 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
             let icon = if entry.expanded { "▾ " } else { "▸ " };
             let display = format!("{}{}{}", indent, icon, entry.name);
             let display: String = display.chars().take(tree_inner.width as usize).collect();
-            let style = if is_selected { selected_style } else { dir_style };
+            let style = if is_selected {
+                selected_style
+            } else {
+                dir_style
+            };
             let line = Paragraph::new(Span::styled(display, style));
             frame.render_widget(line, Rect::new(tree_inner.x, y, tree_inner.width, 1));
         } else {
@@ -890,12 +952,8 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
     let end_y = inner.y + inner.height;
 
     if panel.conversations.is_empty() {
-        let msg = Paragraph::new("No conversations")
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(
-            msg,
-            Rect::new(inner.x, y, inner.width, 1),
-        );
+        let msg = Paragraph::new("No conversations").style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(msg, Rect::new(inner.x, y, inner.width, 1));
         return;
     }
 
@@ -909,10 +967,7 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
         let is_expanded = panel.expanded == Some(i);
 
         // Conversation header line: summary or file path + badge.
-        let label = entry
-            .summary
-            .as_deref()
-            .unwrap_or(&entry.file_path);
+        let label = entry.summary.as_deref().unwrap_or(&entry.file_path);
         let badge = format!(" {}f {}m", entry.files_changed, entry.message_count);
         let avail = max_width.saturating_sub(badge.len());
         let truncated: String = label.chars().take(avail).collect();
@@ -959,10 +1014,7 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
         };
         if let Some(info) = git_info {
             if y < end_y {
-                let git_line: String = format!("  {info}")
-                    .chars()
-                    .take(max_width)
-                    .collect();
+                let git_line: String = format!("  {info}").chars().take(max_width).collect();
                 frame.render_widget(
                     Paragraph::new(git_line).style(Style::default().fg(Color::Magenta)),
                     Rect::new(inner.x, y, inner.width, 1),
@@ -1046,7 +1098,7 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     let input_inner_width = inner.width.saturating_sub(2) as usize; // account for borders
     let input_lines = if input_inner_width > 0 && !panel.input.is_empty() {
         let char_count = panel.input.chars().count();
-        ((char_count + input_inner_width - 1) / input_inner_width).max(1) as u16
+        char_count.div_ceil(input_inner_width).max(1) as u16
     } else {
         1u16
     };
@@ -1060,17 +1112,24 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     let bottom_height = input_height + selection_ctx_height;
     let msg_height = inner.height.saturating_sub(bottom_height);
     let msg_area = Rect::new(inner.x, inner.y, inner.width, msg_height);
-    let selection_ctx_area = Rect::new(inner.x, inner.y + msg_height, inner.width, selection_ctx_height);
-    let input_area = Rect::new(inner.x, inner.y + msg_height + selection_ctx_height, inner.width, input_height);
+    let selection_ctx_area = Rect::new(
+        inner.x,
+        inner.y + msg_height,
+        inner.width,
+        selection_ctx_height,
+    );
+    let input_area = Rect::new(
+        inner.x,
+        inner.y + msg_height + selection_ctx_height,
+        inner.width,
+        input_height,
+    );
 
     // Draw selection context badge if present.
     if let Some(ctx) = &panel.selection_context {
         let badge = ratatui::text::Line::from(vec![
             Span::styled(" @ ", Style::default().fg(Color::Black).bg(Color::Cyan)),
-            Span::styled(
-                format!(" {ctx}"),
-                Style::default().fg(Color::Cyan),
-            ),
+            Span::styled(format!(" {ctx}"), Style::default().fg(Color::Cyan)),
         ]);
         frame.render_widget(Paragraph::new(badge), selection_ctx_area);
     }
@@ -1086,11 +1145,7 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     let mut wrapped_lines: Vec<(ChatRole, String, Option<Color>)> = Vec::new();
     for item in &panel.items {
         match item {
-            ChatItem::Text {
-                role,
-                content,
-                ..
-            } => {
+            ChatItem::Text { role, content, .. } => {
                 let prefix = match role {
                     ChatRole::User => "You: ",
                     ChatRole::Assistant => "AI: ",
@@ -1178,10 +1233,7 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     let max_scroll = total_lines.saturating_sub(visible_height);
     let scroll = panel.scroll.min(max_scroll);
 
-    let visible = wrapped_lines
-        .iter()
-        .skip(scroll)
-        .take(visible_height);
+    let visible = wrapped_lines.iter().skip(scroll).take(visible_height);
 
     for (i, (role, text, override_color)) in visible.enumerate() {
         let y = msg_area.y + i as u16;
@@ -1271,8 +1323,10 @@ fn draw_chat_input(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             (0u16, 0u16)
         };
-        let cursor_y = (input_inner.y + cursor_row).min(input_inner.y + input_inner.height.saturating_sub(1));
-        let cursor_x = (input_inner.x + cursor_col).min(input_inner.x + input_inner.width.saturating_sub(1));
+        let cursor_y =
+            (input_inner.y + cursor_row).min(input_inner.y + input_inner.height.saturating_sub(1));
+        let cursor_x =
+            (input_inner.x + cursor_col).min(input_inner.x + input_inner.width.saturating_sub(1));
         frame.set_cursor_position((cursor_x, cursor_y));
     }
 }
@@ -1333,18 +1387,12 @@ fn format_tool_input(name: &str, input: &serde_json::Value) -> String {
             }
         }
         "search_files" => {
-            let pattern = input
-                .get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             format!("\"{pattern}\" in {path}")
         }
         "run_command" => {
-            let cmd = input
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+            let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
             if cmd.len() > 60 {
                 format!("{}...", &cmd[..60])
             } else {
@@ -1405,7 +1453,12 @@ fn draw_source_control(frame: &mut Frame, app: &App, area: Rect) {
         let branch_name = sc.branch.as_deref().unwrap_or("detached");
         let mut spans = vec![
             Span::styled(" \u{e0a0} ", Style::default().fg(Color::Cyan)),
-            Span::styled(branch_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                branch_name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ];
 
         if sc.ahead > 0 || sc.behind > 0 {
@@ -1599,54 +1652,54 @@ fn file_icon(name: &str) -> &'static str {
     };
     match ext {
         // Rust
-        "rs" => "\u{e7a8} ",  //
+        "rs" => "\u{e7a8} ", //
         // JavaScript / TypeScript
-        "js" | "mjs" | "cjs" => "\u{e781} ",  //
-        "ts" | "mts" | "cts" => "\u{e628} ",  //
-        "jsx" => "\u{e7ba} ",  //
-        "tsx" => "\u{e7ba} ",  //
+        "js" | "mjs" | "cjs" => "\u{e781} ", //
+        "ts" | "mts" | "cts" => "\u{e628} ", //
+        "jsx" => "\u{e7ba} ",                //
+        "tsx" => "\u{e7ba} ",                //
         // Web
-        "html" | "htm" => "\u{e736} ",  //
-        "css" => "\u{e749} ",  //
+        "html" | "htm" => "\u{e736} ", //
+        "css" => "\u{e749} ",          //
         "scss" | "sass" => "\u{e749} ",
         // Data / Config
-        "json" => "\u{e60b} ",  //
-        "yaml" | "yml" => "\u{e6a8} ",  //
-        "toml" => "\u{e6b2} ",  //
-        "xml" => "\u{e619} ",  //
+        "json" => "\u{e60b} ",         //
+        "yaml" | "yml" => "\u{e6a8} ", //
+        "toml" => "\u{e6b2} ",         //
+        "xml" => "\u{e619} ",          //
         // Elixir / Erlang
         "ex" | "exs" => "\u{e62d} ",  //
-        "erl" | "hrl" => "\u{e7b1} ",  //
+        "erl" | "hrl" => "\u{e7b1} ", //
         // Python
-        "py" | "pyi" => "\u{e73c} ",  //
+        "py" | "pyi" => "\u{e73c} ", //
         // Go
-        "go" => "\u{e626} ",  //
+        "go" => "\u{e626} ", //
         // C / C++
-        "c" | "h" => "\u{e61e} ",  //
-        "cpp" | "cxx" | "cc" | "hpp" => "\u{e61d} ",  //
+        "c" | "h" => "\u{e61e} ",                    //
+        "cpp" | "cxx" | "cc" | "hpp" => "\u{e61d} ", //
         // Shell
-        "sh" | "bash" | "zsh" | "fish" => "\u{e795} ",  //
+        "sh" | "bash" | "zsh" | "fish" => "\u{e795} ", //
         // Ruby
-        "rb" => "\u{e791} ",  //
+        "rb" => "\u{e791} ", //
         // Java / Kotlin
-        "java" => "\u{e738} ",  //
-        "kt" | "kts" => "\u{e634} ",  //
+        "java" => "\u{e738} ",       //
+        "kt" | "kts" => "\u{e634} ", //
         // Markdown / Text
-        "md" | "mdx" => "\u{e73e} ",  //
-        "txt" => "\u{f0f6} ",  //
+        "md" | "mdx" => "\u{e73e} ", //
+        "txt" => "\u{f0f6} ",        //
         // Docker
-        "dockerfile" => "\u{e7b0} ",  //
+        "dockerfile" => "\u{e7b0} ", //
         // Git
-        "gitignore" | "gitmodules" | "gitattributes" => "\u{e702} ",  //
+        "gitignore" | "gitmodules" | "gitattributes" => "\u{e702} ", //
         // Images
-        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" => "\u{f1c5} ",  //
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" => "\u{f1c5} ", //
         // Lock files
-        "lock" => "\u{f023} ",  //
+        "lock" => "\u{f023} ", //
         // Catch-all
         _ => match name {
             "Dockerfile" => "\u{e7b0} ",
             "Makefile" | "CMakeLists.txt" => "\u{e779} ",
-            _ => "\u{f15b} ",  //  generic file
+            _ => "\u{f15b} ", //  generic file
         },
     }
 }
@@ -1658,27 +1711,27 @@ fn file_icon_color(name: &str) -> Color {
         None => "",
     };
     match ext {
-        "rs" => Color::Rgb(222, 165, 132),         // Rust orange
-        "js" | "mjs" | "cjs" => Color::Yellow,     // JS yellow
-        "ts" | "mts" | "cts" => Color::Rgb(49, 120, 198), // TS blue
-        "jsx" | "tsx" => Color::Rgb(97, 218, 251),  // React cyan
-        "html" | "htm" => Color::Rgb(227, 76, 38),  // HTML orange
+        "rs" => Color::Rgb(222, 165, 132),                  // Rust orange
+        "js" | "mjs" | "cjs" => Color::Yellow,              // JS yellow
+        "ts" | "mts" | "cts" => Color::Rgb(49, 120, 198),   // TS blue
+        "jsx" | "tsx" => Color::Rgb(97, 218, 251),          // React cyan
+        "html" | "htm" => Color::Rgb(227, 76, 38),          // HTML orange
         "css" | "scss" | "sass" => Color::Rgb(86, 61, 124), // CSS purple
         "json" => Color::Yellow,
-        "yaml" | "yml" => Color::Rgb(203, 23, 30),  // Red
-        "toml" => Color::Rgb(156, 154, 150),        // Gray
+        "yaml" | "yml" => Color::Rgb(203, 23, 30), // Red
+        "toml" => Color::Rgb(156, 154, 150),       // Gray
         "xml" => Color::Rgb(227, 76, 38),
-        "ex" | "exs" => Color::Rgb(110, 74, 126),   // Elixir purple
-        "erl" | "hrl" => Color::Rgb(169, 36, 52),   // Erlang red
-        "py" | "pyi" => Color::Rgb(55, 118, 171),   // Python blue
-        "go" => Color::Rgb(0, 173, 216),             // Go cyan
-        "c" | "h" => Color::Rgb(85, 85, 255),       // C blue
+        "ex" | "exs" => Color::Rgb(110, 74, 126), // Elixir purple
+        "erl" | "hrl" => Color::Rgb(169, 36, 52), // Erlang red
+        "py" | "pyi" => Color::Rgb(55, 118, 171), // Python blue
+        "go" => Color::Rgb(0, 173, 216),          // Go cyan
+        "c" | "h" => Color::Rgb(85, 85, 255),     // C blue
         "cpp" | "cxx" | "cc" | "hpp" => Color::Rgb(0, 89, 156),
         "sh" | "bash" | "zsh" | "fish" => Color::Green,
-        "rb" => Color::Rgb(204, 52, 45),            // Ruby red
-        "java" => Color::Rgb(176, 114, 25),          // Java orange
-        "kt" | "kts" => Color::Rgb(169, 123, 255),  // Kotlin purple
-        "md" | "mdx" => Color::Rgb(66, 165, 245),   // Markdown blue
+        "rb" => Color::Rgb(204, 52, 45),           // Ruby red
+        "java" => Color::Rgb(176, 114, 25),        // Java orange
+        "kt" | "kts" => Color::Rgb(169, 123, 255), // Kotlin purple
+        "md" | "mdx" => Color::Rgb(66, 165, 245),  // Markdown blue
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" => Color::Magenta,
         "lock" => Color::DarkGray,
         _ => match name {
@@ -1809,7 +1862,11 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
                 display_lines.push((None, topic.section.clone(), String::new()));
                 last_section = topic.section.clone();
             }
-            display_lines.push((Some(filter_pos), format!("  {}", topic.title), topic.section.clone()));
+            display_lines.push((
+                Some(filter_pos),
+                format!("  {}", topic.title),
+                topic.section.clone(),
+            ));
         }
 
         // Scroll so selected item is visible.
@@ -2070,9 +2127,7 @@ fn draw_editor(
                         .fg(Color::Black)
                         .add_modifier(Modifier::BOLD)
                 } else if is_search_match {
-                    Style::default()
-                        .bg(Color::Rgb(100, 80, 0))
-                        .fg(Color::White)
+                    Style::default().bg(Color::Rgb(100, 80, 0)).fg(Color::White)
                 } else if is_bracket_match {
                     Style::default()
                         .bg(Color::DarkGray)
@@ -2263,7 +2318,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             if lines > 1 {
                 format!(" {} lines selected │", lines)
             } else {
-                format!(" {} char{} selected │", chars, if chars == 1 { "" } else { "s" })
+                format!(
+                    " {} char{} selected │",
+                    chars,
+                    if chars == 1 { "" } else { "s" }
+                )
             }
         } else {
             String::new()
@@ -2323,52 +2382,48 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 " (no matches)".to_string()
             }
         } else {
-            format!(
-                " ({}/{})",
-                app.search_current + 1,
-                app.search_matches.len()
-            )
+            format!(" ({}/{})", app.search_current + 1, app.search_matches.len())
         };
         format!("/{}{}", app.search_input, match_info)
     } else {
         match app.mode {
-        Mode::Command => format!(":{}", app.command_input),
-        Mode::Intent => format!("intent> {}", app.intent_input),
-        Mode::Review => {
-            if let Some(proposal) = &app.proposal {
-                if proposal.streaming {
-                    format!(
-                        "AI streaming... ({} chars) — Esc to cancel",
-                        proposal.proposed_text.len()
-                    )
-                } else {
-                    // Show impact analysis alongside review controls.
-                    let start_line = app
-                        .buffer()
-                        .char_idx_to_cursor(proposal.start.min(app.buffer().len_chars()))
-                        .row;
-                    let end_line = app
-                        .buffer()
-                        .char_idx_to_cursor(proposal.end.min(app.buffer().len_chars()))
-                        .row;
-                    let impact = app.impact_summary(start_line, end_line).unwrap_or_default();
-                    if impact.is_empty() {
-                        "a: accept | r: reject | Esc: cancel".to_string()
+            Mode::Command => format!(":{}", app.command_input),
+            Mode::Intent => format!("intent> {}", app.intent_input),
+            Mode::Review => {
+                if let Some(proposal) = &app.proposal {
+                    if proposal.streaming {
+                        format!(
+                            "AI streaming... ({} chars) — Esc to cancel",
+                            proposal.proposed_text.len()
+                        )
                     } else {
-                        format!("a: accept | r: reject │ {impact}")
+                        // Show impact analysis alongside review controls.
+                        let start_line = app
+                            .buffer()
+                            .char_idx_to_cursor(proposal.start.min(app.buffer().len_chars()))
+                            .row;
+                        let end_line = app
+                            .buffer()
+                            .char_idx_to_cursor(proposal.end.min(app.buffer().len_chars()))
+                            .row;
+                        let impact = app.impact_summary(start_line, end_line).unwrap_or_default();
+                        if impact.is_empty() {
+                            "a: accept | r: reject | Esc: cancel".to_string()
+                        } else {
+                            format!("a: accept | r: reject │ {impact}")
+                        }
                     }
+                } else {
+                    String::new()
                 }
-            } else {
-                String::new()
+            }
+            _ => {
+                // Show ghost suggestion status if available, otherwise status message.
+                app.ghost_suggestion_status()
+                    .or_else(|| app.status_message.clone())
+                    .unwrap_or_default()
             }
         }
-        _ => {
-            // Show ghost suggestion status if available, otherwise status message.
-            app.ghost_suggestion_status()
-                .or_else(|| app.status_message.clone())
-                .unwrap_or_default()
-        }
-    }
     };
 
     let style = match app.mode {

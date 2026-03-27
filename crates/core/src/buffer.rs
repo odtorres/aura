@@ -881,14 +881,8 @@ mod tests {
         let text = buf.text();
         let open_brace = text.find('{').unwrap();
         let close_brace = text.rfind('}').unwrap();
-        assert_eq!(
-            buf.find_matching_bracket(open_brace),
-            Some(close_brace)
-        );
-        assert_eq!(
-            buf.find_matching_bracket(close_brace),
-            Some(open_brace)
-        );
+        assert_eq!(buf.find_matching_bracket(open_brace), Some(close_brace));
+        assert_eq!(buf.find_matching_bracket(close_brace), Some(open_brace));
     }
 
     // --- Search tests ---

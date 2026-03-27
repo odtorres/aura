@@ -259,8 +259,12 @@ impl SourceControlPanel {
     /// Get the path of the currently selected file entry, if any.
     pub fn selected_path(&self) -> Option<&str> {
         match self.focused_section {
-            GitPanelSection::StagedFiles => self.staged.get(self.selected).map(|e| e.rel_path.as_str()),
-            GitPanelSection::ChangedFiles => self.changed.get(self.selected).map(|e| e.rel_path.as_str()),
+            GitPanelSection::StagedFiles => {
+                self.staged.get(self.selected).map(|e| e.rel_path.as_str())
+            }
+            GitPanelSection::ChangedFiles => {
+                self.changed.get(self.selected).map(|e| e.rel_path.as_str())
+            }
             GitPanelSection::CommitMessage => None,
         }
     }

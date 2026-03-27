@@ -49,7 +49,10 @@ pub fn detect_indent_style(buffer: &Buffer) -> IndentStyle {
             if trimmed.is_empty() {
                 continue;
             }
-            let leading: String = trimmed.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+            let leading: String = trimmed
+                .chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .collect();
             if leading.is_empty() {
                 prev_indent = 0;
                 continue;
@@ -59,12 +62,8 @@ pub fn detect_indent_style(buffer: &Buffer) -> IndentStyle {
             } else {
                 space_count += 1;
                 let indent = leading.len();
-                let delta = if indent > prev_indent {
-                    indent - prev_indent
-                } else {
-                    0
-                };
-                if delta >= 1 && delta <= 8 {
+                let delta = indent.saturating_sub(prev_indent);
+                if (1..=8).contains(&delta) {
                     space_widths[delta] += 1;
                 }
                 prev_indent = indent;

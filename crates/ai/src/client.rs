@@ -114,16 +114,14 @@ impl Message {
     pub fn text_content(&self) -> String {
         match &self.content {
             MessageContent::Text(s) => s.clone(),
-            MessageContent::Blocks(blocks) => {
-                blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        ContentBlock::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("")
-            }
+            MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 }
@@ -495,11 +493,10 @@ impl AnthropicClient {
                             if let (Some(id), Some(name)) =
                                 (current_tool_id.take(), current_tool_name.take())
                             {
-                                let input: serde_json::Value =
-                                    serde_json::from_str(&current_tool_json)
-                                        .unwrap_or(serde_json::Value::Object(
-                                            serde_json::Map::new(),
-                                        ));
+                                let input: serde_json::Value = serde_json::from_str(
+                                    &current_tool_json,
+                                )
+                                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
                                 current_tool_json.clear();
 
                                 // Add text block first if we have accumulated text.
@@ -513,11 +510,7 @@ impl AnthropicClient {
                                     name: name.clone(),
                                     input: input.clone(),
                                 });
-                                let _ = tx.send(AiEvent::ToolUse {
-                                    id,
-                                    name,
-                                    input,
-                                });
+                                let _ = tx.send(AiEvent::ToolUse { id, name, input });
                             }
                         }
                         "message_delta" => {
@@ -536,9 +529,9 @@ impl AnthropicClient {
             if has_tool_use {
                 // Ensure any trailing text is captured.
                 if !accumulated_text.is_empty()
-                    && !content_blocks
-                        .iter()
-                        .any(|b| matches!(b, ContentBlock::Text { text } if text == &accumulated_text))
+                    && !content_blocks.iter().any(
+                        |b| matches!(b, ContentBlock::Text { text } if text == &accumulated_text),
+                    )
                 {
                     content_blocks.insert(
                         0,

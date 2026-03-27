@@ -1,27 +1,27 @@
 //! Application state and main event loop.
 
 use crate::chat_panel::ChatPanel;
+use crate::chat_panel::ToolCallStatus;
+use crate::chat_tools;
 use crate::config::{AuraConfig, Theme};
+use crate::conversation_history::ConversationHistoryPanel;
 use crate::diff_view::DiffView;
 use crate::embedded_terminal::EmbeddedTerminal;
 use crate::file_picker::FilePicker;
 use crate::file_tree::FileTree;
-use crate::help::HelpOverlay;
 use crate::git::{GitRepo, LineStatus};
+use crate::help::HelpOverlay;
 use crate::lsp::{Diagnostic, LspEvent};
-use crate::conversation_history::ConversationHistoryPanel;
-use crate::session::{self, Session, TabState, UiState};
-use crate::source_control::{SidebarView, SourceControlPanel};
 use crate::mcp_client::{McpClientConnection, McpClientEvent};
 use crate::mcp_server::{AgentRegistry, McpAction, McpAppResponse, McpServer};
 use crate::plugin::PluginManager;
+use crate::session::{self, Session, TabState, UiState};
+use crate::source_control::{SidebarView, SourceControlPanel};
 use crate::speculative::{Aggressiveness, GhostSuggestion, SpeculativeEngine};
 use crate::tab::{EditorTab, TabManager};
-use crate::chat_panel::ToolCallStatus;
-use crate::chat_tools;
 use crate::update::{self, UpdateStatus};
 use aura_ai::{
-    estimate_tokens, editor_tools, tool_permission, AiBackend, AiConfig, AiEvent, ContentBlock,
+    editor_tools, estimate_tokens, tool_permission, AiBackend, AiConfig, AiEvent, ContentBlock,
     EditorContext, Message, ToolPermission,
 };
 use aura_core::conversation::{
@@ -284,7 +284,6 @@ impl App {
 
         let ai_client = AiBackend::auto_detect();
 
-
         // Start MCP server.
         let mcp_server = match McpServer::start() {
             Ok(server) => {
@@ -331,14 +330,21 @@ impl App {
             .and_then(|db_path| {
                 tracing::debug!("Trying project-local conversation store at {:?}", db_path);
                 ConversationStore::open(&db_path)
-                    .inspect_err(|e| tracing::warn!("Failed to open conversation store at {:?}: {}", db_path, e))
+                    .inspect_err(|e| {
+                        tracing::warn!("Failed to open conversation store at {:?}: {}", db_path, e)
+                    })
                     .ok()
             })
             .or_else(|| {
                 let fallback = dirs_path()?.join(".aura").join("conversations.db");
-                tracing::debug!("Trying global fallback conversation store at {:?}", fallback);
+                tracing::debug!(
+                    "Trying global fallback conversation store at {:?}",
+                    fallback
+                );
                 ConversationStore::open(&fallback)
-                    .inspect_err(|e| tracing::warn!("Failed to open fallback conversation store: {}", e))
+                    .inspect_err(|e| {
+                        tracing::warn!("Failed to open fallback conversation store: {}", e)
+                    })
                     .ok()
             });
         if let Some(ref store) = conversation_store {
@@ -758,11 +764,7 @@ impl App {
                     continue;
                 }
             };
-            let mut tab = EditorTab::new(
-                buffer,
-                self.conversation_store.as_ref(),
-                &self.theme,
-            );
+            let mut tab = EditorTab::new(buffer, self.conversation_store.as_ref(), &self.theme);
             // Restore cursor and scroll, clamped to buffer bounds.
             let max_row = tab.buffer.line_count().saturating_sub(1);
             tab.cursor.row = tab_state.cursor_row.min(max_row);
@@ -924,7 +926,9 @@ impl App {
     /// Send an intent to the AI.
     pub fn send_intent(&mut self, intent: &str) {
         if self.ai_client.is_none() {
-            self.set_status("No AI backend available. Set ANTHROPIC_API_KEY or install Claude Code CLI");
+            self.set_status(
+                "No AI backend available. Set ANTHROPIC_API_KEY or install Claude Code CLI",
+            );
             self.mode = Mode::Normal;
             return;
         }
@@ -995,7 +999,13 @@ impl App {
 
         let (branch, commit) = self.git_context();
         if let Some(store) = &self.conversation_store {
-            match store.create_conversation(&file_path_str, start_line, end_line, commit.as_deref(), branch.as_deref()) {
+            match store.create_conversation(
+                &file_path_str,
+                start_line,
+                end_line,
+                commit.as_deref(),
+                branch.as_deref(),
+            ) {
                 Ok(conv) => {
                     if let Err(e) =
                         store.add_message(&conv.id, MessageRole::HumanIntent, intent, None)
@@ -1007,17 +1017,10 @@ impl App {
                         .ok();
                     self.active_intent_id = intent_rec.map(|i| i.id);
                     self.active_conversation = Some(conv.id.clone());
-                    tracing::info!(
-                        "Created conversation {} for '{}'",
-                        conv.id,
-                        file_path_str
-                    );
+                    tracing::info!("Created conversation {} for '{}'", conv.id, file_path_str);
                 }
                 Err(e) => {
-                    tracing::error!(
-                        "Failed to create conversation for '{}': {e}",
-                        file_path_str
-                    );
+                    tracing::error!("Failed to create conversation for '{}': {e}", file_path_str);
                 }
             }
         } else {
@@ -1630,13 +1633,10 @@ impl App {
     pub fn update_matching_bracket(&mut self) {
         let tab = self.tab();
         let char_idx = tab.buffer.cursor_to_char_idx(&tab.cursor);
-        self.matching_bracket = tab
-            .buffer
-            .find_matching_bracket(char_idx)
-            .map(|match_idx| {
-                let cursor = self.tab().buffer.char_idx_to_cursor(match_idx);
-                (cursor.row, cursor.col)
-            });
+        self.matching_bracket = tab.buffer.find_matching_bracket(char_idx).map(|match_idx| {
+            let cursor = self.tab().buffer.char_idx_to_cursor(match_idx);
+            (cursor.row, cursor.col)
+        });
     }
 
     /// Populate search_matches from the current buffer using search_query.
@@ -1870,7 +1870,13 @@ impl App {
                         .or_else(|| {
                             let (branch, commit) = self.git_context();
                             store
-                                .create_conversation(&file_path, *start_line, end_l, commit.as_deref(), branch.as_deref())
+                                .create_conversation(
+                                    &file_path,
+                                    *start_line,
+                                    end_l,
+                                    commit.as_deref(),
+                                    branch.as_deref(),
+                                )
                                 .inspect_err(|e| {
                                     tracing::error!("Failed to create MCP conversation: {e}")
                                 })
@@ -2193,7 +2199,15 @@ impl App {
                     .and_then(|v| v.into_iter().next())
                     .or_else(|| {
                         let (branch, commit) = self.git_context();
-                        store.create_conversation(&file_path, start, end, commit.as_deref(), branch.as_deref()).ok()
+                        store
+                            .create_conversation(
+                                &file_path,
+                                start,
+                                end,
+                                commit.as_deref(),
+                                branch.as_deref(),
+                            )
+                            .ok()
                     });
 
                 match conv {
@@ -2785,9 +2799,12 @@ impl App {
     /// Handle a mouse click by focusing the panel under the cursor.
     fn handle_mouse_click(&mut self, col: u16, row: u16) {
         let point_in = |r: Rect| {
-            r.width > 0 && r.height > 0
-                && col >= r.x && col < r.x + r.width
-                && row >= r.y && row < r.y + r.height
+            r.width > 0
+                && r.height > 0
+                && col >= r.x
+                && col < r.x + r.width
+                && row >= r.y
+                && row < r.y + r.height
         };
 
         // Tab bar: clicking a tab switches to it.
@@ -2839,10 +2856,7 @@ impl App {
                 // Entries start at file_tree_rect.y + 1 (border) + 1 (tab header) = +2.
                 let entries_start_y = self.file_tree_rect.y + 2;
                 if row >= entries_start_y {
-                    let visible_height = self
-                        .file_tree_rect
-                        .height
-                        .saturating_sub(3) as usize; // border top + tab header + border bottom
+                    let visible_height = self.file_tree_rect.height.saturating_sub(3) as usize; // border top + tab header + border bottom
                     let selected = self.file_tree.selected;
                     let scroll_offset = if selected >= visible_height && visible_height > 0 {
                         selected.saturating_sub(visible_height - 1)
@@ -2983,7 +2997,8 @@ impl App {
                 // the scroll on the next frame.
                 if viewport_h > margin * 2 {
                     let safe_start = tab.scroll_row + margin;
-                    let safe_end = tab.scroll_row + viewport_h.saturating_sub(1).saturating_sub(margin);
+                    let safe_end =
+                        tab.scroll_row + viewport_h.saturating_sub(1).saturating_sub(margin);
                     if tab.cursor.row < safe_start {
                         tab.cursor.row = safe_start;
                     } else if tab.cursor.row > safe_end {
@@ -3109,9 +3124,8 @@ impl App {
                     return;
                 }
                 _ => {
-                    self.chat_panel.push_system_message(
-                        &format!("Unknown command: {}", text.trim()),
-                    );
+                    self.chat_panel
+                        .push_system_message(&format!("Unknown command: {}", text.trim()));
                     return;
                 }
             }
@@ -3146,8 +3160,10 @@ impl App {
             let end_cur = tab.buffer.char_idx_to_cursor(sel_end);
             let lines = end_cur.row.saturating_sub(start_cur.row) + 1;
             let file_name = tab.file_name();
-            self.chat_panel.selection_context =
-                Some(format!("{lines} line{} from {file_name}", if lines == 1 { "" } else { "s" }));
+            self.chat_panel.selection_context = Some(format!(
+                "{lines} line{} from {file_name}",
+                if lines == 1 { "" } else { "s" }
+            ));
         } else {
             self.chat_panel.selection_context = None;
         }
@@ -3217,7 +3233,9 @@ impl App {
                         ToolPermission::AutoApprove => ToolCallStatus::Running,
                         ToolPermission::RequiresApproval => ToolCallStatus::PendingApproval,
                     };
-                    let idx = self.chat_panel.add_tool_call(&id, &name, input.clone(), status);
+                    let idx = self
+                        .chat_panel
+                        .add_tool_call(&id, &name, input.clone(), status);
                     self.pending_tool_calls.push(PendingToolCall {
                         id,
                         name,
@@ -3225,7 +3243,10 @@ impl App {
                         item_index: idx,
                     });
                 }
-                Ok(AiEvent::ToolUseComplete { text, content_blocks }) => {
+                Ok(AiEvent::ToolUseComplete {
+                    text,
+                    content_blocks,
+                }) => {
                     // The assistant turn is complete with tool calls.
                     self.chat_panel.finish_streaming_for_tools();
                     self.current_assistant_blocks = content_blocks.clone();
@@ -3361,8 +3382,7 @@ impl App {
                 self.chat_panel.pending_approval = Some(next.item_index);
             } else {
                 // Auto-approve remaining.
-                let remaining: Vec<PendingToolCall> =
-                    std::mem::take(&mut self.pending_tool_calls);
+                let remaining: Vec<PendingToolCall> = std::mem::take(&mut self.pending_tool_calls);
                 for c in &remaining {
                     self.execute_tool_call(c);
                 }
@@ -3382,22 +3402,16 @@ impl App {
         let call = self.pending_tool_calls.remove(0);
         self.chat_panel
             .update_tool_status(call.item_index, ToolCallStatus::Denied);
-        self.chat_panel.add_tool_result_to_context(
-            &call.id,
-            "User denied this tool call.",
-            true,
-        );
+        self.chat_panel
+            .add_tool_result_to_context(&call.id, "User denied this tool call.", true);
 
         // Deny all remaining pending tools too.
         let remaining: Vec<PendingToolCall> = std::mem::take(&mut self.pending_tool_calls);
         for c in &remaining {
             self.chat_panel
                 .update_tool_status(c.item_index, ToolCallStatus::Denied);
-            self.chat_panel.add_tool_result_to_context(
-                &c.id,
-                "User denied this tool call.",
-                true,
-            );
+            self.chat_panel
+                .add_tool_result_to_context(&c.id, "User denied this tool call.", true);
         }
         self.chat_panel.pending_approval = None;
         self.continue_tool_loop();
@@ -3408,9 +3422,8 @@ impl App {
         self.chat_panel.tool_loop_count = self.chat_panel.tool_loop_count.saturating_add(1);
 
         if self.chat_panel.tool_loop_count >= chat_tools::MAX_TOOL_ITERATIONS {
-            self.chat_panel.push_system_message(
-                "Tool loop limit reached. Stopping automatic tool use.",
-            );
+            self.chat_panel
+                .push_system_message("Tool loop limit reached. Stopping automatic tool use.");
             self.chat_panel.in_tool_loop = false;
             return;
         }
@@ -3451,7 +3464,9 @@ impl App {
              to change.\n\n",
         );
         prompt.push_str(&format!("Current file: {file_path}\n"));
-        prompt.push_str(&format!("Lines: {line_count}, Cursor: {cursor_row}:{cursor_col}\n"));
+        prompt.push_str(&format!(
+            "Lines: {line_count}, Cursor: {cursor_row}:{cursor_col}\n"
+        ));
 
         // Include selected text if there is an active visual selection.
         if let Some((sel_start, sel_end)) = self.visual_selection_range() {
@@ -3553,7 +3568,8 @@ impl App {
             }
         };
 
-        let samples: &[(&str, usize, usize, &str, &[(&str, &str)])] = &[
+        type Sample<'a> = (&'a str, usize, usize, &'a str, &'a [(&'a str, &'a str)]);
+        let samples: &[Sample<'_>] = &[
             (
                 "src/main.rs",
                 10,
@@ -3691,7 +3707,10 @@ impl App {
                     self.conversation_store = Some(s);
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to lazily open conversation store at {:?}: {e}", path);
+                    tracing::warn!(
+                        "Failed to lazily open conversation store at {:?}: {e}",
+                        path
+                    );
                 }
             }
         }
@@ -3724,7 +3743,13 @@ impl App {
                 .or_else(|| {
                     let (branch, commit) = self.git_context();
                     store
-                        .create_conversation(&file_path, start_line, end_line, commit.as_deref(), branch.as_deref())
+                        .create_conversation(
+                            &file_path,
+                            start_line,
+                            end_line,
+                            commit.as_deref(),
+                            branch.as_deref(),
+                        )
                         .ok()
                 });
 
@@ -3749,18 +3774,19 @@ impl App {
             let end_line = self.tab().buffer.line_count().saturating_sub(1);
 
             let (branch, commit) = self.git_context();
-            if let Ok(conv) = store.create_conversation(&file_path, 0, end_line, commit.as_deref(), branch.as_deref()) {
+            if let Ok(conv) = store.create_conversation(
+                &file_path,
+                0,
+                end_line,
+                commit.as_deref(),
+                branch.as_deref(),
+            ) {
                 let msg = if let Some(r) = role {
                     format!("Agent '{}' connected (role: {})", agent_name, r)
                 } else {
                     format!("Agent '{}' connected", agent_name)
                 };
-                let _ = store.add_message(
-                    &conv.id,
-                    MessageRole::System,
-                    &msg,
-                    Some(agent_name),
-                );
+                let _ = store.add_message(&conv.id, MessageRole::System, &msg, Some(agent_name));
                 self.active_conversation = Some(conv.id);
             }
         }
@@ -3908,7 +3934,11 @@ impl App {
         };
 
         // Read HEAD content.
-        let old_content = match self.git_repo.as_ref().and_then(|r| r.head_file_content(rel).ok()) {
+        let old_content = match self
+            .git_repo
+            .as_ref()
+            .and_then(|r| r.head_file_content(rel).ok())
+        {
             Some(Some(c)) => c,
             _ => String::new(), // New file — empty old side.
         };

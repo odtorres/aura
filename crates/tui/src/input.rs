@@ -260,7 +260,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Char('d') => {
                 if app.source_control.focused_section == GitPanelSection::ChangedFiles {
-                    if let Some(entry) = app.source_control.changed.get(app.source_control.selected) {
+                    if let Some(entry) = app.source_control.changed.get(app.source_control.selected)
+                    {
                         let path = entry.rel_path.clone();
                         app.set_status(format!("Discard changes to {}? (y to confirm)", path));
                         app.source_control.pending_discard = Some(path);
@@ -379,6 +380,23 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // When the conversation history panel is focused, route keys to it.
     if app.conversation_history_focused {
         match code {
+            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.conversation_history_focused = false;
+                app.file_tree.toggle();
+            }
+            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.conversation_history_focused = false;
+                app.toggle_sidebar_view();
+            }
+            KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_conversation_history();
+            }
+            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
+                // Switch to chat panel.
+                app.conversation_history.visible = false;
+                app.conversation_history_focused = false;
+                app.toggle_chat_panel();
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 app.conversation_history.select_down();
             }
@@ -396,23 +414,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Esc => {
                 app.conversation_history_focused = false;
-            }
-            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.conversation_history_focused = false;
-                app.file_tree.toggle();
-            }
-            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.conversation_history_focused = false;
-                app.toggle_sidebar_view();
-            }
-            KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_conversation_history();
-            }
-            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
-                // Switch to chat panel.
-                app.conversation_history.visible = false;
-                app.conversation_history_focused = false;
-                app.toggle_chat_panel();
             }
             _ => {}
         }
@@ -512,8 +513,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.help.page_down(15);
             }
             KeyCode::Char(c)
-                if app.help.in_topics_view()
-                    && !modifiers.contains(KeyModifiers::CONTROL) =>
+                if app.help.in_topics_view() && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 app.help.type_char(c);
             }
@@ -840,9 +840,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
 
         // n — next search match (only when not leader-pending and not Ctrl).
-        KeyCode::Char('n')
-            if !modifiers.contains(KeyModifiers::CONTROL) && !app.leader_pending =>
-        {
+        KeyCode::Char('n') if !modifiers.contains(KeyModifiers::CONTROL) && !app.leader_pending => {
             if app.search_query.is_some() {
                 app.search_next();
                 let total = app.search_matches.len();
@@ -940,36 +938,25 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             // otherwise-blank line, match the opener's indentation.
             if matches!(c, '}' | ')' | ']') {
                 let tab = app.tab_mut();
-                let line_text = tab
-                    .buffer
-                    .line_text(tab.cursor.row)
-                    .unwrap_or_default();
+                let line_text = tab.buffer.line_text(tab.cursor.row).unwrap_or_default();
                 let trimmed = line_text.trim_end_matches('\n').trim_end_matches('\r');
                 let trimmed_content = trimmed.trim_start();
                 // Only auto-dedent if the line has just this bracket.
                 if trimmed_content.len() == 1 && trimmed_content.starts_with(c) {
                     // Find the char index of the bracket we just inserted.
-                    let bracket_char_idx = tab
-                        .buffer
-                        .cursor_to_char_idx(&tab.cursor)
-                        .saturating_sub(1);
-                    if let Some(match_idx) =
-                        tab.buffer.find_matching_bracket(bracket_char_idx)
-                    {
-                        let match_cursor =
-                            tab.buffer.char_idx_to_cursor(match_idx);
-                        let match_line = tab
-                            .buffer
-                            .line_text(match_cursor.row)
-                            .unwrap_or_default();
+                    let bracket_char_idx =
+                        tab.buffer.cursor_to_char_idx(&tab.cursor).saturating_sub(1);
+                    if let Some(match_idx) = tab.buffer.find_matching_bracket(bracket_char_idx) {
+                        let match_cursor = tab.buffer.char_idx_to_cursor(match_idx);
+                        let match_line = tab.buffer.line_text(match_cursor.row).unwrap_or_default();
                         let target_indent: String = match_line
                             .chars()
                             .take_while(|ch| *ch == ' ' || *ch == '\t')
                             .collect();
                         let current_indent_len = trimmed.len() - trimmed_content.len();
-                        let line_start = tab.buffer.cursor_to_char_idx(
-                            &aura_core::Cursor::new(tab.cursor.row, 0),
-                        );
+                        let line_start = tab
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(tab.cursor.row, 0));
                         // Remove old indent and insert new one.
                         if current_indent_len > 0 {
                             tab.buffer.delete(
@@ -989,18 +976,14 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         KeyCode::Enter => {
             let tab = app.tab_mut();
-            let current_line = tab
-                .buffer
-                .line_text(tab.cursor.row)
-                .unwrap_or_default();
+            let current_line = tab.buffer.line_text(tab.cursor.row).unwrap_or_default();
             // Get leading whitespace from the current line.
             let base_indent: String = current_line
                 .chars()
                 .take_while(|c| (*c == ' ' || *c == '\t'))
                 .collect();
             // Check if text before cursor ends with an opening bracket/colon.
-            let text_before_cursor: String =
-                current_line.chars().take(tab.cursor.col).collect();
+            let text_before_cursor: String = current_line.chars().take(tab.cursor.col).collect();
             let trimmed = text_before_cursor.trim_end();
             let increase_indent = trimmed.ends_with('{')
                 || trimmed.ends_with('(')
@@ -1713,8 +1696,10 @@ fn execute_command(app: &mut App, cmd: &str) {
                     (0, app.tab().buffer.len_chars())
                 } else {
                     let row = app.tab().cursor.row;
-                    let start =
-                        app.tab().buffer.cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
+                    let start = app
+                        .tab()
+                        .buffer
+                        .cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
                     let end = if row + 1 < app.tab().buffer.line_count() {
                         app.tab()
                             .buffer
@@ -1769,10 +1754,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                     ));
                 }
                 Some(UpdateStatus::UpToDate) => {
-                    app.set_status(format!(
-                        "AURA v{} is up to date",
-                        update::CURRENT_VERSION
-                    ));
+                    app.set_status(format!("AURA v{} is up to date", update::CURRENT_VERSION));
                 }
                 Some(UpdateStatus::Error(e)) => {
                     app.set_status(format!("Update check failed: {}", e));
@@ -1837,10 +1819,7 @@ pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.mode = Mode::Normal;
             app.source_control_focused = false;
             if let Some(rel_path) = rel_path {
-                let workdir = app
-                    .git_repo
-                    .as_ref()
-                    .map(|r| r.workdir().to_path_buf());
+                let workdir = app.git_repo.as_ref().map(|r| r.workdir().to_path_buf());
                 if let Some(wd) = workdir {
                     let full_path = wd.join(&rel_path);
                     if let Err(e) = app.open_file(full_path) {

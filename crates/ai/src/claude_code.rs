@@ -255,10 +255,7 @@ impl ClaudeCodeClient {
 
                     // ── Handle stream_event wrapped Anthropic API events ──
                     if let Some(event) = v.get("event") {
-                        let event_type = event
-                            .get("type")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("");
+                        let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                         match event_type {
                             "content_block_start" => {
@@ -292,15 +289,13 @@ impl ClaudeCodeClient {
                                                 delta.get("text").and_then(|t| t.as_str())
                                             {
                                                 accumulated_text.push_str(text);
-                                                let _ =
-                                                    tx.send(AiEvent::Token(text.to_string()));
+                                                let _ = tx.send(AiEvent::Token(text.to_string()));
                                             }
                                         }
                                         "input_json_delta" => {
                                             // Accumulate native tool input for activity display.
-                                            if let Some(partial) = delta
-                                                .get("partial_json")
-                                                .and_then(|t| t.as_str())
+                                            if let Some(partial) =
+                                                delta.get("partial_json").and_then(|t| t.as_str())
                                             {
                                                 current_native_tool_json.push_str(partial);
                                             }
@@ -375,7 +370,7 @@ impl ClaudeCodeClient {
                 .take()
                 .and_then(|stderr| {
                     let reader = BufReader::new(stderr);
-                    let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
                     if lines.is_empty() {
                         None
                     } else {
@@ -443,10 +438,7 @@ impl ClaudeCodeClient {
     ///
     /// Claude Code's `{"type":"assistant","message":{...}}` events show
     /// what the AI is doing. We display tool use as informational activity.
-    fn parse_assistant_activity(
-        message: &serde_json::Value,
-        tx: &mpsc::Sender<AiEvent>,
-    ) {
+    fn parse_assistant_activity(message: &serde_json::Value, tx: &mpsc::Sender<AiEvent>) {
         // Check for content array.
         if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
             for block in content {
@@ -458,9 +450,7 @@ impl ClaudeCodeClient {
                         .unwrap_or("unknown");
                     let input = block.get("input").cloned().unwrap_or_default();
                     let summary = Self::summarize_tool_input_value(&input);
-                    let _ = tx.send(AiEvent::Activity(format!(
-                        "Tool: {name} {summary}"
-                    )));
+                    let _ = tx.send(AiEvent::Activity(format!("Tool: {name} {summary}")));
                 }
             }
         }
@@ -474,18 +464,13 @@ impl ClaudeCodeClient {
                     .unwrap_or("unknown");
                 let input = message.get("input").cloned().unwrap_or_default();
                 let summary = Self::summarize_tool_input_value(&input);
-                let _ = tx.send(AiEvent::Activity(format!(
-                    "Tool: {name} {summary}"
-                )));
+                let _ = tx.send(AiEvent::Activity(format!("Tool: {name} {summary}")));
             }
         }
     }
 
     /// Parse a tool result event and emit an activity notification.
-    fn parse_tool_result_activity(
-        message: &serde_json::Value,
-        tx: &mpsc::Sender<AiEvent>,
-    ) {
+    fn parse_tool_result_activity(message: &serde_json::Value, tx: &mpsc::Sender<AiEvent>) {
         let content = message
             .get("content")
             .and_then(|c| {
@@ -592,10 +577,9 @@ impl ClaudeCodeClient {
             if let Some(json_str) = trimmed.strip_prefix("TOOL_CALL:") {
                 let json_str = json_str.trim();
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    if let (Some(name), Some(input)) = (
-                        v.get("name").and_then(|n| n.as_str()),
-                        v.get("input"),
-                    ) {
+                    if let (Some(name), Some(input)) =
+                        (v.get("name").and_then(|n| n.as_str()), v.get("input"))
+                    {
                         tool_calls.push((name.to_string(), input.clone()));
                         continue;
                     }
@@ -605,10 +589,7 @@ impl ClaudeCodeClient {
         }
 
         // Trim trailing empty lines from display text.
-        while display_lines
-            .last()
-            .map_or(false, |l| l.trim().is_empty())
-        {
+        while display_lines.last().is_some_and(|l| l.trim().is_empty()) {
             display_lines.pop();
         }
 
