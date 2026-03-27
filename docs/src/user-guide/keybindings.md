@@ -68,6 +68,7 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `Ctrl+T` | Toggle terminal pane (and focus) |
 | `Ctrl+J` | Toggle chat panel (and focus) |
 | `Ctrl+H` | Toggle conversation history panel |
+| `Ctrl+W` | Toggle split pane focus |
 | `Ctrl+,` | Open settings modal |
 | `F1` | Open help overlay |
 
@@ -139,6 +140,9 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `:tree` | | Toggle file tree sidebar |
 | `:term-height <N>` | `:th <N>` | Set terminal pane height |
 | `:compact` | | Compact conversation database |
+| `:vsplit` | `:vs` | Vertical split pane |
+| `:hsplit` | `:sp` | Horizontal split pane |
+| `:only` | | Close split pane |
 | `:settings` | `:prefs` | Open settings modal |
 | `:update` | `:check-update` | Force check for updates |
 | `:host` | | Start hosting a collab session |

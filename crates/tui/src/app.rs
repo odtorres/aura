@@ -48,6 +48,15 @@ fn chrono_now() -> String {
     format!("{}", d.as_secs())
 }
 
+/// Direction for split panes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitDirection {
+    /// Left/right split (vertical divider).
+    Vertical,
+    /// Top/bottom split (horizontal divider).
+    Horizontal,
+}
+
 /// The editing mode — vim-inspired but simplified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -191,6 +200,16 @@ pub struct App {
     pub help: HelpOverlay,
     /// Settings modal overlay.
     pub settings_modal: crate::settings_modal::SettingsModal,
+
+    // --- Split panes ---
+    /// Whether a split pane is active.
+    pub split_active: bool,
+    /// Direction of the split.
+    pub split_direction: SplitDirection,
+    /// Tab index shown in the secondary (right/bottom) pane.
+    pub split_tab_idx: usize,
+    /// Whether the secondary pane has focus (false = primary has focus).
+    pub split_focus_secondary: bool,
     /// File tree sidebar.
     pub file_tree: FileTree,
     /// Which sidebar view is active (Files or Git).
@@ -502,6 +521,10 @@ impl App {
             file_picker: FilePicker::new(terminal_cwd.clone()),
             help: HelpOverlay::new(),
             settings_modal: crate::settings_modal::SettingsModal::new(),
+            split_active: false,
+            split_direction: SplitDirection::Vertical,
+            split_tab_idx: 0,
+            split_focus_secondary: false,
             file_tree: FileTree::new(terminal_cwd),
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
@@ -4509,7 +4532,48 @@ impl App {
         }
     }
 
-    /// Stop the current collaboration session.
+    // ----- Split panes -----
+
+    /// Open a vertical split showing the current tab in both panes.
+    pub fn split_vertical(&mut self) {
+        self.split_active = true;
+        self.split_direction = SplitDirection::Vertical;
+        self.split_tab_idx = self.tabs.active_index();
+        self.split_focus_secondary = false;
+        self.set_status("Vertical split — Ctrl+W to switch panes");
+    }
+
+    /// Open a horizontal split showing the current tab in both panes.
+    pub fn split_horizontal(&mut self) {
+        self.split_active = true;
+        self.split_direction = SplitDirection::Horizontal;
+        self.split_tab_idx = self.tabs.active_index();
+        self.split_focus_secondary = false;
+        self.set_status("Horizontal split — Ctrl+W to switch panes");
+    }
+
+    /// Close the split pane.
+    pub fn split_close(&mut self) {
+        self.split_active = false;
+        self.split_focus_secondary = false;
+    }
+
+    /// Toggle focus between primary and secondary panes.
+    pub fn split_toggle_focus(&mut self) {
+        if self.split_active {
+            self.split_focus_secondary = !self.split_focus_secondary;
+        }
+    }
+
+    /// Get the tab index of the focused pane.
+    pub fn focused_tab_idx(&self) -> usize {
+        if self.split_active && self.split_focus_secondary {
+            self.split_tab_idx
+        } else {
+            self.tabs.active_index()
+        }
+    }
+
     /// Open the settings modal.
     pub fn open_settings(&mut self) {
         self.settings_modal.open(&self.config);

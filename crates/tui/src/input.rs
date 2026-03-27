@@ -545,6 +545,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Ctrl+W — toggle split pane focus.
+    if code == KeyCode::Char('w') && modifiers.contains(KeyModifiers::CONTROL) {
+        app.split_toggle_focus();
+        return;
+    }
+
     // F1 — open help from any mode.
     if code == KeyCode::F(1) {
         app.help.open();
@@ -1848,6 +1854,16 @@ fn execute_command(app: &mut App, cmd: &str) {
         "update" | "check-update" => {
             // Force a fresh check (bypasses cache).
             app.force_update_check();
+        }
+        // --- Split panes ---
+        "vsplit" | "vs" => {
+            app.split_vertical();
+        }
+        "hsplit" | "hs" | "split" | "sp" => {
+            app.split_horizontal();
+        }
+        "only" => {
+            app.split_close();
         }
         // --- Settings ---
         "settings" | "preferences" | "prefs" => {

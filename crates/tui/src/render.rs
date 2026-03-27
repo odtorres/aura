@@ -141,94 +141,45 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_status_bar(frame, app, status_area);
         draw_command_bar(frame, app, command_area);
     } else {
-        // Draw editor border with filename as title.
-        let border_color = if !app.terminal_focused
-            && !app.file_tree_focused
-            && !app.source_control_focused
-            && !app.conversation_history_focused
-        {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        };
-        let editor_title = format!(" {} ", app.tab().title());
-        let editor_block = Block::default()
-            .borders(Borders::ALL)
-            .title(editor_title)
-            .border_style(Style::default().fg(border_color));
-        let editor_inner = editor_block.inner(editor_area);
-        frame.render_widget(editor_block, editor_area);
-
-        // Carve out 1 column on the right for the minimap scrollbar (if enabled).
-        let show_minimap = app.config.editor.show_minimap;
-        let (editor_content_area, minimap_area) = if show_minimap {
-            let hsplit = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(1), Constraint::Length(1)])
-                .split(editor_inner);
-            (hsplit[0], Some(hsplit[1]))
-        } else {
-            (editor_inner, None)
-        };
-
-        // Adjust scroll so cursor is visible (using inner dimensions).
-        let gutter_width_usize = 6;
-        let viewport_h = editor_content_area.height as usize;
-        let viewport_w = editor_content_area
-            .width
-            .saturating_sub(gutter_width_usize as u16) as usize;
-        app.scroll_to_cursor(viewport_h, viewport_w);
-
-        // Pre-compute git line status for visible lines.
-        let git_status: std::collections::HashMap<usize, LineStatus> = {
-            let visible_lines = viewport_h;
-            let mut status = std::collections::HashMap::new();
-            for i in 0..visible_lines {
-                let line_idx = app.tab().scroll_row + i;
-                if let Some(s) = app.git_line_status(line_idx) {
-                    status.insert(line_idx, s);
+        // Split the editor area if split panes are active.
+        if app.split_active {
+            use crate::app::SplitDirection;
+            let (pane_a, pane_b) = match app.split_direction {
+                SplitDirection::Vertical => {
+                    let hsplit = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(editor_area);
+                    (hsplit[0], hsplit[1])
                 }
-            }
-            status
-        };
+                SplitDirection::Horizontal => {
+                    let vsplit = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(editor_area);
+                    (vsplit[0], vsplit[1])
+                }
+            };
 
-        draw_editor(frame, app, editor_content_area, &git_status);
-        draw_peer_cursors(frame, app, editor_content_area);
+            let primary_idx = app.tabs.active_index();
+            let secondary_idx = app.split_tab_idx.min(app.tabs.count().saturating_sub(1));
+            let primary_focused = !app.split_focus_secondary
+                && !app.terminal_focused
+                && !app.file_tree_focused
+                && !app.source_control_focused;
+            let secondary_focused = app.split_focus_secondary
+                && !app.terminal_focused
+                && !app.file_tree_focused
+                && !app.source_control_focused;
 
-        // Draw minimap with diagnostic markers (if enabled).
-        if let Some(minimap_rect) = minimap_area {
-            let theme = &app.theme;
-            let total_lines = app.buffer().line_count();
-            let scroll_row = app.tab().scroll_row;
-
-            let mut markers: Vec<(usize, Color)> = Vec::new();
-            for d in &app.tab().diagnostics {
-                let color = if d.is_error() {
-                    theme.error
-                } else if d.is_warning() {
-                    theme.warning
-                } else {
-                    theme.info
-                };
-                markers.push((d.range.start.line as usize, color));
-            }
-            markers.sort_by_key(|&(line, color)| {
-                let prio = match color {
-                    c if c == theme.error => 2u8,
-                    c if c == theme.warning => 1,
-                    _ => 0,
-                };
-                (prio, line)
-            });
-
-            draw_minimap(
-                frame,
-                minimap_rect,
-                &markers,
-                total_lines,
-                scroll_row,
-                viewport_h,
-            );
+            draw_editor_pane(frame, app, pane_a, primary_idx, primary_focused);
+            draw_editor_pane(frame, app, pane_b, secondary_idx, secondary_focused);
+        } else {
+            let is_focused = !app.terminal_focused
+                && !app.file_tree_focused
+                && !app.source_control_focused
+                && !app.conversation_history_focused;
+            draw_editor_pane(frame, app, editor_area, app.tabs.active_index(), is_focused);
         }
 
         if has_proposal {
@@ -248,19 +199,27 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_status_bar(frame, app, status_area);
         draw_command_bar(frame, app, command_area);
 
+        // Compute the editor inner area for overlays (account for block borders).
+        let editor_inner_for_popups = Rect::new(
+            editor_area.x + 1,
+            editor_area.y + 1,
+            editor_area.width.saturating_sub(2),
+            editor_area.height.saturating_sub(2),
+        );
+
         // Render ghost suggestion if present.
         if let Some(suggestion) = app.current_ghost_suggestion() {
-            draw_ghost_text(frame, app, editor_content_area, suggestion);
+            draw_ghost_text(frame, app, editor_inner_for_popups, suggestion);
         }
 
         // Render hover popup if present.
         if let Some(hover_text) = app.tab().hover_info.clone() {
-            draw_hover_popup(frame, app, editor_content_area, &hover_text);
+            draw_hover_popup(frame, app, editor_inner_for_popups, &hover_text);
         }
 
         // Render conversation panel if present.
         if let Some(panel) = &app.conversation_panel {
-            draw_conversation_panel(frame, editor_content_area, panel);
+            draw_conversation_panel(frame, editor_inner_for_popups, panel);
         }
 
         // Render file picker overlay if visible.
@@ -311,11 +270,43 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 frame.set_cursor_position((cx, cy));
             }
         } else if app.mode != Mode::Review {
-            // Editor cursor (6 = gutter width), positioned inside the border.
+            // Compute the content area of the focused pane for cursor positioning.
+            let pane_area = if app.split_active {
+                use crate::app::SplitDirection;
+                let (a, b) = match app.split_direction {
+                    SplitDirection::Vertical => {
+                        let s = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                            .split(editor_area);
+                        (s[0], s[1])
+                    }
+                    SplitDirection::Horizontal => {
+                        let s = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                            .split(editor_area);
+                        (s[0], s[1])
+                    }
+                };
+                if app.split_focus_secondary {
+                    b
+                } else {
+                    a
+                }
+            } else {
+                editor_area
+            };
+            // Account for block border (1px each side) + gutter (6).
+            let content_x = pane_area.x + 1 + 6; // border + gutter
+            let content_y = pane_area.y + 1; // border
+            let content_right = pane_area.right().saturating_sub(1); // border
+            let content_bottom = pane_area.bottom().saturating_sub(1); // border
+
             let tab = app.tab();
-            let cursor_x = (tab.cursor.col - tab.scroll_col) as u16 + editor_content_area.x + 6;
-            let cursor_y = (tab.cursor.row - tab.scroll_row) as u16 + editor_content_area.y;
-            if cursor_x < editor_content_area.right() && cursor_y < editor_content_area.bottom() {
+            let cursor_x = (tab.cursor.col.saturating_sub(tab.scroll_col)) as u16 + content_x;
+            let cursor_y = (tab.cursor.row.saturating_sub(tab.scroll_row)) as u16 + content_y;
+            if cursor_x < content_right && cursor_y < content_bottom {
                 frame.set_cursor_position((cursor_x, cursor_y));
             }
         }
@@ -2373,6 +2364,106 @@ fn draw_editor(
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
+}
+
+/// Draw a single editor pane (border + editor content + optional minimap).
+fn draw_editor_pane(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    tab_idx: usize,
+    is_focused: bool,
+) {
+    let tab_idx = tab_idx.min(app.tabs.count().saturating_sub(1));
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
+    let title = format!(" {} ", app.tabs.tabs()[tab_idx].title());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Minimap.
+    let show_minimap = app.config.editor.show_minimap;
+    let (content_area, minimap_area) = if show_minimap {
+        let hsplit = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(inner);
+        (hsplit[0], Some(hsplit[1]))
+    } else {
+        (inner, None)
+    };
+
+    // Scroll the focused pane's tab to keep cursor visible.
+    if is_focused {
+        let gutter_w = 6u16;
+        let vp_h = content_area.height as usize;
+        let vp_w = content_area.width.saturating_sub(gutter_w) as usize;
+        app.scroll_to_cursor(vp_h, vp_w);
+    }
+
+    // Git line status for visible lines.
+    let pane_scroll_row = app.tabs.tabs()[tab_idx].scroll_row;
+    let git_status: std::collections::HashMap<usize, LineStatus> = {
+        let visible = content_area.height as usize;
+        let mut status = std::collections::HashMap::new();
+        for i in 0..visible {
+            let line_idx = pane_scroll_row + i;
+            if let Some(s) = app.git_line_status(line_idx) {
+                status.insert(line_idx, s);
+            }
+        }
+        status
+    };
+
+    draw_editor(frame, app, content_area, &git_status);
+    if is_focused {
+        draw_peer_cursors(frame, app, content_area);
+    }
+
+    // Minimap.
+    if let Some(minimap_rect) = minimap_area {
+        let tab = &app.tabs.tabs()[tab_idx];
+        let theme = &app.theme;
+        let total_lines = tab.buffer.line_count();
+        let scroll_row = tab.scroll_row;
+        let viewport_h = content_area.height as usize;
+
+        let mut markers: Vec<(usize, Color)> = Vec::new();
+        for d in &tab.diagnostics {
+            let color = if d.is_error() {
+                theme.error
+            } else if d.is_warning() {
+                theme.warning
+            } else {
+                theme.info
+            };
+            markers.push((d.range.start.line as usize, color));
+        }
+        markers.sort_by_key(|&(line, color)| {
+            let prio = match color {
+                c if c == theme.error => 2u8,
+                c if c == theme.warning => 1,
+                _ => 0,
+            };
+            (prio, line)
+        });
+
+        draw_minimap(
+            frame,
+            minimap_rect,
+            &markers,
+            total_lines,
+            scroll_row,
+            viewport_h,
+        );
+    }
 }
 
 /// Draw remote peer cursors and selections as overlays on the editor.

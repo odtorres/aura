@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Split panes** — Vertical (`:vsplit`) and horizontal (`:hsplit`) editor splits. View two files or the same file side-by-side. `Ctrl+W` toggles focus between panes. `:only` closes the split. Each pane has its own title, border highlighting, minimap, and scroll position.
 - **Settings modal** — Interactive settings overlay (`Ctrl+,` or `:settings`). Toggle editor options live: minimap, line numbers, authorship markers, tab settings, scroll margin, conversation compaction, update checker. Changes apply immediately.
 - **Optional minimap** — The scrollbar minimap can now be toggled on/off via the settings modal or `show_minimap` in `aura.toml`.
 
