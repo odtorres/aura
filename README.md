@@ -30,10 +30,10 @@ See [TODO.md](TODO.md) for the full roadmap and phase history.
 
 ## Installation
 
-### Homebrew (macOS / Linux)
+### Homebrew (coming soon)
 
 ```bash
-brew install aura-editor/tap/aura
+# brew install aura-editor/tap/aura
 ```
 
 ### Shell installer (macOS / Linux)

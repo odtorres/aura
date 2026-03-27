@@ -24,11 +24,13 @@ Pre-built binaries are available from [GitHub Releases](https://github.com/odtor
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh
 ```
 
-## Homebrew
+## Homebrew (coming soon)
 
 ```bash
-brew install aura-editor/tap/aura
+# brew install aura-editor/tap/aura
 ```
+
+Homebrew support is planned. For now, use the shell installer or cargo install.
 
 ## Building from Source
 
