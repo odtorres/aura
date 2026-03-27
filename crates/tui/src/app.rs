@@ -253,6 +253,12 @@ pub struct App {
     update_receiver: Option<mpsc::Receiver<UpdateStatus>>,
     /// Latest update status (displayed in status bar).
     pub update_status: Option<UpdateStatus>,
+    /// Whether the floating update notification toast is visible.
+    pub update_notification_visible: bool,
+    /// Whether the update confirmation modal is visible.
+    pub update_modal_visible: bool,
+    /// Cached rect for the update notification (for mouse click detection).
+    pub update_notification_rect: Rect,
 }
 
 /// A tool call pending execution or approval.
@@ -477,6 +483,9 @@ impl App {
             search_current: 0,
             update_receiver: None,
             update_status: None,
+            update_notification_visible: false,
+            update_modal_visible: false,
+            update_notification_rect: Rect::default(),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -2281,16 +2290,43 @@ impl App {
     fn poll_update_check(&mut self) {
         if let Some(ref rx) = self.update_receiver {
             if let Ok(status) = rx.try_recv() {
-                if let UpdateStatus::Available { ref version, .. } = status {
-                    self.set_status(format!(
-                        "AURA v{} available \u{2014} :update for details",
-                        version
-                    ));
+                if matches!(status, UpdateStatus::Available { .. }) {
+                    self.update_notification_visible = true;
                 }
                 self.update_status = Some(status);
                 // Drop the receiver — we only need one result per session.
                 self.update_receiver = None;
             }
+        }
+    }
+
+    /// Dismiss the update notification toast.
+    pub fn dismiss_update_notification(&mut self) {
+        self.update_notification_visible = false;
+    }
+
+    /// Show the update confirmation modal.
+    pub fn show_update_modal(&mut self) {
+        self.update_notification_visible = false;
+        self.update_modal_visible = true;
+    }
+
+    /// Run the platform-appropriate update command in the embedded terminal.
+    pub fn run_update(&mut self) {
+        self.update_modal_visible = false;
+        if let Some(UpdateStatus::Available { ref version, .. }) = self.update_status {
+            let method = update::detect_install_method();
+            let cmd = match method {
+                update::InstallMethod::Homebrew => "brew upgrade aura".to_string(),
+                update::InstallMethod::CargoInstall => "cargo install aura".to_string(),
+                update::InstallMethod::Aur => "yay -S aura-editor".to_string(),
+                _ => "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh".to_string(),
+            };
+            self.set_status(format!("Updating to v{}...", version));
+            // Run the update command in the embedded terminal.
+            self.terminal.visible = true;
+            self.terminal_focused = true;
+            self.terminal.send_bytes(format!("{}\n", cmd).as_bytes());
         }
     }
 
@@ -2806,6 +2842,18 @@ impl App {
                 && row >= r.y
                 && row < r.y + r.height
         };
+
+        // Click on the update notification toast → open the update modal.
+        if self.update_notification_visible && point_in(self.update_notification_rect) {
+            self.show_update_modal();
+            return;
+        }
+
+        // If the update modal is visible, clicks outside dismiss it.
+        if self.update_modal_visible {
+            self.update_modal_visible = false;
+            return;
+        }
 
         // Tab bar: clicking a tab switches to it.
         if self.tabs.count() > 1 && point_in(self.tab_bar_rect) {

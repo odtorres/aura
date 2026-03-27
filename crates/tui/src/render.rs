@@ -286,6 +286,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_help(frame, app, area);
         }
 
+        // Render update notification toast.
+        if app.update_notification_visible {
+            draw_update_notification(frame, app, area);
+        }
+
+        // Render update confirmation modal.
+        if app.update_modal_visible {
+            draw_update_modal(frame, app, area);
+        }
+
         // Position the terminal cursor.
         if app.file_picker.visible {
             // No editor cursor while the file picker is open.
@@ -2647,4 +2657,112 @@ mod tests {
         assert_eq!(map_line_to_row(0, 1, 10), Some(0));
         assert_eq!(map_line_to_row(0, 1, 1), Some(0));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Update notification & modal
+// ---------------------------------------------------------------------------
+
+/// Draw a floating notification toast in the top-right corner.
+fn draw_update_notification(frame: &mut Frame, app: &mut App, area: Rect) {
+    let version = match &app.update_status {
+        Some(crate::update::UpdateStatus::Available { version, .. }) => version.clone(),
+        _ => return,
+    };
+
+    let text = format!(" Update v{} available — click to update ", version);
+    let width = (text.len() as u16 + 2).min(area.width);
+    let height = 3u16;
+    let x = area.x + area.width.saturating_sub(width + 1);
+    let y = area.y + 1;
+    let rect = Rect::new(x, y, width, height);
+
+    // Save rect for mouse click detection.
+    app.update_notification_rect = rect;
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" New Version ")
+        .title_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let line = Line::from(vec![
+        Span::styled(
+            format!(" \u{2191} v{} available ", version),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" [click] ", Style::default().fg(Color::DarkGray)),
+    ]);
+    frame.render_widget(Paragraph::new(line), inner);
+}
+
+/// Draw the update confirmation modal (centered popup).
+fn draw_update_modal(frame: &mut Frame, app: &App, area: Rect) {
+    let (version, url) = match &app.update_status {
+        Some(crate::update::UpdateStatus::Available { version, url }) => {
+            (version.clone(), url.clone())
+        }
+        _ => return,
+    };
+
+    let method = crate::update::detect_install_method();
+    let cmd = crate::update::upgrade_instructions(&method, &version);
+
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let height = 9u16;
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Update Available ")
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let current = crate::update::CURRENT_VERSION;
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("  Current: v{}  \u{2192}  New: v{}", current, version),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}", cmd),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}", url),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "  [Y] Update  ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  [N/Esc] Cancel  ", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }

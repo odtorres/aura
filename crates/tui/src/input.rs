@@ -22,6 +22,25 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // When the update modal is visible, intercept Y/N/Esc.
+    if app.update_modal_visible {
+        match code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                app.run_update();
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                app.update_modal_visible = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // Dismiss update notification on any key press.
+    if app.update_notification_visible {
+        app.update_notification_visible = false;
+    }
+
     // When search bar is active, route keys to search input.
     if app.search_active {
         match code {
