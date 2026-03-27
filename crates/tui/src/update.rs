@@ -124,6 +124,35 @@ pub fn spawn_update_check(sender: mpsc::Sender<UpdateStatus>, interval_hours: u6
         .ok();
 }
 
+/// Spawn a background thread that performs a forced update check (bypasses cache)
+/// and sends the result on `sender`.
+pub fn spawn_forced_update_check(sender: mpsc::Sender<UpdateStatus>) {
+    std::thread::Builder::new()
+        .name("update-check-forced".into())
+        .spawn(move || {
+            let status = perform_forced_check();
+            let _ = sender.send(status);
+        })
+        .ok();
+}
+
+/// Perform a forced check, bypassing the cache entirely.
+fn perform_forced_check() -> UpdateStatus {
+    match fetch_latest_release() {
+        Ok((tag, url)) => {
+            let cache = UpdateCache {
+                last_check_unix: now_unix(),
+                latest_version: tag.clone(),
+                release_url: url.clone(),
+                current_version_at_check: CURRENT_VERSION.to_string(),
+            };
+            write_cache(&cache);
+            cache_to_status(&cache)
+        }
+        Err(e) => UpdateStatus::Error(e),
+    }
+}
+
 fn perform_check(interval_hours: u64) -> UpdateStatus {
     let interval_secs = interval_hours * 3600;
 

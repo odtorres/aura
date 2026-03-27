@@ -1807,32 +1807,8 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         // :update / :check-update — show update info and upgrade instructions.
         "update" | "check-update" => {
-            use crate::update::{self, UpdateStatus};
-            match &app.update_status {
-                Some(UpdateStatus::Available { version, url }) => {
-                    let method = update::detect_install_method();
-                    let instr = update::upgrade_instructions(&method, version);
-                    app.set_status(format!(
-                        "v{} \u{2192} v{} | {} | {}",
-                        update::CURRENT_VERSION,
-                        version,
-                        instr,
-                        url
-                    ));
-                }
-                Some(UpdateStatus::UpToDate) => {
-                    app.set_status(format!("AURA v{} is up to date", update::CURRENT_VERSION));
-                }
-                Some(UpdateStatus::Error(e)) => {
-                    app.set_status(format!("Update check failed: {}", e));
-                }
-                None => {
-                    app.set_status(format!(
-                        "AURA v{} (update check pending or disabled)",
-                        update::CURRENT_VERSION
-                    ));
-                }
-            }
+            // Force a fresh check (bypasses cache).
+            app.force_update_check();
         }
         // --- Collaboration commands ---
         "host" => {
