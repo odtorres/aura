@@ -27,6 +27,7 @@ The TUI crate handles everything the user sees and interacts with: rendering, in
 | `source_control` | Source control sidebar (git staging, commits) |
 | `chat_panel` | Interactive AI chat panel with multi-turn conversations |
 | `chat_tools` | Tool execution engine for chat panel (read, edit, diagnostics) |
+| `collab` | Real-time collaborative editing — TCP host/client, wire protocol, peer awareness |
 | `session` | Session persistence — save/restore tabs, cursors, UI state |
 
 ## App State Machine
@@ -48,6 +49,7 @@ The `App` struct is the central state container. Key fields:
 - `speculative_engine` — background AI analysis engine
 - `git_repo` — gitoxide repository handle
 - `plugin_manager` — plugin lifecycle management
+- `collab` — collaborative editing session (TCP host/client, peer state)
 - `config` / `theme` — configuration and theme state
 
 ### Mode Enum
@@ -70,9 +72,10 @@ pub enum Mode {
 The main loop (in `App::run`) uses crossterm's event polling with a short timeout to balance responsiveness with CPU usage:
 
 1. Poll for crossterm events (keyboard, mouse, resize)
-2. Check for async events (AI streaming, LSP, MCP)
-3. Dispatch key events to the mode-specific handler
-4. Re-render the frame via ratatui
+2. Check for async events (AI streaming, LSP, MCP, collab sync)
+3. Broadcast cursor/selection awareness to collab peers (throttled)
+4. Dispatch key events to the mode-specific handler
+5. Re-render the frame via ratatui
 
 ## Rendering Pipeline
 
@@ -83,7 +86,8 @@ The `render` module draws the UI using ratatui's immediate-mode rendering:
 3. **Status bar**: Mode indicator, filename, cursor position, git branch, agent count
 4. **Command bar**: Command input (in Command mode) or intent input (in Intent mode)
 5. **Panels**: File tree (left), terminal (bottom), conversation panel (floating)
-6. **Overlays**: File picker, hover info, ghost suggestions, diagnostic popups
+6. **Peer cursors**: Colored blocks with name labels for collaborative editing peers
+7. **Overlays**: File picker, hover info, ghost suggestions, diagnostic popups
 
 ## Input Handling
 

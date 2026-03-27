@@ -27,6 +27,9 @@ pub struct AuraConfig {
     /// Update checker settings.
     #[serde(default)]
     pub update: UpdateConfig,
+    /// Collaboration settings.
+    #[serde(default)]
+    pub collab: CollabConfig,
 }
 
 impl Default for AuraConfig {
@@ -38,6 +41,7 @@ impl Default for AuraConfig {
             keybindings: KeybindingConfig::default(),
             mcp_servers: HashMap::new(),
             update: UpdateConfig::default(),
+            collab: CollabConfig::default(),
         }
     }
 }
@@ -57,6 +61,28 @@ impl Default for UpdateConfig {
         Self {
             check_for_updates: true,
             check_interval_hours: 24,
+        }
+    }
+}
+
+/// Collaboration session settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CollabConfig {
+    /// Display name shown to other peers (defaults to hostname).
+    pub display_name: String,
+    /// Default port to listen on when hosting (0 = random available port).
+    pub default_port: u16,
+}
+
+impl Default for CollabConfig {
+    fn default() -> Self {
+        let display_name = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "anonymous".to_string());
+        Self {
+            display_name,
+            default_port: 0,
         }
     }
 }

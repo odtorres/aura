@@ -10,6 +10,7 @@ pub mod conversation;
 pub mod crdt;
 pub mod cursor;
 pub mod semantic;
+pub mod sync;
 
 pub use author::{Author, AuthorColor, AuthorId};
 pub use buffer::Buffer;
@@ -17,3 +18,4 @@ pub use conversation::ConversationStore;
 pub use crdt::CrdtDoc;
 pub use cursor::Cursor;
 pub use semantic::SemanticGraph;
+pub use sync::PeerSyncState;

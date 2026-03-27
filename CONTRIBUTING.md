@@ -49,6 +49,20 @@ crates/
 └── editor/    # Binary entry point
 ```
 
+## Testing Collaborative Editing
+
+To test real-time collaboration locally:
+
+```bash
+# Terminal 1: host a session
+cargo run -p aura -- test_file.rs --host
+
+# Terminal 2: join (port is shown in the host's status bar)
+cargo run -p aura -- --join 127.0.0.1:<port>
+```
+
+Both instances will sync edits in real-time. The collab module (`crates/tui/src/collab.rs`) uses the same thread + mpsc channel pattern as the MCP server — see `mcp_server.rs` for reference.
+
 ## Submitting Changes
 
 - Small, focused commits — one logical change per commit

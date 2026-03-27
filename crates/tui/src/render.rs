@@ -20,8 +20,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
     let has_terminal = app.terminal.visible;
     let terminal_height = if has_terminal { app.terminal.height } else { 0 };
-    let has_tab_bar = app.tabs.count() > 1;
-    let tab_bar_height: u16 = if has_tab_bar { 1 } else { 0 };
+    let tab_bar_height: u16 = 1;
 
     let chunks = if has_proposal {
         Layout::default()
@@ -56,13 +55,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let status_area = chunks[4];
     let command_area = chunks[5];
 
-    // Draw tab bar if multiple tabs are open.
-    if has_tab_bar {
-        app.tab_bar_rect = tab_bar_area;
-        draw_tab_bar(frame, app, tab_bar_area);
-    } else {
-        app.tab_bar_rect = Rect::default();
-    }
+    // Always draw the tab bar.
+    app.tab_bar_rect = tab_bar_area;
+    draw_tab_bar(frame, app, tab_bar_area);
 
     // If the file tree is visible, split the editor area horizontally.
     let (file_tree_area, editor_area_outer) = if app.file_tree.visible {
@@ -195,6 +190,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         };
 
         draw_editor(frame, app, editor_content_area, &git_status);
+        draw_peer_cursors(frame, app, editor_content_area);
 
         // Draw minimap with diagnostic markers.
         {
@@ -294,6 +290,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // Render update confirmation modal.
         if app.update_modal_visible {
             draw_update_modal(frame, app, area);
+        }
+
+        // Render close-tab confirmation modal.
+        if app.tab_close_confirm.is_some() {
+            draw_close_tab_modal(frame, app, area);
         }
 
         // Position the terminal cursor.
@@ -626,7 +627,7 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 /// Draw the tab bar showing all open tabs.
-fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_tab_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     if area.height == 0 {
         return;
     }
@@ -636,6 +637,7 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span> = Vec::new();
     let max_width = area.width as usize;
     let mut used_width = 0;
+    let mut close_btn_ranges: Vec<(usize, u16, u16)> = Vec::new();
 
     for (i, tab) in tabs.iter().enumerate() {
         let is_active = i == active_idx;
@@ -644,9 +646,13 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             format!(" {} ", tab.title())
         };
-
+        // Close button: " × "
+        let close_btn = "\u{00d7} ";
         let label_len = label.len();
-        if used_width + label_len + 1 > max_width {
+        let close_len = close_btn.len();
+        let total_len = label_len + close_len;
+
+        if used_width + total_len + 1 > max_width {
             // Truncate with indicator.
             if used_width < max_width {
                 let remaining = max_width - used_width;
@@ -669,13 +675,26 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         };
         spans.push(Span::styled(label, style));
 
+        // Close button with distinct styling.
+        let close_x_start = area.x + used_width as u16 + label_len as u16;
+        let close_x_end = close_x_start + close_len as u16;
+        close_btn_ranges.push((i, close_x_start, close_x_end));
+        let close_style = if is_active {
+            Style::default().fg(Color::Red).bg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(close_btn, close_style));
+
         // Separator between tabs.
         if i + 1 < tabs.len() {
             spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
             used_width += 1;
         }
-        used_width += label_len;
+        used_width += total_len;
     }
+
+    app.tab_close_btn_ranges = close_btn_ranges;
 
     let line = ratatui::text::Line::from(spans);
     let bg_style = Style::default().bg(Color::Black);
@@ -2012,6 +2031,18 @@ fn author_color(author: &AuthorId, theme: &Theme) -> Color {
     match author {
         AuthorId::Human => theme.author_human,
         AuthorId::Ai(_) => theme.author_ai,
+        AuthorId::Peer { peer_id, .. } => {
+            use aura_core::AuthorColor;
+            match AuthorColor::for_peer(*peer_id) {
+                AuthorColor::Cyan => Color::Cyan,
+                AuthorColor::Magenta => Color::Magenta,
+                AuthorColor::Orange => Color::Indexed(208),
+                AuthorColor::Teal => Color::Indexed(30),
+                AuthorColor::Purple => Color::Indexed(141),
+                AuthorColor::Yellow => Color::Yellow,
+                _ => Color::Gray,
+            }
+        }
     }
 }
 
@@ -2189,6 +2220,98 @@ fn draw_editor(
     frame.render_widget(paragraph, area);
 }
 
+/// Draw remote peer cursors and selections as overlays on the editor.
+fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
+    let peers = app.collab_peer_awareness();
+    if peers.is_empty() {
+        return;
+    }
+
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_area_x = area.x + gutter_width;
+    let text_area_width = area.width.saturating_sub(gutter_width) as usize;
+
+    for peer in &peers {
+        let color = app.collab_peer_color(peer.peer_id);
+
+        // Draw selection highlight if the peer has one.
+        if let Some(((sr, sc), (er, ec))) = peer.selection {
+            let (start_row, start_col, end_row, end_col) = if (sr, sc) <= (er, ec) {
+                (sr, sc, er, ec)
+            } else {
+                (er, ec, sr, sc)
+            };
+
+            for row in start_row..=end_row {
+                if row < scroll_row || row >= scroll_row + visible_rows {
+                    continue;
+                }
+                let screen_y = area.y + (row - scroll_row) as u16;
+
+                let col_start = if row == start_row {
+                    start_col.saturating_sub(scroll_col)
+                } else {
+                    0
+                };
+                let col_end = if row == end_row {
+                    end_col.saturating_sub(scroll_col)
+                } else {
+                    text_area_width
+                };
+
+                for col in col_start..col_end.min(text_area_width) {
+                    let screen_x = text_area_x + col as u16;
+                    if screen_x < area.x + area.width {
+                        let cell = &mut frame.buffer_mut()[(screen_x, screen_y)];
+                        cell.set_bg(color);
+                        cell.set_fg(Color::Black);
+                    }
+                }
+            }
+        }
+
+        // Draw cursor block.
+        if let Some((row, col)) = peer.cursor {
+            if row >= scroll_row
+                && row < scroll_row + visible_rows
+                && col >= scroll_col
+                && col < scroll_col + text_area_width
+            {
+                let screen_y = area.y + (row - scroll_row) as u16;
+                let screen_x = text_area_x + (col - scroll_col) as u16;
+
+                if screen_x < area.x + area.width {
+                    let cell = &mut frame.buffer_mut()[(screen_x, screen_y)];
+                    cell.set_bg(color);
+                    cell.set_fg(Color::Black);
+
+                    // Draw name label above the cursor (if there's room).
+                    if screen_y > area.y {
+                        let label = &peer.name;
+                        let label_len = label.len().min(12);
+                        let label_y = screen_y - 1;
+                        let label_start = screen_x;
+
+                        for (i, ch) in label.chars().take(label_len).enumerate() {
+                            let lx = label_start + i as u16;
+                            if lx < area.x + area.width {
+                                let cell = &mut frame.buffer_mut()[(lx, label_y)];
+                                cell.set_char(ch);
+                                cell.set_bg(color);
+                                cell.set_fg(Color::Black);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Draw the AI proposal pane with diff highlighting.
 fn draw_proposal(frame: &mut Frame, app: &App, area: Rect) {
     let proposal = match &app.proposal {
@@ -2305,8 +2428,25 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         _ => String::new(),
     };
 
+    let collab_indicator = match app.collab_status() {
+        crate::collab::CollabStatus::Hosting { port, peer_count } => {
+            if peer_count > 0 {
+                format!(" │ COLLAB:{port} ({peer_count} peers)")
+            } else {
+                format!(" │ COLLAB:{port}")
+            }
+        }
+        crate::collab::CollabStatus::Connected { peer_count } => {
+            format!(" │ COLLAB ({peer_count} peers)")
+        }
+        crate::collab::CollabStatus::Reconnecting { attempt } => {
+            format!(" │ COLLAB reconnecting #{attempt}...")
+        }
+        crate::collab::CollabStatus::Inactive => String::new(),
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -2315,6 +2455,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         diag_str,
         lsp_indicator,
         mcp_indicator,
+        collab_indicator,
         experiment_indicator,
         update_indicator
     );
@@ -2761,6 +2902,61 @@ fn draw_update_modal(frame: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  [N/Esc] Cancel  ", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Draw the close-tab confirmation modal (centered popup).
+fn draw_close_tab_modal(frame: &mut Frame, app: &App, area: Rect) {
+    let idx = match app.tab_close_confirm {
+        Some(idx) => idx,
+        None => return,
+    };
+    let tab_name = if idx < app.tabs.count() {
+        app.tabs.tabs()[idx].file_name().to_string()
+    } else {
+        return;
+    };
+
+    let width = 50u16.min(area.width.saturating_sub(4));
+    let height = 7u16;
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Unsaved Changes ")
+        .title_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("  \"{}\" has unsaved changes.", tab_name),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "  [S] Save & Close  ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  [D] Discard  ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  [Esc] Cancel  ", Style::default().fg(Color::DarkGray)),
         ]),
     ];
 

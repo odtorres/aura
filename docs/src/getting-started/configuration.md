@@ -37,6 +37,10 @@ t = "test"
 [keybindings.normal_map]
 # Custom normal mode key → action mappings
 
+[collab]
+display_name = "alice"
+default_port = 0
+
 [mcp_servers]
 # External MCP server connections
 # [mcp_servers.my-server]
@@ -146,6 +150,16 @@ url = "ws://localhost:9001"
 ```
 
 AURA also runs its own MCP server, exposing editor tools and resources. See [MCP Protocol](../architecture/mcp.md) for details.
+
+## Collaboration
+
+```toml
+[collab]
+display_name = "alice"    # Name shown to peers (default: $USER)
+default_port = 0          # Port to host on (0 = random available)
+```
+
+See [Collaborative Editing](../user-guide/collaborative-editing.md) for usage details.
 
 ## Session Persistence
 

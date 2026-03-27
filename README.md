@@ -16,13 +16,14 @@ Current editors treat AI as a plugin — a guest in a house built for a single h
 - **Multi-agent collaboration**: Multiple AI agents can work simultaneously via CRDT, with conflict-free concurrent editing.
 - **Speculative execution**: The AI thinks ahead in the background, offering improvement suggestions as ghost text overlays.
 - **Interactive chat panel**: Conversational AI with tool execution and approval flow, right inside the editor.
+- **Real-time collaborative editing**: Multiple AURA instances can edit the same file simultaneously over TCP, with automerge CRDT conflict resolution, colored peer cursors, and automatic reconnection.
 - **Session persistence**: Open tabs, cursor positions, and UI layout are saved on exit and restored on reopen.
 
 <!-- ANCHOR: overview-end -->
 
 ## Status
 
-**All development phases complete.** AURA is a fully-featured AI-native editor with CRDT-based multi-author editing, Anthropic AI integration, Tree-sitter syntax highlighting, LSP support, MCP protocol, speculative execution, git integration, an embedded PTY terminal, and a plugin system.
+**All development phases complete.** AURA is a fully-featured AI-native editor with CRDT-based multi-author editing, Anthropic AI integration, Tree-sitter syntax highlighting, LSP support, MCP protocol, speculative execution, git integration, an embedded PTY terminal, real-time collaborative editing, and a plugin system.
 
 See [TODO.md](TODO.md) for the full roadmap and phase history.
 
@@ -60,6 +61,15 @@ aura path/to/file.rs
 
 # Open scratch buffer
 aura
+
+# Collaborative editing: host a session
+aura path/to/file.rs --host
+
+# Collaborative editing: join a session
+aura --join 127.0.0.1:12345
+
+# Set your display name for collab
+aura path/to/file.rs --host --name alice
 
 # Or run from source
 cargo run -p aura -- path/to/file.rs
@@ -187,6 +197,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `:tree` | Toggle file tree |
 | `:term-height <N>` / `:th <N>` | Set terminal height |
 | `:chat` | Toggle chat panel |
+| `:host` | Start hosting a collab session |
+| `:join <addr:port>` | Join a collab session |
+| `:collab-stop` | End the collab session |
 
 ### Review Mode (AI Proposals)
 

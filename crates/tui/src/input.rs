@@ -22,6 +22,23 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // When the close-tab confirmation modal is visible, intercept S/D/Esc.
+    if app.tab_close_confirm.is_some() {
+        match code {
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                app.handle_close_confirm_save();
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                app.handle_close_confirm_discard();
+            }
+            KeyCode::Esc => {
+                app.handle_close_confirm_cancel();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // When the update modal is visible, intercept Y/N/Esc.
     if app.update_modal_visible {
         match code {
@@ -1817,8 +1834,20 @@ fn execute_command(app: &mut App, cmd: &str) {
                 }
             }
         }
+        // --- Collaboration commands ---
+        "host" => {
+            app.start_collab_host();
+        }
+        "collab-stop" | "collab stop" => {
+            app.stop_collab();
+        }
         other => {
-            app.set_status(format!("Unknown command: {}", other));
+            // Handle commands with arguments.
+            if let Some(addr) = other.strip_prefix("join ") {
+                app.join_collab_session(addr.trim());
+            } else {
+                app.set_status(format!("Unknown command: {}", other));
+            }
         }
     }
 }

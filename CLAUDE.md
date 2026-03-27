@@ -26,9 +26,9 @@ editor → tui → core
 
 ## Current Phase
 
-**Post-Phase 9: Polish & Distribution**
+**Phase 10: Real-Time Collaborative Editing**
 
-AURA is a fully-featured terminal editor with vim-like modal editing, AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting, LSP integration, MCP server/client, embedded terminal, git integration, plugin system, and semantic indexing. Remaining work focuses on distribution packaging (Phase 8.5 unchecked items in `TODO.md`).
+AURA is a fully-featured terminal editor with vim-like modal editing, AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting, LSP integration, MCP server/client, embedded terminal, git integration, plugin system, and semantic indexing. Phase 10 adds real-time collaborative editing using the existing automerge CRDT. Phase 10 (collaborative editing) is complete: CRDT sync, TCP networking, peer awareness (cursors/selections), reconnection with exponential backoff, and incremental rope reconciliation.
 
 See `TODO.md` for the full roadmap.
 
@@ -82,7 +82,7 @@ See `TODO.md` for the full roadmap.
 
 ### Buffer architecture
 
-The buffer uses `ropey` (rope data structure) for efficient text manipulation. Every edit is tagged with an `AuthorId` (human or AI agent). Automerge (CRDT) is layered on top for conflict-free multi-author editing.
+The buffer uses `ropey` (rope data structure) for efficient text manipulation. Every edit is tagged with an `AuthorId` (Human, AI agent, or remote Peer). Automerge (CRDT) is layered on top for conflict-free multi-author editing and real-time collaborative sync.
 
 ### Modal editing
 
@@ -91,6 +91,10 @@ Vim-inspired but not a vim clone. We implement the essential modes (Normal, Inse
 ### AI integration pattern
 
 The core editing loop is: **express intent → AI proposes → human reviews → accept/reject/refine**. AI edits stream in via the Anthropic API and are rendered as ghost text or in a diff view. All AI changes are tracked separately in the CRDT so they can be undone independently.
+
+### Collaborative editing architecture
+
+Real-time collaboration uses a host-client topology over TCP. One AURA instance hosts (`--host`), others join (`--join addr:port`). The wire protocol is binary-framed (4-byte length + type byte + payload) carrying automerge sync messages and JSON awareness updates. The host spawns per-client handler threads; the client has a reader thread with automatic reconnection (exponential backoff 1s→30s). All network I/O uses `std::thread` + `std::sync::mpsc` — the same pattern as MCP and LSP. Remote edits are applied via automerge's sync protocol with incremental rope reconciliation (only the changed character range is patched). Peer cursors and selections are rendered as colored overlays with name labels.
 
 ## File Structure Reference
 
@@ -112,6 +116,7 @@ aura-editor/
     │       ├── cursor.rs       # Cursor and selection
     │       ├── author.rs       # AuthorId and Author types
     │       ├── crdt.rs         # CrdtDoc wrapping automerge
+    │       ├── sync.rs         # Collaborative sync primitives (PeerSyncState)
     │       ├── conversation.rs # SQLite-backed conversation/decision history
     │       └── semantic.rs     # Lightweight dependency graph
     ├── tui/
@@ -138,6 +143,7 @@ aura-editor/
     │       ├── embedded_terminal.rs    # PTY terminal (portable-pty + VTE)
     │       ├── chat_panel.rs           # Interactive AI chat panel
     │       ├── chat_tools.rs           # Tool execution for chat panel
+    │       ├── collab.rs              # Real-time collaborative editing (TCP sync)
     │       ├── session.rs              # Session persistence (save/restore)
     │       └── help.rs                 # In-editor help overlay
     ├── ai/

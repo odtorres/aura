@@ -9,10 +9,17 @@ use serde::{Deserialize, Serialize};
 /// Identifies who made an edit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AuthorId {
-    /// The human user.
+    /// The local human user.
     Human,
     /// An AI agent, identified by name.
     Ai(String),
+    /// A remote human peer in a collaborative session.
+    Peer {
+        /// Human-readable display name.
+        name: String,
+        /// Unique peer identifier (derived from automerge ActorId).
+        peer_id: u64,
+    },
 }
 
 impl AuthorId {
@@ -26,7 +33,15 @@ impl AuthorId {
         Self::Ai(name.into())
     }
 
-    /// Returns true if this is the human author.
+    /// Create a remote peer author ID.
+    pub fn peer(name: impl Into<String>, peer_id: u64) -> Self {
+        Self::Peer {
+            name: name.into(),
+            peer_id,
+        }
+    }
+
+    /// Returns true if this is the local human author.
     pub fn is_human(&self) -> bool {
         matches!(self, Self::Human)
     }
@@ -36,11 +51,17 @@ impl AuthorId {
         matches!(self, Self::Ai(_))
     }
 
-    /// Human-readable name ("you" or the agent name).
+    /// Returns true if this is a remote peer author.
+    pub fn is_peer(&self) -> bool {
+        matches!(self, Self::Peer { .. })
+    }
+
+    /// Human-readable name ("you", agent name, or peer name).
     pub fn display_name(&self) -> &str {
         match self {
             Self::Human => "you",
             Self::Ai(name) => name.as_str(),
+            Self::Peer { name, .. } => name.as_str(),
         }
     }
 }
@@ -71,6 +92,29 @@ pub enum AuthorColor {
     Purple,
     /// Yellow — extra author slot.
     Yellow,
+    /// Cyan — for remote peers.
+    Cyan,
+    /// Magenta — for remote peers.
+    Magenta,
+    /// Orange — for remote peers.
+    Orange,
+    /// Teal — for remote peers.
+    Teal,
+}
+
+impl AuthorColor {
+    /// Assign a color to a peer based on their ID (rotating palette).
+    pub fn for_peer(peer_id: u64) -> Self {
+        const PEER_COLORS: &[AuthorColor] = &[
+            AuthorColor::Cyan,
+            AuthorColor::Magenta,
+            AuthorColor::Orange,
+            AuthorColor::Teal,
+            AuthorColor::Purple,
+            AuthorColor::Yellow,
+        ];
+        PEER_COLORS[(peer_id as usize) % PEER_COLORS.len()]
+    }
 }
 
 impl Author {
@@ -87,6 +131,14 @@ impl Author {
         Self {
             id: AuthorId::ai(name),
             color: AuthorColor::Blue,
+        }
+    }
+
+    /// Create an Author representing a remote peer.
+    pub fn peer(name: impl Into<String>, peer_id: u64) -> Self {
+        Self {
+            id: AuthorId::peer(name, peer_id),
+            color: AuthorColor::for_peer(peer_id),
         }
     }
 }

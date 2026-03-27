@@ -550,6 +550,117 @@ impl Buffer {
         &mut self.crdt
     }
 
+    // ----- Collaborative sync -----
+
+    /// Apply a sync message from a remote peer, reconciling the rope with the
+    /// CRDT state afterwards.
+    ///
+    /// Uses incremental reconciliation: finds the first and last differing
+    /// characters between the old and new text, then patches only that range
+    /// in the rope. This is O(delta + scan) instead of O(document).
+    pub fn apply_remote_sync(
+        &mut self,
+        sync_state: &mut crate::sync::SyncState,
+        msg: crate::sync::SyncMessage,
+        remote_author: &AuthorId,
+    ) -> Result<(), automerge::AutomergeError> {
+        self.crdt.receive_sync_message(sync_state, msg)?;
+
+        // Get the CRDT text as the source of truth.
+        let new_text = self.crdt.text();
+        let old_text = self.rope.to_string();
+
+        if new_text == old_text {
+            return Ok(());
+        }
+
+        let old_bytes = old_text.as_bytes();
+        let new_bytes = new_text.as_bytes();
+
+        // Find the first byte that differs.
+        let prefix_len = old_bytes
+            .iter()
+            .zip(new_bytes.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+
+        // Find the last byte that differs (scanning from the end).
+        let old_suffix_start = old_bytes.len();
+        let new_suffix_start = new_bytes.len();
+        let max_suffix = (old_suffix_start - prefix_len).min(new_suffix_start - prefix_len);
+        let suffix_len = old_bytes[old_suffix_start.saturating_sub(max_suffix)..]
+            .iter()
+            .rev()
+            .zip(
+                new_bytes[new_suffix_start.saturating_sub(max_suffix)..]
+                    .iter()
+                    .rev(),
+            )
+            .take_while(|(a, b)| a == b)
+            .count();
+
+        let old_change_end = old_suffix_start - suffix_len;
+        let new_change_end = new_suffix_start - suffix_len;
+
+        // Convert byte offsets to char offsets in the rope.
+        let char_start = old_text[..prefix_len].chars().count();
+        let char_old_end = old_text[..old_change_end].chars().count();
+        let insert_text = &new_text[prefix_len..new_change_end];
+
+        // Apply the minimal patch to the rope.
+        if char_old_end > char_start {
+            self.rope.remove(char_start..char_old_end);
+        }
+        if !insert_text.is_empty() {
+            self.rope.insert(char_start, insert_text);
+        }
+
+        // Update line authors for affected lines.
+        let line_count = self.rope.len_lines().max(1);
+        if self.history.is_empty() {
+            self.line_authors = vec![remote_author.clone(); line_count];
+        } else {
+            // Determine affected line range and mark those as remote.
+            let affected_line_start = self.rope.char_to_line(char_start);
+            let affected_line_end =
+                if char_start + insert_text.chars().count() <= self.rope.len_chars() {
+                    self.rope
+                        .char_to_line(char_start + insert_text.chars().count())
+                } else {
+                    line_count.saturating_sub(1)
+                };
+
+            // Resize line_authors to match.
+            self.line_authors.resize(line_count, remote_author.clone());
+            for line in affected_line_start..=affected_line_end.min(line_count.saturating_sub(1)) {
+                if line < self.line_authors.len() {
+                    self.line_authors[line] = remote_author.clone();
+                }
+            }
+        }
+
+        self.modified = true;
+        Ok(())
+    }
+
+    /// Load a full document snapshot from a remote host (initial sync).
+    ///
+    /// Replaces both the CRDT and rope with the snapshot content.
+    pub fn load_remote_snapshot(&mut self, bytes: &[u8]) -> Result<(), automerge::AutomergeError> {
+        let new_crdt = CrdtDoc::load_bytes(bytes)?;
+        let text = new_crdt.text();
+        let line_count = text.lines().count().max(1);
+
+        self.crdt = new_crdt;
+        self.rope = Rope::from_str(&text);
+        self.line_authors = vec![AuthorId::human(); line_count];
+        self.history.clear();
+        self.history_pos = 0;
+        self.modified = false;
+
+        Ok(())
+    }
+
     /// Get the edit history (visible portion up to history_pos).
     pub fn history(&self) -> &[Edit] {
         &self.history[..self.history_pos]
@@ -688,6 +799,9 @@ impl Buffer {
             let author_label = match &edit.author {
                 crate::author::AuthorId::Human => "human".to_string(),
                 crate::author::AuthorId::Ai(name) => format!("ai:{name}"),
+                crate::author::AuthorId::Peer { name, peer_id } => {
+                    format!("peer:{name}#{peer_id}")
+                }
             };
             let action_label = match &edit.kind {
                 EditKind::Insert { text, .. } => {
@@ -931,6 +1045,96 @@ mod tests {
         let count = buf.replace_all("foo", "bar", 0, 4, human());
         assert_eq!(count, 1);
         assert_eq!(buf.text(), "bar\nfoo\nfoo");
+    }
+
+    #[test]
+    fn test_buffer_remote_sync() {
+        // Create two buffers sharing the same CRDT origin.
+        let mut buf_a = Buffer::new();
+        buf_a.insert(0, "hello", human());
+
+        // Fork the CRDT to create buf_b's initial state.
+        let snapshot = buf_a.crdt_mut().save_bytes();
+        let mut buf_b = Buffer::new();
+        buf_b.load_remote_snapshot(&snapshot).unwrap();
+        assert_eq!(buf_b.text(), "hello");
+
+        // Make an edit on A.
+        buf_a.insert(5, " world", human());
+        assert_eq!(buf_a.text(), "hello world");
+
+        // Sync A → B.
+        let remote_author = AuthorId::peer("alice", 1);
+        let mut state_a = crate::sync::SyncState::new();
+        let mut state_b = crate::sync::SyncState::new();
+
+        for _ in 0..10 {
+            if let Some(m) = buf_a.crdt_mut().generate_sync_message(&mut state_a) {
+                buf_b
+                    .apply_remote_sync(&mut state_b, m, &remote_author)
+                    .unwrap();
+            }
+            if let Some(m) = buf_b.crdt_mut().generate_sync_message(&mut state_b) {
+                buf_a
+                    .apply_remote_sync(&mut state_a, m, &AuthorId::peer("bob", 2))
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(buf_b.text(), "hello world");
+        assert_eq!(buf_a.text(), buf_b.text());
+    }
+
+    #[test]
+    fn test_incremental_sync_small_edit_in_large_doc() {
+        // Create a large document.
+        let mut lines: Vec<String> = (0..100)
+            .map(|i| format!("line {} content here\n", i))
+            .collect();
+        let big_text = lines.join("");
+
+        let mut buf_a = Buffer::new();
+        buf_a.insert(0, &big_text, human());
+
+        let snapshot = buf_a.crdt_mut().save_bytes();
+        let mut buf_b = Buffer::new();
+        buf_b.load_remote_snapshot(&snapshot).unwrap();
+
+        // A makes a small edit in the middle of the document.
+        let edit_line = 50;
+        let line_start = buf_a.rope().line_to_char(edit_line);
+        buf_a.insert(line_start, "INSERTED ", human());
+        lines[edit_line] = format!("INSERTED line {} content here\n", edit_line);
+        let expected = lines.join("");
+
+        // Sync A → B.
+        let remote_author = AuthorId::peer("alice", 1);
+        let mut state_a = crate::sync::SyncState::new();
+        let mut state_b = crate::sync::SyncState::new();
+
+        for _ in 0..10 {
+            if let Some(m) = buf_a.crdt_mut().generate_sync_message(&mut state_a) {
+                buf_b
+                    .apply_remote_sync(&mut state_b, m, &remote_author)
+                    .unwrap();
+            }
+            if let Some(m) = buf_b.crdt_mut().generate_sync_message(&mut state_b) {
+                buf_a
+                    .apply_remote_sync(&mut state_a, m, &AuthorId::peer("bob", 2))
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(buf_b.text(), expected);
+        assert_eq!(buf_a.text(), buf_b.text());
+
+        // Verify that the line_authors for the edited line is the remote author.
+        if let Some(author) = buf_b.line_author(edit_line) {
+            assert!(
+                author.is_peer(),
+                "edited line should be attributed to remote peer"
+            );
+        }
     }
 }
 

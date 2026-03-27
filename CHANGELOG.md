@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Quit-all commands** — `:qa`, `:qa!`, `:wqa` for closing all tabs at once.
 - **Find and replace** with regex support.
 - **Release automation** via cargo-dist — GitHub Actions, shell installer, Homebrew formula, cross-platform builds (macOS, Linux, Windows).
+- **Real-time collaborative editing** — Multiple AURA instances can edit the same file over TCP. Automerge CRDT handles conflict-free merging. Colored peer cursors with name labels, selection highlighting, automatic reconnection with exponential backoff, and incremental rope reconciliation for performance. Start with `--host` / `--join` CLI flags or `:host` / `:join` commands.
+- **Tab close buttons** — Clickable close button on each tab in the tab bar with save/discard confirmation dialog for unsaved changes.
 - **Comprehensive documentation** — mdBook user guide, architecture docs, API reference, all deployed to GitHub Pages.
 
 [0.1.1]: https://github.com/odtorres/aura/releases/tag/v0.1.1

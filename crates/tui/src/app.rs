@@ -229,6 +229,20 @@ pub struct App {
     pub conv_history_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
     pub tab_bar_rect: Rect,
+    /// Close button hit areas: (tab_index, x_start, x_end) in absolute screen coords.
+    pub tab_close_btn_ranges: Vec<(usize, u16, u16)>,
+    /// Tab index pending close confirmation (unsaved changes dialog).
+    pub tab_close_confirm: Option<usize>,
+
+    // --- Collaboration ---
+    /// Active collaboration session (None when not collaborating).
+    pub collab: Option<crate::collab::CollabSession>,
+    /// Last cursor position sent in an awareness update (for change detection).
+    collab_last_cursor: Option<(usize, usize)>,
+    /// Last selection sent in an awareness update.
+    collab_last_selection: Option<((usize, usize), (usize, usize))>,
+    /// Timestamp of last awareness broadcast (for throttling).
+    collab_last_awareness: std::time::Instant,
 
     // --- Bracket matching ---
     /// Position (row, col) of the matching bracket for the char under cursor.
@@ -474,6 +488,12 @@ impl App {
             file_tree_rect: Rect::default(),
             conv_history_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
+            tab_close_btn_ranges: Vec::new(),
+            tab_close_confirm: None,
+            collab: None,
+            collab_last_cursor: None,
+            collab_last_selection: None,
+            collab_last_awareness: std::time::Instant::now(),
             matching_bracket: None,
             search_query: None,
             search_input: String::new(),
@@ -600,6 +620,10 @@ impl App {
             // Poll for MCP server requests and external MCP client events.
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
+
+            // Poll for collaboration events and broadcast awareness.
+            self.poll_collab_events();
+            self.maybe_send_awareness();
 
             // Poll for update check result.
             self.poll_update_check();
@@ -1121,6 +1145,8 @@ impl App {
         if let Some(repo) = &mut self.git_repo {
             repo.invalidate_status();
         }
+        // Broadcast CRDT changes to collab peers.
+        self.broadcast_collab_sync();
     }
 
     /// Regenerate syntax highlights from the current buffer content.
@@ -2849,16 +2875,37 @@ impl App {
             return;
         }
 
+        // If the close-tab confirm modal is visible, clicks outside dismiss it.
+        if self.tab_close_confirm.is_some() {
+            self.tab_close_confirm = None;
+            return;
+        }
+
         // If the update modal is visible, clicks outside dismiss it.
         if self.update_modal_visible {
             self.update_modal_visible = false;
             return;
         }
 
-        // Tab bar: clicking a tab switches to it.
-        if self.tabs.count() > 1 && point_in(self.tab_bar_rect) {
+        // Tab bar: check close buttons first, then tab switching.
+        if point_in(self.tab_bar_rect) {
+            // Check if click is on a close button.
+            for &(tab_idx, x_start, x_end) in &self.tab_close_btn_ranges {
+                if col >= x_start && col < x_end && row == self.tab_bar_rect.y {
+                    // Close button clicked — check for unsaved changes.
+                    if tab_idx < self.tabs.count() && self.tabs.tabs()[tab_idx].is_modified() {
+                        self.tab_close_confirm = Some(tab_idx);
+                    } else if self.close_tab_by_index(tab_idx) {
+                        self.should_quit = true;
+                    }
+                    return;
+                }
+            }
+
+            // Otherwise, switch to the clicked tab.
             let click_x = (col - self.tab_bar_rect.x) as usize;
             let max_width = self.tab_bar_rect.width as usize;
+            let close_btn_len = 2; // "× " length
             let mut x = 0usize;
             for (i, tab) in self.tabs.tabs().iter().enumerate() {
                 let label = if i < 9 {
@@ -2867,14 +2914,15 @@ impl App {
                     format!(" {} ", tab.title())
                 };
                 let label_len = label.len();
-                if x + label_len + 1 > max_width {
+                let total_len = label_len + close_btn_len;
+                if x + total_len + 1 > max_width {
                     break;
                 }
                 if click_x >= x && click_x < x + label_len {
                     self.tabs.switch_to(i);
                     return;
                 }
-                x += label_len;
+                x += total_len;
                 // Separator character.
                 if i + 1 < self.tabs.count() {
                     x += 1;
@@ -4186,6 +4234,299 @@ impl App {
         }
     }
 
+    // ----- Collaboration -----
+
+    /// Start hosting a collaboration session.
+    pub fn start_collab_host(&mut self) {
+        let name = self.config.collab.display_name.clone();
+        let port = self.config.collab.default_port;
+        let snapshot = self.tab_mut().buffer.crdt_mut().save_bytes();
+
+        match crate::collab::CollabSession::host(&name, port, snapshot) {
+            Ok(session) => {
+                let port = session.port.unwrap_or(0);
+                self.collab = Some(session);
+                self.set_status(format!("Hosting collab session on port {port}"));
+            }
+            Err(e) => self.set_status(format!("Failed to host: {e}")),
+        }
+    }
+
+    /// Join an existing collaboration session.
+    pub fn join_collab_session(&mut self, addr: &str) {
+        let name = self.config.collab.display_name.clone();
+
+        match crate::collab::CollabSession::join(&name, addr) {
+            Ok(session) => {
+                self.collab = Some(session);
+                self.set_status(format!("Joining collab session at {addr}"));
+            }
+            Err(e) => self.set_status(format!("Failed to join: {e}")),
+        }
+    }
+
+    /// Stop the current collaboration session.
+    pub fn stop_collab(&mut self) {
+        if let Some(session) = self.collab.take() {
+            session.shutdown();
+            self.set_status("Collab session ended");
+        }
+    }
+
+    /// Poll for collaboration events (called from the main event loop).
+    fn poll_collab_events(&mut self) {
+        let events = match &self.collab {
+            Some(session) => session.poll_events(),
+            None => return,
+        };
+
+        for event in events {
+            match event {
+                crate::collab::CollabEvent::SyncMessage { peer_id, data } => {
+                    // Decode the automerge sync message and apply it.
+                    let msg = match aura_core::sync::SyncMessage::decode(&data) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::warn!("Failed to decode sync message: {e:?}");
+                            continue;
+                        }
+                    };
+
+                    // Take the sync state out to avoid borrow conflict.
+                    let mut sync_state = if let Some(session) = &mut self.collab {
+                        if !session.peers.contains_key(&peer_id) {
+                            session.add_peer(peer_id, format!("peer-{peer_id}"));
+                        }
+                        std::mem::take(&mut session.peers.get_mut(&peer_id).unwrap().sync_state)
+                    } else {
+                        continue;
+                    };
+
+                    let remote_author =
+                        aura_core::AuthorId::peer(format!("peer-{peer_id}"), peer_id);
+                    if let Err(e) = self.tab_mut().buffer.apply_remote_sync(
+                        &mut sync_state,
+                        msg,
+                        &remote_author,
+                    ) {
+                        tracing::warn!("Failed to apply sync message: {e}");
+                    } else {
+                        self.tab_mut().mark_highlights_dirty();
+                    }
+
+                    // Generate a response sync message.
+                    let reply = self
+                        .tabs
+                        .active_mut()
+                        .buffer
+                        .crdt_mut()
+                        .generate_sync_message(&mut sync_state);
+
+                    // Put the sync state back and send reply.
+                    if let Some(session) = &mut self.collab {
+                        if let Some(peer) = session.peers.get_mut(&peer_id) {
+                            peer.sync_state = sync_state;
+                        }
+                        if let Some(reply_msg) = reply {
+                            session.broadcast_sync(reply_msg.encode());
+                        }
+                    }
+                }
+                crate::collab::CollabEvent::DocSnapshot(data) => {
+                    // Client received initial snapshot from host.
+                    if let Err(e) = self.tab_mut().buffer.load_remote_snapshot(&data) {
+                        tracing::warn!("Failed to load snapshot: {e}");
+                        self.set_status(format!("Failed to load snapshot: {e}"));
+                    } else {
+                        self.tab_mut().mark_highlights_dirty();
+                        self.set_status("Document synced from host");
+
+                        // Generate an initial sync message.
+                        let mut state = aura_core::sync::SyncState::new();
+                        let msg = self
+                            .tabs
+                            .active_mut()
+                            .buffer
+                            .crdt_mut()
+                            .generate_sync_message(&mut state);
+
+                        // Store the sync state and send the message.
+                        if let Some(session) = &mut self.collab {
+                            session.add_peer(0, "host".to_string());
+                            session.peers.get_mut(&0).unwrap().sync_state = state;
+                            if let Some(m) = msg {
+                                session.broadcast_sync(m.encode());
+                            }
+                        }
+                    }
+                }
+                crate::collab::CollabEvent::PeerJoined { peer_id, name } => {
+                    if let Some(session) = &mut self.collab {
+                        session.add_peer(peer_id, name.clone());
+                    }
+                    self.set_status(format!("Peer joined: {name}"));
+                }
+                crate::collab::CollabEvent::PeerLeft { peer_id } => {
+                    let name = self
+                        .collab
+                        .as_ref()
+                        .and_then(|s| s.peers.get(&peer_id))
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| format!("peer-{peer_id}"));
+                    if let Some(session) = &mut self.collab {
+                        session.remove_peer(peer_id);
+                    }
+                    self.set_status(format!("Peer left: {name}"));
+                }
+                crate::collab::CollabEvent::Awareness(update) => {
+                    if let Some(session) = &mut self.collab {
+                        session.update_peer_awareness(update);
+                    }
+                }
+                crate::collab::CollabEvent::Reconnecting { attempt } => {
+                    if let Some(session) = &mut self.collab {
+                        session.reconnecting = true;
+                        session.reconnect_attempt = attempt;
+                    }
+                    self.set_status(format!("Collab: reconnecting (attempt {attempt})..."));
+                }
+                crate::collab::CollabEvent::Reconnected => {
+                    if let Some(session) = &mut self.collab {
+                        session.reconnecting = false;
+                        session.reconnect_attempt = 0;
+                    }
+                    self.set_status("Collab: reconnected!");
+                }
+                crate::collab::CollabEvent::Error(msg) => {
+                    tracing::warn!("Collab error: {msg}");
+                    self.set_status(format!("Collab: {msg}"));
+                }
+            }
+        }
+
+        // Periodically clean up expired disconnected peer states (host only).
+        if let Some(session) = &mut self.collab {
+            if session.is_host {
+                session.cleanup_disconnected_peers();
+            }
+        }
+    }
+
+    /// Broadcast local CRDT changes to all peers.
+    fn broadcast_collab_sync(&mut self) {
+        if self.collab.is_none() {
+            return;
+        }
+        // Collect peer IDs first.
+        let peer_ids: Vec<u64> = self
+            .collab
+            .as_ref()
+            .map(|s| s.peers.keys().copied().collect())
+            .unwrap_or_default();
+
+        for peer_id in peer_ids {
+            // Take the sync state out to avoid borrow conflict.
+            let mut sync_state = if let Some(session) = &mut self.collab {
+                if let Some(peer) = session.peers.get_mut(&peer_id) {
+                    std::mem::take(&mut peer.sync_state)
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+
+            let msg = self
+                .tabs
+                .active_mut()
+                .buffer
+                .crdt_mut()
+                .generate_sync_message(&mut sync_state);
+
+            // Put the sync state back and send.
+            if let Some(session) = &mut self.collab {
+                if let Some(peer) = session.peers.get_mut(&peer_id) {
+                    peer.sync_state = sync_state;
+                }
+                if let Some(m) = msg {
+                    session.broadcast_sync(m.encode());
+                }
+            }
+        }
+    }
+
+    /// Send an awareness update if cursor/selection changed (throttled to 50ms).
+    fn maybe_send_awareness(&mut self) {
+        if self.collab.is_none() {
+            return;
+        }
+
+        let now = std::time::Instant::now();
+        if now.duration_since(self.collab_last_awareness) < Duration::from_millis(50) {
+            return;
+        }
+
+        let tab = self.tab();
+        let cursor = (tab.cursor.row, tab.cursor.col);
+        let selection = tab
+            .visual_anchor
+            .as_ref()
+            .map(|anchor| ((anchor.row, anchor.col), (tab.cursor.row, tab.cursor.col)));
+
+        // Only send if changed.
+        if self.collab_last_cursor == Some(cursor) && self.collab_last_selection == selection {
+            return;
+        }
+
+        self.collab_last_cursor = Some(cursor);
+        self.collab_last_selection = selection;
+        self.collab_last_awareness = now;
+
+        if let Some(session) = &self.collab {
+            let update = crate::collab::AwarenessUpdate {
+                peer_id: session.local_peer_id,
+                name: session.local_name.clone(),
+                cursor: Some(cursor),
+                selection,
+            };
+            session.broadcast_awareness(update);
+        }
+    }
+
+    /// Get all peer awareness states for rendering.
+    pub fn collab_peer_awareness(&self) -> Vec<&crate::collab::AwarenessUpdate> {
+        match &self.collab {
+            Some(session) => session
+                .peers
+                .values()
+                .filter_map(|p| p.awareness.as_ref())
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Get peer color by peer_id.
+    pub fn collab_peer_color(&self, peer_id: u64) -> ratatui::style::Color {
+        use aura_core::AuthorColor;
+        match AuthorColor::for_peer(peer_id) {
+            AuthorColor::Cyan => ratatui::style::Color::Cyan,
+            AuthorColor::Magenta => ratatui::style::Color::Magenta,
+            AuthorColor::Orange => ratatui::style::Color::Indexed(208),
+            AuthorColor::Teal => ratatui::style::Color::Indexed(30),
+            AuthorColor::Purple => ratatui::style::Color::Indexed(141),
+            AuthorColor::Yellow => ratatui::style::Color::Yellow,
+            _ => ratatui::style::Color::Gray,
+        }
+    }
+
+    /// Get the collab status for UI display.
+    pub fn collab_status(&self) -> crate::collab::CollabStatus {
+        self.collab
+            .as_ref()
+            .map(|s| s.status())
+            .unwrap_or(crate::collab::CollabStatus::Inactive)
+    }
+
     /// Close the current tab. Returns `true` if the app should quit.
     pub fn close_current_tab(&mut self) -> bool {
         if self.tab().is_modified() {
@@ -4205,5 +4546,60 @@ impl App {
             return true;
         }
         false
+    }
+
+    /// Force-close a tab by index. Returns `true` if the app should quit.
+    pub fn close_tab_by_index(&mut self, idx: usize) -> bool {
+        if idx >= self.tabs.count() {
+            return false;
+        }
+        // Shutdown LSP for the target tab.
+        self.tabs.tabs_mut()[idx].shutdown_lsp();
+        if self.tabs.close(idx).is_none() {
+            // Last tab — signal quit.
+            return true;
+        }
+        false
+    }
+
+    /// Save a tab's buffer by index. Returns Ok(()) on success.
+    pub fn save_tab_by_index(&mut self, idx: usize) -> Result<(), String> {
+        if idx >= self.tabs.count() {
+            return Err("Invalid tab index".to_string());
+        }
+        self.tabs.tabs_mut()[idx]
+            .buffer
+            .save()
+            .map_err(|e| format!("{}", e))
+    }
+
+    /// Handle the user's response to the close-tab confirmation dialog.
+    pub fn handle_close_confirm_save(&mut self) {
+        if let Some(idx) = self.tab_close_confirm.take() {
+            if idx < self.tabs.count() {
+                match self.save_tab_by_index(idx) {
+                    Ok(_) => {
+                        if self.close_tab_by_index(idx) {
+                            self.should_quit = true;
+                        }
+                    }
+                    Err(e) => self.set_status(format!("Save failed: {}", e)),
+                }
+            }
+        }
+    }
+
+    /// Handle the user choosing to discard changes and close the tab.
+    pub fn handle_close_confirm_discard(&mut self) {
+        if let Some(idx) = self.tab_close_confirm.take() {
+            if self.close_tab_by_index(idx) {
+                self.should_quit = true;
+            }
+        }
+    }
+
+    /// Cancel the close-tab confirmation dialog.
+    pub fn handle_close_confirm_cancel(&mut self) {
+        self.tab_close_confirm = None;
     }
 }

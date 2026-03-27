@@ -309,7 +309,7 @@ The AI thinks ahead. The human reviews when ready.
   - [ ] Verify `brew install aura-editor/tap/aura` works after tap repo is set up
 - [ ] Publish to crates.io: `cargo publish -p aura`
 - [ ] Verify `cargo install aura` works after crates.io publish
-- [ ] detect in the app a new version and show there is a new version available 
+- [x] detect in the app a new version and show there is a new version available
 
 
 ## Phase 9: UX Improvements & Claude Code Integration (Post-launch)
@@ -343,6 +343,48 @@ Focused on making the editor feel polished and deeply integrated with Claude Cod
 > File tree and terminal panels are fully interactive with keyboard focus.
 > PTY terminal runs a real shell with colors and streaming output.
 > Claude Code running inside or outside AURA can auto-discover the MCP server.
+
+---
+
+## Phase 10: Real-Time Collaborative Editing
+
+Multiple AURA instances can collaborate on the same file in real-time using the existing automerge CRDT for conflict-free merging.
+
+### 10.1 CRDT sync foundation
+- [x] Add `AuthorId::Peer { name, peer_id }` for remote human peers
+- [x] Expose automerge sync API on `CrdtDoc` (generate/receive sync messages, save/load, fork)
+- [x] Create `sync.rs` module with `PeerSyncState` and re-exports
+- [x] Add `Buffer::apply_remote_sync()` for rope reconciliation after CRDT sync
+- [x] Add `Buffer::load_remote_snapshot()` for initial document transfer
+- [x] Add sync convergence unit tests (bidirectional, concurrent edits, fork, roundtrip)
+
+### 10.2 Networking layer
+- [x] Create `collab.rs` with `CollabSession`, TCP host/client, binary wire protocol
+- [x] Add `poll_collab_events()` to main event loop
+- [x] Add CLI flags: `--host`, `--join <addr:port>`, `--name <display_name>`
+- [x] Add `:host` / `:join` / `:collab-stop` commands in command mode
+- [x] Broadcast local edits to peers after every buffer mutation
+- [x] Apply incoming sync messages to buffer on receive
+- [x] Add `CollabConfig` to `aura.toml` (display_name, default_port)
+- [x] Show collab status in status bar (COLLAB:port, peer count)
+
+### 10.3 Remote peer awareness
+- [x] Broadcast cursor position and selection to peers (throttled, max 50ms)
+- [x] Render peer cursors as colored blocks with name labels
+- [x] Highlight peer selections with colored backgrounds
+- [x] Assign unique colors per peer (6-color rotating palette)
+
+### 10.4 Reconnection & robustness
+- [x] Client reconnect with exponential backoff (1s, 2s, 4s, ..., 30s max)
+- [x] Host retains peer sync state for 5 minutes after disconnect
+- [x] Show collab status in status bar (hosting, connected, reconnecting with attempt #)
+
+### 10.5 Incremental rope reconciliation
+- [x] Replace full rope rebuild with incremental diff (O(delta + scan) instead of O(document))
+- [x] Update only affected line_authors for changed lines
+
+### Phase 10 Definition of Done
+> Two or more AURA instances can connect, see each other's cursors, and edit the same file in real-time with automatic conflict resolution via the CRDT.
 
 ---
 
