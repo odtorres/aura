@@ -5,7 +5,7 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-03-25
+## [0.1.0] - 2026-03-27
 
 ### Added
 
@@ -27,9 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Semantic indexer** — lightweight dependency graph for cross-file awareness.
 - **Plugin system** — trait-based plugin architecture with manager.
 - **Configuration** via `aura.toml` — themes (dark, light, monokai, custom), keybindings, AI settings, editor preferences.
-- **In-app update checker** — background check against GitHub Releases API with status bar indicator and `:update` command.
-- **Mouse support** — click-to-position, click-and-drag selection, scroll wheel.
+- **In-app update checker** — background check against GitHub Releases API with floating notification toast, interactive update modal (Y/N), and `:update` / `:version` commands.
+- **Mouse support** — click-to-position, click-and-drag visual selection, scroll wheel, clickable sidebar tabs (Files/Git), clickable git panel entries, clickable editor tab bar.
+- **Quit-all commands** — `:qa`, `:qa!`, `:wqa` for closing all tabs at once.
 - **Find and replace** with regex support.
 - **Release automation** via cargo-dist — GitHub Actions, shell installer, Homebrew formula, cross-platform builds (macOS, Linux, Windows).
+- **Comprehensive documentation** — mdBook user guide, architecture docs, API reference, all deployed to GitHub Pages.
 
 [0.1.0]: https://github.com/odtorres/aura/releases/tag/v0.1.0
