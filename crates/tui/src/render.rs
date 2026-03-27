@@ -1651,16 +1651,16 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(header, header_style),
                 Span::styled(
                     " ".repeat(
-                        (inner.width.saturating_sub(header_len + btn_text.len() as u16)) as usize,
+                        (inner
+                            .width
+                            .saturating_sub(header_len + btn_text.len() as u16))
+                            as usize,
                     ),
                     Style::default(),
                 ),
                 Span::styled(btn_text, btn_style),
             ]);
-            frame.render_widget(
-                Paragraph::new(line),
-                Rect::new(inner.x, y, inner.width, 1),
-            );
+            frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
         }
         y += 1;
     }
