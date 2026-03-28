@@ -645,6 +645,22 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Route keys to the branch picker when visible.
+    if app.branch_picker.visible {
+        match code {
+            KeyCode::Esc => app.branch_picker.close(),
+            KeyCode::Enter => app.execute_branch_pick(),
+            KeyCode::Backspace => app.branch_picker.backspace(),
+            KeyCode::Up | KeyCode::Char('k') => app.branch_picker.select_up(),
+            KeyCode::Down | KeyCode::Char('j') => app.branch_picker.select_down(),
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.branch_picker.type_char(c);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Ctrl+P — open command palette from any mode.
     if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
         app.open_command_palette();
@@ -2216,22 +2232,7 @@ fn execute_command(app: &mut App, cmd: &str) {
             }
         }
         "branches" | "br" => {
-            let branches = app.git_list_branches();
-            if branches.is_empty() {
-                app.set_status("No git branches found");
-            } else {
-                let list: Vec<String> = branches
-                    .iter()
-                    .map(|b| {
-                        if b.is_current {
-                            format!("*{}", b.name)
-                        } else {
-                            b.name.clone()
-                        }
-                    })
-                    .collect();
-                app.set_status(format!("Branches: {}", list.join(" │ ")));
-            }
+            app.open_branch_picker();
         }
         _ if cmd.trim().starts_with("checkout ") => {
             let branch = cmd.trim().strip_prefix("checkout ").unwrap_or("").trim();

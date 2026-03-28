@@ -261,6 +261,8 @@ pub struct App {
     pub settings_modal: crate::settings_modal::SettingsModal,
     /// Command palette overlay.
     pub command_palette: crate::command_palette::CommandPalette,
+    /// Branch picker modal.
+    pub branch_picker: crate::branch_picker::BranchPicker,
     /// Claude Code activity watcher.
     pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
@@ -599,6 +601,7 @@ impl App {
             help: HelpOverlay::new(),
             settings_modal: crate::settings_modal::SettingsModal::new(),
             command_palette: crate::command_palette::CommandPalette::new(),
+            branch_picker: crate::branch_picker::BranchPicker::new(),
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,
@@ -3231,6 +3234,27 @@ impl App {
             .as_ref()
             .and_then(|r| r.list_branches().ok())
             .unwrap_or_default()
+    }
+
+    /// Open the branch picker modal.
+    pub fn open_branch_picker(&mut self) {
+        let branches = self.git_list_branches();
+        if branches.is_empty() {
+            self.set_status("No branches found");
+            return;
+        }
+        self.branch_picker.open(branches);
+    }
+
+    /// Execute the branch picker selection.
+    pub fn execute_branch_pick(&mut self) {
+        let branch = match self.branch_picker.selected_branch() {
+            Some(b) => b.to_string(),
+            None => return,
+        };
+        self.branch_picker.close();
+        self.git_checkout(&branch);
+        self.refresh_source_control();
     }
 
     /// Switch to a git branch.

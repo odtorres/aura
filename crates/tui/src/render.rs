@@ -237,6 +237,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_help(frame, app, area);
         }
 
+        // Render branch picker if visible.
+        if app.branch_picker.visible {
+            draw_branch_picker(frame, &app.branch_picker, area);
+        }
+
         // Render settings modal if visible.
         if app.settings_modal.visible {
             draw_settings_modal(frame, &app.settings_modal, area);
@@ -2121,6 +2126,127 @@ fn draw_conversation_detail(
         Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
         Rect::new(rect.x + 1, footer_y, rect.width.saturating_sub(2), 1),
     );
+}
+
+/// Draw the branch picker modal (centered popup).
+fn draw_branch_picker(frame: &mut Frame, picker: &crate::branch_picker::BranchPicker, area: Rect) {
+    let width = area.width.min(60);
+    let height = area.height.min(20);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta))
+        .title(" Switch Branch ")
+        .title_style(
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // Filter input.
+    let query_line = if picker.query.is_empty() {
+        "Select a branch...".to_string()
+    } else {
+        format!("> {}", picker.query)
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            query_line,
+            Style::default().fg(if picker.query.is_empty() {
+                Color::DarkGray
+            } else {
+                Color::Yellow
+            }),
+        )),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    // Branch list.
+    let list_height = inner.height.saturating_sub(1) as usize;
+    let selected = picker.selected;
+    let scroll = if selected >= list_height {
+        selected - list_height + 1
+    } else {
+        0
+    };
+
+    for (vis_idx, &branch_idx) in picker
+        .filtered
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_height)
+    {
+        let branch = &picker.branches[branch_idx];
+        let row_y = inner.y + 1 + (vis_idx - scroll) as u16;
+        if row_y >= inner.y + inner.height {
+            break;
+        }
+
+        let is_selected = vis_idx == selected;
+        let is_current = branch.is_current;
+
+        let indicator = if is_current { "* " } else { "  " };
+        let name = &branch.name;
+        let tip = &branch.tip_short;
+
+        let max_name = (inner.width as usize).saturating_sub(indicator.len() + tip.len() + 3);
+        let name_display: String = name.chars().take(max_name).collect();
+
+        let line = ratatui::text::Line::from(vec![
+            Span::styled(
+                indicator,
+                if is_current {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default()
+                },
+            ),
+            Span::styled(
+                name_display,
+                if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else if is_current {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+            Span::styled(
+                format!("  {tip}"),
+                if is_selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                },
+            ),
+        ]);
+
+        let bg = if is_selected {
+            Style::default().bg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+        frame.render_widget(
+            Paragraph::new(line).style(bg),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
 }
 
 /// Draw the command palette (centered popup).
