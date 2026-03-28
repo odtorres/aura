@@ -227,6 +227,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_file_picker(frame, app, area);
         }
 
+        // Render command palette if visible.
+        if app.command_palette.visible {
+            draw_command_palette(frame, &app.command_palette, area);
+        }
+
         // Render help overlay if visible.
         if app.help.visible {
             draw_help(frame, app, area);
@@ -1882,6 +1887,112 @@ fn draw_file_picker(frame: &mut Frame, app: &App, area: Rect) {
         let display: String = entry.chars().take(inner.width as usize).collect();
         let line_widget = Paragraph::new(Span::styled(display, style));
         frame.render_widget(line_widget, Rect::new(inner.x, row_y, inner.width, 1));
+    }
+}
+
+/// Draw the command palette (centered popup).
+fn draw_command_palette(
+    frame: &mut Frame,
+    palette: &crate::command_palette::CommandPalette,
+    area: Rect,
+) {
+    let width = area.width.min(80);
+    let height = area.height.min(20);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta))
+        .title(" Command Palette ")
+        .title_style(
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // Query line.
+    let query_line = format!("> {}", palette.query);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            query_line,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    // Results.
+    let list_height = inner.height.saturating_sub(1) as usize;
+    let selected = palette.selected;
+    let scroll_start = if selected >= list_height {
+        selected - list_height + 1
+    } else {
+        0
+    };
+
+    for (vis_idx, &item_idx) in palette
+        .filtered
+        .iter()
+        .enumerate()
+        .skip(scroll_start)
+        .take(list_height)
+    {
+        let item = &palette.items()[item_idx];
+        let row_y = inner.y + 1 + (vis_idx - scroll_start) as u16;
+        if row_y >= inner.y + inner.height {
+            break;
+        }
+
+        let is_selected = vis_idx == selected;
+        let badge = item.badge();
+        let badge_color = match item {
+            crate::command_palette::PaletteItem::Command { .. } => Color::Cyan,
+            crate::command_palette::PaletteItem::File { .. } => Color::Green,
+            crate::command_palette::PaletteItem::Setting { .. } => Color::Yellow,
+        };
+
+        let display = item.display_text();
+        let line = ratatui::text::Line::from(vec![
+            Span::styled(
+                format!(" [{badge}] "),
+                if is_selected {
+                    Style::default().fg(Color::Black).bg(badge_color)
+                } else {
+                    Style::default().fg(badge_color)
+                },
+            ),
+            Span::styled(
+                display.to_string(),
+                if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+        ]);
+
+        let bg = if is_selected {
+            Style::default().bg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+        frame.render_widget(
+            Paragraph::new(line).style(bg),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
     }
 }
 

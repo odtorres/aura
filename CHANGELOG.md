@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] - 2026-03-28
+
+### Added
+
+- **Command palette** — VS Code-style `Ctrl+P` fuzzy search across commands, files, and settings in one overlay. Type to filter, Enter to execute. Commands show `[cmd]` badge, files show `[file]`, settings show `[set]`. 24 commands, all workspace files, and 3 settings available.
+
 ## [0.1.13] - 2026-03-28
 
 ### Added

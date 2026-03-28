@@ -603,6 +603,32 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Ctrl+P — open command palette from any mode.
+    if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
+        app.open_command_palette();
+        return;
+    }
+
+    // Route keys to the command palette when visible.
+    if app.command_palette.visible {
+        match code {
+            KeyCode::Esc => app.command_palette.close(),
+            KeyCode::Enter => app.execute_palette_selection(),
+            KeyCode::Backspace => app.command_palette.backspace(),
+            KeyCode::Up | KeyCode::Char('k') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.command_palette.select_up();
+            }
+            KeyCode::Down | KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.command_palette.select_down();
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.command_palette.type_char(c);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Route keys to the file picker when it is visible.
     if app.file_picker.visible {
         match code {
@@ -1941,6 +1967,11 @@ pub fn handle_review(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
 }
 
 /// Execute a command-mode command.
+/// Execute a command from the command palette (public entry point).
+pub fn execute_command_from_palette(app: &mut App, cmd: &str) {
+    execute_command(app, cmd);
+}
+
 fn execute_command(app: &mut App, cmd: &str) {
     match cmd.trim() {
         "w" => match app.tab_mut().buffer.save() {

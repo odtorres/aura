@@ -256,6 +256,8 @@ pub struct App {
     pub help: HelpOverlay,
     /// Settings modal overlay.
     pub settings_modal: crate::settings_modal::SettingsModal,
+    /// Command palette overlay.
+    pub command_palette: crate::command_palette::CommandPalette,
 
     // --- Split panes ---
     /// Whether a split pane is active.
@@ -591,6 +593,7 @@ impl App {
             file_picker: FilePicker::new(terminal_cwd.clone()),
             help: HelpOverlay::new(),
             settings_modal: crate::settings_modal::SettingsModal::new(),
+            command_palette: crate::command_palette::CommandPalette::new(),
             split_active: false,
             split_direction: SplitDirection::Vertical,
             split_tab_idx: 0,
@@ -4766,6 +4769,50 @@ impl App {
             self.split_tab_idx
         } else {
             self.tabs.active_index()
+        }
+    }
+
+    /// Open the command palette.
+    pub fn open_command_palette(&mut self) {
+        let commands = crate::command_palette::editor_commands();
+        let settings = crate::command_palette::settings_items(&self.config);
+
+        // Collect workspace files.
+        let files: Vec<crate::command_palette::PaletteItem> = self
+            .file_tree
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir)
+            .map(|e| crate::command_palette::PaletteItem::File {
+                path: e.path.display().to_string(),
+            })
+            .collect();
+
+        self.command_palette.open(commands, files, settings);
+    }
+
+    /// Execute the currently selected palette item.
+    pub fn execute_palette_selection(&mut self) {
+        let item = match self.command_palette.selected_item() {
+            Some(i) => i.clone(),
+            None => return,
+        };
+        self.command_palette.close();
+
+        match item {
+            crate::command_palette::PaletteItem::Command { id, .. } => {
+                // Execute as a command-mode command.
+                self.mode = Mode::Normal;
+                crate::input::execute_command_from_palette(self, &id);
+            }
+            crate::command_palette::PaletteItem::File { path } => {
+                if let Err(e) = self.open_file(std::path::PathBuf::from(&path)) {
+                    self.set_status(e);
+                }
+            }
+            crate::command_palette::PaletteItem::Setting { .. } => {
+                self.open_settings();
+            }
         }
     }
 
