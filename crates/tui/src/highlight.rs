@@ -108,11 +108,11 @@ impl Language {
         match ext {
             "rs" => Some(Self::Rust),
             "py" => Some(Self::Python),
-            "ts" => Some(Self::TypeScript),
+            "ts" | "mts" => Some(Self::TypeScript),
             "tsx" => Some(Self::Tsx),
             "go" => Some(Self::Go),
-            "js" => Some(Self::JavaScript),
-            "jsx" => Some(Self::JavaScript),
+            "js" | "mjs" | "cjs" => Some(Self::JavaScript),
+            "jsx" => Some(Self::Tsx), // JSX uses the TSX grammar for JSX support
             "java" => Some(Self::Java),
             "c" | "h" => Some(Self::C),
             "cpp" | "cxx" | "cc" | "hpp" | "hxx" | "hh" => Some(Self::Cpp),

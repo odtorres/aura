@@ -187,7 +187,7 @@ pub fn detect_server(extension: &str) -> Option<LspServerConfig> {
     let (cmd, args, lang_id) = match extension {
         "rs" => ("rust-analyzer", vec![], "rust"),
         "py" => ("pyright-langserver", vec!["--stdio".to_string()], "python"),
-        "ts" | "js" => (
+        "ts" | "js" | "mts" | "mjs" | "cjs" => (
             "typescript-language-server",
             vec!["--stdio".to_string()],
             "typescript",
