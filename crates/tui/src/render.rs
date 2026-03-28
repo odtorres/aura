@@ -476,6 +476,65 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let gutter_width: u16 = 5;
 
+    // Build syntax-highlighted lines for both sides.
+    let ext = dv.file_path.rsplit('.').next().unwrap_or("");
+    let mut highlighter = crate::highlight::Language::from_extension(ext)
+        .and_then(crate::highlight::SyntaxHighlighter::new);
+
+    // Reconstruct old and new text from diff lines for highlighting.
+    let (old_text, new_text) = {
+        let mut old = String::new();
+        let mut new = String::new();
+        for line in &dv.lines {
+            match line {
+                DiffLine::Both(l, _) => {
+                    old.push_str(l);
+                    old.push('\n');
+                    new.push_str(l);
+                    new.push('\n');
+                }
+                DiffLine::LeftOnly(l) => {
+                    old.push_str(l);
+                    old.push('\n');
+                }
+                DiffLine::RightOnly(r) => {
+                    new.push_str(r);
+                    new.push('\n');
+                }
+            }
+        }
+        (old, new)
+    };
+
+    let old_hl = highlighter
+        .as_mut()
+        .map(|h| h.highlight(&old_text, Some(&app.theme)))
+        .unwrap_or_default();
+    let new_hl = highlighter
+        .as_mut()
+        .map(|h| h.highlight(&new_text, Some(&app.theme)))
+        .unwrap_or_default();
+
+    // Track line indices into highlighted arrays.
+    let mut old_hl_idx: usize = 0;
+    let mut new_hl_idx: usize = 0;
+
+    // Advance highlight indices up to scroll.
+    for line in dv.lines.iter().take(scroll) {
+        match line {
+            DiffLine::Both(_, _) => {
+                old_hl_idx += 1;
+                new_hl_idx += 1;
+            }
+            DiffLine::LeftOnly(_) => {
+                old_hl_idx += 1;
+            }
+            DiffLine::RightOnly(_) => {
+                new_hl_idx += 1;
+            }
+        }
+    }
+
     for (i, diff_line) in dv
         .lines
         .iter()
@@ -503,10 +562,10 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     )),
                     Rect::new(left_inner.x, y, gutter_width, 1),
                 );
-                // Left content.
-                let left_text: String = l.chars().take(left_content_w).collect();
+                // Left content with syntax highlighting.
+                let left_spans = build_highlighted_spans(l, old_hl.get(old_hl_idx), left_content_w);
                 frame.render_widget(
-                    Paragraph::new(Span::raw(left_text)),
+                    Paragraph::new(ratatui::text::Line::from(left_spans)),
                     Rect::new(
                         left_content_x,
                         y,
@@ -524,10 +583,11 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     )),
                     Rect::new(right_inner.x, y, gutter_width, 1),
                 );
-                // Right content.
-                let right_text: String = l.chars().take(right_content_w).collect();
+                // Right content with syntax highlighting.
+                let right_spans =
+                    build_highlighted_spans(l, new_hl.get(new_hl_idx), right_content_w);
                 frame.render_widget(
-                    Paragraph::new(Span::raw(right_text)),
+                    Paragraph::new(ratatui::text::Line::from(right_spans)),
                     Rect::new(
                         right_content_x,
                         y,
@@ -535,6 +595,9 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                         1,
                     ),
                 );
+
+                old_hl_idx += 1;
+                new_hl_idx += 1;
             }
             DiffLine::LeftOnly(l) => {
                 old_line_no += 1;
@@ -552,11 +615,15 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     )),
                     Rect::new(left_inner.x, y, gutter_width, 1),
                 );
-                // Left content — red background, fill full width.
-                let left_text: String = l.chars().take(left_content_w).collect();
-                let padded = format!("{:<width$}", left_text, width = left_content_w);
+                // Left content with syntax highlighting + red background.
+                let left_spans = build_highlighted_spans_with_bg(
+                    l,
+                    old_hl.get(old_hl_idx),
+                    left_content_w,
+                    del_style,
+                );
                 frame.render_widget(
-                    Paragraph::new(Span::styled(padded, del_style)),
+                    Paragraph::new(ratatui::text::Line::from(left_spans)).style(del_style),
                     Rect::new(
                         left_content_x,
                         y,
@@ -571,6 +638,8 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     Paragraph::new(Span::styled(empty, Style::default().fg(Color::DarkGray))),
                     Rect::new(right_inner.x, y, right_inner.width, 1),
                 );
+
+                old_hl_idx += 1;
             }
             DiffLine::RightOnly(r) => {
                 new_line_no += 1;
@@ -595,11 +664,15 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     )),
                     Rect::new(right_inner.x, y, gutter_width, 1),
                 );
-                // Right content — green background, fill full width.
-                let right_text: String = r.chars().take(right_content_w).collect();
-                let padded = format!("{:<width$}", right_text, width = right_content_w);
+                // Right content with syntax highlighting + green background.
+                let right_spans = build_highlighted_spans_with_bg(
+                    r,
+                    new_hl.get(new_hl_idx),
+                    right_content_w,
+                    add_style,
+                );
                 frame.render_widget(
-                    Paragraph::new(Span::styled(padded, add_style)),
+                    Paragraph::new(ratatui::text::Line::from(right_spans)).style(add_style),
                     Rect::new(
                         right_content_x,
                         y,
@@ -607,6 +680,8 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
                         1,
                     ),
                 );
+
+                new_hl_idx += 1;
             }
         }
     }
@@ -1783,6 +1858,92 @@ fn status_color(status: GitFileStatus) -> Style {
         GitFileStatus::Renamed => Style::default().fg(Color::Blue),
         GitFileStatus::Untracked => Style::default().fg(Color::DarkGray),
     }
+}
+
+/// Build syntax-highlighted spans for a diff line.
+fn build_highlighted_spans<'a>(
+    text: &str,
+    hl_line: Option<&crate::highlight::HighlightedLine>,
+    max_width: usize,
+) -> Vec<Span<'a>> {
+    let chars: Vec<char> = text.chars().take(max_width).collect();
+    if chars.is_empty() {
+        return vec![Span::raw("")];
+    }
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut current_color = Color::Reset;
+
+    for (i, &ch) in chars.iter().enumerate() {
+        let color = hl_line
+            .and_then(|hl| hl.colors.get(i).copied())
+            .unwrap_or(Color::Reset);
+        if color != current_color && !current.is_empty() {
+            let style = if current_color == Color::Reset {
+                Style::default()
+            } else {
+                Style::default().fg(current_color)
+            };
+            spans.push(Span::styled(std::mem::take(&mut current), style));
+        }
+        current_color = color;
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        let style = if current_color == Color::Reset {
+            Style::default()
+        } else {
+            Style::default().fg(current_color)
+        };
+        spans.push(Span::styled(current, style));
+    }
+    spans
+}
+
+/// Build syntax-highlighted spans with a background color overlay (for diff additions/deletions).
+fn build_highlighted_spans_with_bg<'a>(
+    text: &str,
+    hl_line: Option<&crate::highlight::HighlightedLine>,
+    max_width: usize,
+    bg_style: Style,
+) -> Vec<Span<'a>> {
+    let chars: Vec<char> = text.chars().take(max_width).collect();
+    if chars.is_empty() {
+        return vec![Span::styled(" ".repeat(max_width), bg_style)];
+    }
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut current_color = Color::Reset;
+
+    for (i, &ch) in chars.iter().enumerate() {
+        let color = hl_line
+            .and_then(|hl| hl.colors.get(i).copied())
+            .unwrap_or(Color::Reset);
+        if color != current_color && !current.is_empty() {
+            let fg = if current_color == Color::Reset {
+                bg_style.fg.unwrap_or(Color::White)
+            } else {
+                current_color
+            };
+            spans.push(Span::styled(std::mem::take(&mut current), bg_style.fg(fg)));
+        }
+        current_color = color;
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        let fg = if current_color == Color::Reset {
+            bg_style.fg.unwrap_or(Color::White)
+        } else {
+            current_color
+        };
+        spans.push(Span::styled(current, bg_style.fg(fg)));
+    }
+    // Pad to fill width.
+    let rendered_len: usize = chars.len();
+    if rendered_len < max_width {
+        spans.push(Span::styled(" ".repeat(max_width - rendered_len), bg_style));
+    }
+    spans
 }
 
 /// Split a path into (filename, directory). Like Cursor's git panel format.
