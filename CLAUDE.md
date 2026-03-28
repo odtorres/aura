@@ -28,7 +28,7 @@ editor → tui → core
 
 **Post-Phase 10: Polish & Features**
 
-AURA is a fully-featured terminal editor with vim-like modal editing (operator+motion, text objects, char search), AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting (17 languages), LSP integration (10 servers), MCP server/client, embedded terminal, git integration, plugin system, semantic indexing, real-time multi-file collaborative editing, split panes, and a settings modal. Recent additions include split panes (vertical/horizontal), settings modal (Ctrl+,), optional minimap, conversation compaction, git panel UI improvements (stage-all button, AI commit message generation), and code quality sweep (no unwrap in library code).
+AURA is a fully-featured terminal editor with vim-like modal editing (operator+motion, text objects, char search, visual block, multi-cursor, dot repeat, macros), AI co-authoring (Anthropic API), CRDT multi-author tracking, tree-sitter syntax highlighting (17+ languages incl. React/Next.js), LSP integration (10 servers), MCP server/client, embedded terminal, git integration (branch picker, diff with syntax highlighting), Lua plugin runtime, snippet system (32 built-in), semantic indexing, real-time multi-file collaborative editing with auth, split panes, command palette, settings modal, Claude Code activity observer, and conversation compaction with AI summarization.
 
 See `TODO.md` for the full roadmap.
 
@@ -145,6 +145,10 @@ aura-editor/
     │       ├── chat_tools.rs           # Tool execution for chat panel
     │       ├── collab.rs              # Real-time collaborative editing (TCP sync)
     │       ├── settings_modal.rs        # Interactive settings overlay
+    │       ├── snippets.rs             # Tab-triggered code snippet engine
+    │       ├── command_palette.rs      # Fuzzy command palette (Ctrl+P)
+    │       ├── branch_picker.rs        # Git branch picker modal (Ctrl+B)
+    │       ├── claude_watcher.rs       # Claude Code JSONL activity observer
     │       ├── session.rs              # Session persistence (save/restore)
     │       └── help.rs                 # In-editor help overlay
     ├── ai/

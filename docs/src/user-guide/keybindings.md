@@ -93,6 +93,21 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `q` | Stop recording macro |
 | `@{a-z}` | Play back macro from register |
 
+### Snippets (Insert mode)
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Expand snippet trigger / jump to next placeholder / insert indent |
+
+Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to expand. Tab cycles through placeholders. See [AI Features](ai-features.md) for the full snippet list.
+
+### Multi-Cursor
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+D` | Add cursor at next occurrence of word under cursor |
+| `Esc` | Clear all secondary cursors |
+
 ### LSP Integration
 
 | Key | Action |

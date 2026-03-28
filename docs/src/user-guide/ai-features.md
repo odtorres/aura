@@ -195,3 +195,59 @@ The chat panel limits how many messages are sent to the AI per turn (`max_contex
 ### Configuration
 
 See [Configuration](../getting-started/configuration.md) for the full `[conversations]` settings reference.
+
+## Code Snippets
+
+AURA includes a Tab-triggered snippet system with VS Code-compatible `${1:placeholder}` syntax.
+
+### Usage
+
+1. Enter Insert mode (`i`)
+2. Type a trigger word (e.g., `fn`, `if`, `for`)
+3. Press `Tab` — the trigger expands into a template
+4. Cursor lands on the first placeholder — type to replace
+5. Press `Tab` to jump to the next placeholder
+6. Final `Tab` goes to the `$0` (exit) position
+
+### Built-in Snippets
+
+**Rust** (10): `fn`, `pfn`, `test`, `impl`, `struct`, `enum`, `match`, `if`, `for`, `mod`
+
+**Python** (6): `def`, `class`, `if`, `for`, `with`, `try`
+
+**TypeScript/JS** (8): `fn`, `afn`, `class`, `if`, `for`, `import`, `export`, `const`
+
+**Go** (6): `func`, `if`, `iferr`, `for`, `struct`, `switch`
+
+**Generic** (2): `todo`, `fixme`
+
+### Custom Snippets
+
+Create JSON files in `~/.aura/snippets/` named by language:
+
+```json
+// ~/.aura/snippets/rust.json
+{
+  "Print Debug": {
+    "prefix": "pd",
+    "body": "println!(\"${1:var}: {:?}\", ${1:var});$0",
+    "description": "Debug print"
+  }
+}
+```
+
+Format: VS Code snippet JSON with `prefix` (trigger), `body` (template), `description`.
+
+## Multi-Cursor Editing
+
+Edit at multiple positions simultaneously.
+
+### Usage
+
+1. Place cursor on a word in Normal mode
+2. Press `Ctrl+D` — adds a yellow cursor at the next occurrence
+3. Press `Ctrl+D` again — adds another (wraps around)
+4. Enter Insert mode (`i`) — type at ALL cursor positions at once
+5. Press `Esc` — clears all secondary cursors
+
+Secondary cursors are rendered as yellow blocks. The primary cursor remains the terminal cursor.

@@ -91,6 +91,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | **Insert** | Text input | `INSERT` (green) |
 | **Visual** | Character selection | `VISUAL` (magenta) |
 | **VisualLine** | Line selection | `V-LINE` (magenta) |
+| **VisualBlock** | Column selection | `V-BLOCK` (magenta) |
 | **Command** | Ex-style commands (`:`) | `COMMAND` (yellow) |
 | **Intent** | Natural language AI input | `INTENT` (cyan) |
 | **Review** | AI proposal review | `REVIEW` (red) |
