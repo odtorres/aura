@@ -57,6 +57,34 @@ pub enum SplitDirection {
     Horizontal,
 }
 
+/// Vim operator waiting for a motion (operator-pending mode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operator {
+    /// Delete (d).
+    Delete,
+    /// Change — delete and enter Insert mode (c).
+    Change,
+    /// Yank (y).
+    Yank,
+    /// Indent (>).
+    Indent,
+    /// Dedent (<).
+    Dedent,
+}
+
+/// Character search mode (f/F/t/T).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindCharMode {
+    /// Forward to char (f).
+    Forward,
+    /// Backward to char (F).
+    Backward,
+    /// Forward till before char (t).
+    ForwardTill,
+    /// Backward till after char (T).
+    BackwardTill,
+}
+
 /// The editing mode — vim-inspired but simplified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -138,6 +166,18 @@ pub struct App {
     pub show_authorship: bool,
     /// Leader key pending (Space was pressed, waiting for next key).
     pub leader_pending: bool,
+    /// Pending operator waiting for a motion (operator-pending mode).
+    pub pending_operator: Option<Operator>,
+    /// Count prefix accumulator (e.g., "3" in "3dw").
+    pub count_prefix: Option<usize>,
+    /// Character search pending (f/F/t/T pressed, waiting for char).
+    pub find_char_pending: Option<FindCharMode>,
+    /// Last character search for ; and , repeat.
+    pub last_find_char: Option<(FindCharMode, char)>,
+    /// Replace char pending (r pressed, waiting for char).
+    pub replace_char_pending: bool,
+    /// Text object pending: true = inner (i), false = around (a). Waiting for delimiter.
+    pub text_object_pending: Option<bool>,
     /// Intent input buffer (what the user types in Intent mode).
     pub intent_input: String,
     /// Active AI proposal for review.
@@ -484,6 +524,12 @@ impl App {
             command_input: String::new(),
             status_message: None,
             register: None,
+            pending_operator: None,
+            count_prefix: None,
+            find_char_pending: None,
+            last_find_char: None,
+            replace_char_pending: false,
+            text_object_pending: None,
             show_authorship: true,
             leader_pending: false,
             intent_input: String::new(),

@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-03-27
+
+### Added
+
+- **Operator-pending mode** — Full vim operator+motion system: `dw`, `d$`, `cw`, `ce`, `yw`, `yb`, etc. Operators (`d`, `c`, `y`, `>`, `<`) wait for a motion, then apply to the range.
+- **Count prefix** — `3j`, `5dw`, `2dd`, etc. Numeric prefixes multiply motions and operations.
+- **Text objects** — `ci"`, `da(`, `diw`, `yaw`, `ci{`, `di[`, `ca<`, etc. Inner (`i`) and around (`a`) variants for quotes, parentheses, braces, brackets, angle brackets, and words.
+- **Character search** — `f{char}`, `F{char}`, `t{char}`, `T{char}` to jump to characters on the current line. `;` and `,` to repeat/reverse the search.
+- **Essential vim commands** — `r{char}` (replace), `J` (join lines), `~` (toggle case), `s` (substitute), `S`/`cc` (substitute line), `C`/`c$` (change to EOL), `D`/`d$` (delete to EOL), `Y` (yank line), `*`/`#` (search word under cursor).
+- **Indent/dedent operators** — `>>` and `<<` for indenting/dedenting lines, with count support (`3>>`).
+
 ## [0.1.7] - 2026-03-27
 
 ### Added

@@ -687,6 +687,241 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // --- Replace char pending (r{char}) ---
+    if app.replace_char_pending {
+        app.replace_char_pending = false;
+        if let KeyCode::Char(ch) = code {
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            if pos < tab.buffer.len_chars() {
+                tab.buffer.delete(pos, pos + 1, AuthorId::human());
+                tab.buffer.insert(pos, &ch.to_string(), AuthorId::human());
+                app.mark_highlights_dirty();
+            }
+        }
+        return;
+    }
+
+    // --- Character search pending (f/F/t/T + {char}) ---
+    if let Some(mode) = app.find_char_pending.take() {
+        if let KeyCode::Char(ch) = code {
+            app.last_find_char = Some((mode, ch));
+            execute_find_char(app, mode, ch);
+        }
+        return;
+    }
+
+    // --- Count prefix accumulation ---
+    if let KeyCode::Char(c @ '1'..='9') = code {
+        if app.pending_operator.is_none() || app.count_prefix.is_some() {
+            let digit = (c as u32 - '0' as u32) as usize;
+            let current = app.count_prefix.unwrap_or(0);
+            app.count_prefix = Some(current * 10 + digit);
+            return;
+        }
+    }
+    if let KeyCode::Char('0') = code {
+        if app.count_prefix.is_some() {
+            let current = app.count_prefix.unwrap_or(0);
+            app.count_prefix = Some(current * 10);
+            return;
+        }
+    }
+
+    // --- Text object pending (i/a + delimiter) ---
+    if let Some(is_inner) = app.text_object_pending.take() {
+        if let KeyCode::Char(delim) = code {
+            let op = app.pending_operator.take();
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let range = match delim {
+                '"' | '\'' | '`' => tab.buffer.find_inner_delimited(pos, delim, delim),
+                '(' | ')' | 'b' => {
+                    if is_inner {
+                        tab.buffer.find_inner_delimited(pos, '(', ')')
+                    } else {
+                        tab.buffer.find_around_delimited(pos, '(', ')')
+                    }
+                }
+                '{' | '}' | 'B' => {
+                    if is_inner {
+                        tab.buffer.find_inner_delimited(pos, '{', '}')
+                    } else {
+                        tab.buffer.find_around_delimited(pos, '{', '}')
+                    }
+                }
+                '[' | ']' => {
+                    if is_inner {
+                        tab.buffer.find_inner_delimited(pos, '[', ']')
+                    } else {
+                        tab.buffer.find_around_delimited(pos, '[', ']')
+                    }
+                }
+                '<' | '>' => {
+                    if is_inner {
+                        tab.buffer.find_inner_delimited(pos, '<', '>')
+                    } else {
+                        tab.buffer.find_around_delimited(pos, '<', '>')
+                    }
+                }
+                'w' => {
+                    if is_inner {
+                        Some(tab.buffer.find_inner_word(pos))
+                    } else {
+                        Some(tab.buffer.find_around_word(pos))
+                    }
+                }
+                _ => None,
+            };
+            // For quote delimiters, apply inner/around after finding.
+            let range = if matches!(delim, '"' | '\'' | '`') && !is_inner {
+                range.map(|(s, e)| {
+                    (
+                        s.saturating_sub(1),
+                        (e + 1).min(app.tab().buffer.len_chars()),
+                    )
+                })
+            } else {
+                range
+            };
+            if let (Some((start, end)), Some(op)) = (range, op) {
+                apply_operator(app, op, start, end);
+            }
+        } else {
+            // Not a valid delimiter — cancel.
+            app.pending_operator = None;
+        }
+        return;
+    }
+
+    // --- Operator-pending: d, c, y, >, < ---
+    if app.pending_operator.is_some() {
+        let op = app.pending_operator.take().unwrap();
+        let count = app.count_prefix.take().unwrap_or(1);
+
+        // Double-press = line operation (dd, cc, yy, >>, <<).
+        let is_line_op = matches!(
+            (&op, code),
+            (Operator::Delete, KeyCode::Char('d'))
+                | (Operator::Change, KeyCode::Char('c'))
+                | (Operator::Yank, KeyCode::Char('y'))
+                | (Operator::Indent, KeyCode::Char('>'))
+                | (Operator::Dedent, KeyCode::Char('<'))
+        );
+
+        if is_line_op {
+            let tab = app.tab_mut();
+            let start_line = tab.cursor.row;
+            let end_line = (start_line + count).min(tab.buffer.line_count());
+            let start_idx = tab
+                .buffer
+                .cursor_to_char_idx(&aura_core::Cursor::new(start_line, 0));
+            let end_idx = if end_line >= tab.buffer.line_count() {
+                tab.buffer.len_chars()
+            } else {
+                tab.buffer
+                    .cursor_to_char_idx(&aura_core::Cursor::new(end_line, 0))
+            };
+
+            match op {
+                Operator::Delete => {
+                    let text = tab.buffer.rope().slice(start_idx..end_idx).to_string();
+                    app.register = Some(text);
+                    app.tab_mut()
+                        .buffer
+                        .delete(start_idx, end_idx, AuthorId::human());
+                    app.clamp_cursor();
+                    app.mark_highlights_dirty();
+                }
+                Operator::Change => {
+                    let text = tab.buffer.rope().slice(start_idx..end_idx).to_string();
+                    app.register = Some(text);
+                    app.tab_mut()
+                        .buffer
+                        .delete(start_idx, end_idx, AuthorId::human());
+                    app.clamp_cursor();
+                    app.mark_highlights_dirty();
+                    app.mode = Mode::Insert;
+                }
+                Operator::Yank => {
+                    let text = tab.buffer.rope().slice(start_idx..end_idx).to_string();
+                    app.register = Some(text);
+                    app.set_status(format!(
+                        "{count} line{} yanked",
+                        if count == 1 { "" } else { "s" }
+                    ));
+                }
+                Operator::Indent => {
+                    let indent = app.tab().indent_style.unit();
+                    app.tab_mut().buffer.indent_lines(
+                        start_line,
+                        end_line.saturating_sub(1),
+                        &indent,
+                        AuthorId::human(),
+                    );
+                    app.mark_highlights_dirty();
+                }
+                Operator::Dedent => {
+                    let tw = app.config.editor.tab_width;
+                    app.tab_mut().buffer.dedent_lines(
+                        start_line,
+                        end_line.saturating_sub(1),
+                        tw,
+                        AuthorId::human(),
+                    );
+                    app.mark_highlights_dirty();
+                }
+            }
+            return;
+        }
+
+        // Text objects: i/a + delimiter.
+        if matches!(code, KeyCode::Char('i')) {
+            app.pending_operator = Some(op);
+            app.text_object_pending = Some(true); // inner
+            return;
+        }
+        if matches!(code, KeyCode::Char('a')) {
+            app.pending_operator = Some(op);
+            app.text_object_pending = Some(false); // around
+            return;
+        }
+
+        // Operator + motion: compute range and apply.
+        if let Some((start, end)) = resolve_operator_motion(app, code, count) {
+            apply_operator(app, op, start, end);
+        }
+        return;
+    }
+
+    // --- Operator keys: set pending_operator ---
+    match code {
+        KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.pending_operator = Some(Operator::Delete);
+            return;
+        }
+        KeyCode::Char('c') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.pending_operator = Some(Operator::Change);
+            return;
+        }
+        KeyCode::Char('y') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.pending_operator = Some(Operator::Yank);
+            return;
+        }
+        KeyCode::Char('>') => {
+            app.pending_operator = Some(Operator::Indent);
+            return;
+        }
+        KeyCode::Char('<') => {
+            app.pending_operator = Some(Operator::Dedent);
+            return;
+        }
+        _ => {}
+    }
+
+    // Consume count for standalone motions.
+    let count = app.count_prefix.take().unwrap_or(1);
+
     match code {
         // Leader key (Space)
         KeyCode::Char(' ') => {
@@ -743,28 +978,28 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.dismiss_ghost_suggestions();
         }
 
-        // Navigation (clears hover popup and notifies speculative engine)
+        // Navigation with count support.
         KeyCode::Char('h') | KeyCode::Left => {
             let tab = app.tab_mut();
-            tab.cursor.col = tab.cursor.col.saturating_sub(1);
+            tab.cursor.col = tab.cursor.col.saturating_sub(count);
             tab.hover_info = None;
             app.notify_cursor_moved();
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            app.tab_mut().cursor.col += 1;
+            app.tab_mut().cursor.col += count;
             app.clamp_cursor();
             app.tab_mut().hover_info = None;
             app.notify_cursor_moved();
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let tab = app.tab_mut();
-            tab.cursor.row = tab.cursor.row.saturating_sub(1);
+            tab.cursor.row = tab.cursor.row.saturating_sub(count);
             tab.hover_info = None;
             app.clamp_cursor();
             app.notify_cursor_moved();
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.tab_mut().cursor.row += 1;
+            app.tab_mut().cursor.row += count;
             app.clamp_cursor();
             app.tab_mut().hover_info = None;
             app.notify_cursor_moved();
@@ -788,25 +1023,31 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             tab.cursor.col = 0;
         }
 
-        // Word movement
+        // Word movement with count.
         KeyCode::Char('w') => {
             let tab = app.tab_mut();
-            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
-            let new_pos = tab.buffer.next_word_start(pos);
-            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+            let mut pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            for _ in 0..count {
+                pos = tab.buffer.next_word_start(pos);
+            }
+            tab.cursor = tab.buffer.char_idx_to_cursor(pos);
             app.clamp_cursor();
         }
         KeyCode::Char('b') => {
             let tab = app.tab_mut();
-            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
-            let new_pos = tab.buffer.prev_word_start(pos);
-            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+            let mut pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            for _ in 0..count {
+                pos = tab.buffer.prev_word_start(pos);
+            }
+            tab.cursor = tab.buffer.char_idx_to_cursor(pos);
         }
         KeyCode::Char('e') => {
             let tab = app.tab_mut();
-            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
-            let new_pos = tab.buffer.word_end(pos);
-            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+            let mut pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            for _ in 0..count {
+                pos = tab.buffer.word_end(pos);
+            }
+            tab.cursor = tab.buffer.char_idx_to_cursor(pos);
             app.clamp_cursor();
         }
 
@@ -830,21 +1071,175 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.set_status("Nothing to undo");
             }
         }
-        // dd — delete current line
-        KeyCode::Char('d') => {
+        // f/F/t/T — character search on line.
+        KeyCode::Char('f') => {
+            app.find_char_pending = Some(FindCharMode::Forward);
+        }
+        KeyCode::Char('F') => {
+            app.find_char_pending = Some(FindCharMode::Backward);
+        }
+        KeyCode::Char('t') => {
+            app.find_char_pending = Some(FindCharMode::ForwardTill);
+        }
+        KeyCode::Char('T') => {
+            app.find_char_pending = Some(FindCharMode::BackwardTill);
+        }
+        // ; — repeat last f/F/t/T search.
+        KeyCode::Char(';') => {
+            if let Some((mode, ch)) = app.last_find_char {
+                execute_find_char(app, mode, ch);
+            }
+        }
+        // , — reverse last f/F/t/T search.
+        KeyCode::Char(',') => {
+            if let Some((mode, ch)) = app.last_find_char {
+                let reversed = match mode {
+                    FindCharMode::Forward => FindCharMode::Backward,
+                    FindCharMode::Backward => FindCharMode::Forward,
+                    FindCharMode::ForwardTill => FindCharMode::BackwardTill,
+                    FindCharMode::BackwardTill => FindCharMode::ForwardTill,
+                };
+                execute_find_char(app, reversed, ch);
+            }
+        }
+        // r — replace character under cursor.
+        KeyCode::Char('r') => {
+            app.replace_char_pending = true;
+        }
+        // J — join current line with next.
+        KeyCode::Char('J') => {
             let row = app.tab().cursor.row;
-            if let Some(text) = app.tab_mut().buffer.delete_line(row, AuthorId::human()) {
-                app.register = Some(text);
+            app.tab_mut().buffer.join_lines(row, AuthorId::human());
+            app.mark_highlights_dirty();
+        }
+        // ~ — toggle case of character under cursor.
+        KeyCode::Char('~') => {
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            if let Some(ch) = tab.buffer.get_char(pos) {
+                let toggled: String = if ch.is_uppercase() {
+                    ch.to_lowercase().to_string()
+                } else {
+                    ch.to_uppercase().to_string()
+                };
+                tab.buffer.delete(pos, pos + 1, AuthorId::human());
+                tab.buffer.insert(pos, &toggled, AuthorId::human());
+                tab.cursor.col += 1;
                 app.clamp_cursor();
                 app.mark_highlights_dirty();
             }
         }
-        // yy — yank current line
-        KeyCode::Char('y') => {
+        // s — substitute: delete char and enter Insert.
+        KeyCode::Char('s') if !app.source_control_focused => {
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            if pos < tab.buffer.len_chars() {
+                tab.buffer.delete(pos, pos + 1, AuthorId::human());
+                app.mark_highlights_dirty();
+            }
+            app.mode = Mode::Insert;
+        }
+        // S — substitute line: delete line content and enter Insert.
+        KeyCode::Char('S') => {
+            let tab = app.tab_mut();
+            let row = tab.cursor.row;
+            let line_start = tab
+                .buffer
+                .cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
+            let line_end = if row + 1 < tab.buffer.line_count() {
+                tab.buffer
+                    .cursor_to_char_idx(&aura_core::Cursor::new(row + 1, 0))
+                    - 1
+            } else {
+                tab.buffer.len_chars()
+            };
+            if line_end > line_start {
+                let text = tab.buffer.rope().slice(line_start..line_end).to_string();
+                app.register = Some(text);
+                app.tab_mut()
+                    .buffer
+                    .delete(line_start, line_end, AuthorId::human());
+                app.tab_mut().cursor.col = 0;
+                app.mark_highlights_dirty();
+            }
+            app.mode = Mode::Insert;
+        }
+        // C — change to end of line.
+        KeyCode::Char('C') => {
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let row = tab.cursor.row;
+            let line_end = if row + 1 < tab.buffer.line_count() {
+                tab.buffer
+                    .cursor_to_char_idx(&aura_core::Cursor::new(row + 1, 0))
+                    - 1
+            } else {
+                tab.buffer.len_chars()
+            };
+            if line_end > pos {
+                let text = tab.buffer.rope().slice(pos..line_end).to_string();
+                app.register = Some(text);
+                app.tab_mut()
+                    .buffer
+                    .delete(pos, line_end, AuthorId::human());
+                app.mark_highlights_dirty();
+            }
+            app.mode = Mode::Insert;
+        }
+        // D — delete to end of line.
+        KeyCode::Char('D') => {
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let row = tab.cursor.row;
+            let line_end = if row + 1 < tab.buffer.line_count() {
+                tab.buffer
+                    .cursor_to_char_idx(&aura_core::Cursor::new(row + 1, 0))
+                    - 1
+            } else {
+                tab.buffer.len_chars()
+            };
+            if line_end > pos {
+                let text = tab.buffer.rope().slice(pos..line_end).to_string();
+                app.register = Some(text);
+                app.tab_mut()
+                    .buffer
+                    .delete(pos, line_end, AuthorId::human());
+                app.clamp_cursor();
+                app.mark_highlights_dirty();
+            }
+        }
+        // Y — yank line (alias for yy).
+        KeyCode::Char('Y') => {
             let row = app.tab().cursor.row;
             if let Some(text) = app.tab().buffer.line_text(row) {
                 app.register = Some(text);
                 app.set_status("Yanked line");
+            }
+        }
+        // * — search word under cursor forward.
+        KeyCode::Char('*') => {
+            let tab = app.tab();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let (start, end) = tab.buffer.find_inner_word(pos);
+            if end > start {
+                let word = tab.buffer.rope().slice(start..end).to_string();
+                app.search_query = Some(word.clone());
+                app.search_input = word;
+                app.search_forward = true;
+                app.execute_search();
+            }
+        }
+        // # — search word under cursor backward.
+        KeyCode::Char('#') => {
+            let tab = app.tab();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let (start, end) = tab.buffer.find_inner_word(pos);
+            if end > start {
+                let word = tab.buffer.rope().slice(start..end).to_string();
+                app.search_query = Some(word.clone());
+                app.search_input = word;
+                app.search_forward = false;
+                app.execute_search();
             }
         }
         // p — paste register after current line
@@ -1947,5 +2342,198 @@ pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
         _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vim operator/motion helpers
+// ---------------------------------------------------------------------------
+
+use crate::app::{FindCharMode, Operator};
+
+/// Resolve a motion key into a (start, end) character index range.
+fn resolve_operator_motion(app: &mut App, code: KeyCode, count: usize) -> Option<(usize, usize)> {
+    let tab = app.tab_mut();
+    let start = tab.buffer.cursor_to_char_idx(&tab.cursor);
+
+    let end = match code {
+        KeyCode::Char('w') => {
+            let mut pos = start;
+            for _ in 0..count {
+                pos = tab.buffer.next_word_start(pos);
+            }
+            pos
+        }
+        KeyCode::Char('b') => {
+            let mut pos = start;
+            for _ in 0..count {
+                pos = tab.buffer.prev_word_start(pos);
+            }
+            pos
+        }
+        KeyCode::Char('e') => {
+            let mut pos = start;
+            for _ in 0..count {
+                pos = tab.buffer.word_end(pos);
+            }
+            (pos + 1).min(tab.buffer.len_chars())
+        }
+        KeyCode::Char('$') => {
+            let row = tab.cursor.row;
+            if row + 1 < tab.buffer.line_count() {
+                tab.buffer
+                    .cursor_to_char_idx(&aura_core::Cursor::new(row + 1, 0))
+                    - 1
+            } else {
+                tab.buffer.len_chars()
+            }
+        }
+        KeyCode::Char('0') => tab
+            .buffer
+            .cursor_to_char_idx(&aura_core::Cursor::new(tab.cursor.row, 0)),
+        KeyCode::Char('G') => tab.buffer.len_chars(),
+        KeyCode::Char('h') | KeyCode::Left => start.saturating_sub(count),
+        KeyCode::Char('l') | KeyCode::Right => (start + count).min(tab.buffer.len_chars()),
+        KeyCode::Char('j') | KeyCode::Down => {
+            let target_row =
+                (tab.cursor.row + count).min(tab.buffer.line_count().saturating_sub(1));
+            tab.buffer
+                .cursor_to_char_idx(&aura_core::Cursor::new(target_row + 1, 0))
+                .min(tab.buffer.len_chars())
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            let target_row = tab.cursor.row.saturating_sub(count);
+            tab.buffer
+                .cursor_to_char_idx(&aura_core::Cursor::new(target_row, 0))
+        }
+        KeyCode::Char('%') => {
+            if let Some(match_idx) = tab.buffer.find_matching_bracket(start) {
+                if match_idx > start {
+                    match_idx + 1
+                } else {
+                    match_idx
+                }
+            } else {
+                return None;
+            }
+        }
+        // Text objects handled in the operator-pending section.
+        KeyCode::Char('i') | KeyCode::Char('a') => {
+            // Phase 2 will add text object support here.
+            return None;
+        }
+        _ => return None,
+    };
+
+    let (s, e) = if end < start {
+        (end, start)
+    } else {
+        (start, end)
+    };
+    Some((s, e))
+}
+
+/// Apply an operator to a character range.
+fn apply_operator(app: &mut App, op: Operator, start: usize, end: usize) {
+    if start == end {
+        return;
+    }
+    match op {
+        Operator::Delete => {
+            let text = app.tab().buffer.rope().slice(start..end).to_string();
+            app.register = Some(text);
+            app.tab_mut().buffer.delete(start, end, AuthorId::human());
+            let cursor = app.tab().buffer.char_idx_to_cursor(start);
+            app.tab_mut().cursor = cursor;
+            app.clamp_cursor();
+            app.mark_highlights_dirty();
+        }
+        Operator::Change => {
+            let text = app.tab().buffer.rope().slice(start..end).to_string();
+            app.register = Some(text);
+            app.tab_mut().buffer.delete(start, end, AuthorId::human());
+            let cursor = app.tab().buffer.char_idx_to_cursor(start);
+            app.tab_mut().cursor = cursor;
+            app.clamp_cursor();
+            app.mark_highlights_dirty();
+            app.mode = Mode::Insert;
+        }
+        Operator::Yank => {
+            let text = app.tab().buffer.rope().slice(start..end).to_string();
+            app.register = Some(text);
+        }
+        Operator::Indent => {
+            let start_line = app.tab().buffer.char_idx_to_cursor(start).row;
+            let end_line = app
+                .tab()
+                .buffer
+                .char_idx_to_cursor(end.saturating_sub(1).max(start))
+                .row;
+            let indent = app.tab().indent_style.unit();
+            app.tab_mut()
+                .buffer
+                .indent_lines(start_line, end_line, &indent, AuthorId::human());
+            app.mark_highlights_dirty();
+        }
+        Operator::Dedent => {
+            let start_line = app.tab().buffer.char_idx_to_cursor(start).row;
+            let end_line = app
+                .tab()
+                .buffer
+                .char_idx_to_cursor(end.saturating_sub(1).max(start))
+                .row;
+            let tw = app.config.editor.tab_width;
+            app.tab_mut()
+                .buffer
+                .dedent_lines(start_line, end_line, tw, AuthorId::human());
+            app.mark_highlights_dirty();
+        }
+    }
+}
+
+/// Execute a character search (f/F/t/T) on the current line.
+fn execute_find_char(app: &mut App, mode: FindCharMode, ch: char) {
+    let tab = app.tab_mut();
+    let row = tab.cursor.row;
+    let col = tab.cursor.col;
+    let line_text = match tab.buffer.line_text(row) {
+        Some(t) => t,
+        None => return,
+    };
+    let chars: Vec<char> = line_text.chars().collect();
+
+    match mode {
+        FindCharMode::Forward => {
+            for (i, &c) in chars.iter().enumerate().skip(col + 1) {
+                if c == ch {
+                    tab.cursor.col = i;
+                    return;
+                }
+            }
+        }
+        FindCharMode::Backward => {
+            for i in (0..col).rev() {
+                if chars[i] == ch {
+                    tab.cursor.col = i;
+                    return;
+                }
+            }
+        }
+        FindCharMode::ForwardTill => {
+            for (i, &c) in chars.iter().enumerate().skip(col + 1) {
+                if c == ch {
+                    tab.cursor.col = i.saturating_sub(1);
+                    return;
+                }
+            }
+        }
+        FindCharMode::BackwardTill => {
+            for i in (0..col).rev() {
+                if chars[i] == ch {
+                    tab.cursor.col = i + 1;
+                    return;
+                }
+            }
+        }
     }
 }

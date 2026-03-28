@@ -118,9 +118,26 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `G` | Go to end of file |
 | `gd` | Go to definition (LSP) |
 | `K` | Hover info (LSP) |
+| `f{char}` / `F{char}` | Find char forward/backward on line |
+| `t{char}` / `T{char}` | Till char forward/backward on line |
+| `;` / `,` | Repeat / reverse last char search |
+| `*` / `#` | Search word under cursor forward/backward |
 | `x` | Delete character |
-| `d` | Delete line |
-| `y` | Yank line |
+| `d{motion}` | Delete (operator + motion, e.g. `dw`, `d$`) |
+| `c{motion}` | Change (delete + Insert, e.g. `cw`, `ci"`) |
+| `y{motion}` | Yank (e.g. `yw`, `yy`) |
+| `dd` | Delete line |
+| `cc` | Change line |
+| `yy` / `Y` | Yank line |
+| `D` | Delete to end of line |
+| `C` | Change to end of line |
+| `s` | Substitute character |
+| `S` | Substitute line |
+| `r{char}` | Replace character |
+| `J` | Join lines |
+| `~` | Toggle case |
+| `>>` / `<<` | Indent / dedent |
+| `{count}{motion}` | Repeat motion (e.g. `3j`, `5dw`) |
 | `p` | Paste |
 | `u` | Undo |
 | `Tab` | Accept ghost suggestion |

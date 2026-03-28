@@ -547,6 +547,209 @@ impl Buffer {
         self.last_edit.as_ref().map(|(a, t)| (a, *t))
     }
 
+    // ----- Vim motion helpers -----
+
+    /// Join the given line with the next line, replacing the newline with a space.
+    pub fn join_lines(&mut self, line: usize, author: AuthorId) {
+        if line + 1 >= self.line_count() {
+            return;
+        }
+        // Find the newline at the end of the line.
+        let line_end = self.rope.line_to_char(line + 1);
+        let join_pos = line_end.saturating_sub(1);
+        if join_pos < self.rope.len_chars() {
+            self.delete(join_pos, join_pos + 1, author.clone());
+            // Insert a space where the newline was (unless the next line starts with whitespace).
+            let next_char = self.rope.get_char(join_pos);
+            if next_char.map(|c| !c.is_whitespace()).unwrap_or(true) {
+                self.insert(join_pos, " ", author);
+            }
+        }
+    }
+
+    /// Indent lines in the range [start_line, end_line] by prepending `indent_str`.
+    pub fn indent_lines(
+        &mut self,
+        start_line: usize,
+        end_line: usize,
+        indent_str: &str,
+        author: AuthorId,
+    ) {
+        // Work backwards to avoid index shifting.
+        for line in (start_line..=end_line.min(self.line_count().saturating_sub(1))).rev() {
+            let char_idx = self.rope.line_to_char(line);
+            self.insert(char_idx, indent_str, author.clone());
+        }
+    }
+
+    /// Dedent lines in the range [start_line, end_line] by removing one indent level.
+    pub fn dedent_lines(
+        &mut self,
+        start_line: usize,
+        end_line: usize,
+        tab_width: usize,
+        author: AuthorId,
+    ) {
+        for line in (start_line..=end_line.min(self.line_count().saturating_sub(1))).rev() {
+            let char_idx = self.rope.line_to_char(line);
+            if let Some(line_text) = self.line_text(line) {
+                let mut remove = 0;
+                for ch in line_text.chars() {
+                    if ch == '\t' && remove == 0 {
+                        remove = 1;
+                        break;
+                    } else if ch == ' ' && remove < tab_width {
+                        remove += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if remove > 0 {
+                    self.delete(char_idx, char_idx + remove, author.clone());
+                }
+            }
+        }
+    }
+
+    /// Find the inner range of a delimiter pair around `char_idx`.
+    /// Returns (start, end) character indices of the content between delimiters.
+    pub fn find_inner_delimited(
+        &self,
+        char_idx: usize,
+        open: char,
+        close: char,
+    ) -> Option<(usize, usize)> {
+        let text = self.rope.to_string();
+        let bytes = text.as_bytes();
+        let byte_idx = self.rope.char_to_byte(char_idx.min(self.rope.len_chars()));
+
+        // Search backward for opening delimiter.
+        let mut depth = 0i32;
+        let mut open_pos = None;
+        for i in (0..byte_idx).rev() {
+            let ch = bytes[i] as char;
+            if ch == close && open != close {
+                depth += 1;
+            } else if ch == open {
+                if depth == 0 {
+                    open_pos = Some(i);
+                    break;
+                }
+                depth -= 1;
+            }
+        }
+        // For same-char delimiters (quotes), search outward.
+        if open == close {
+            let line_start = text[..byte_idx].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let line_end = text[byte_idx..]
+                .find('\n')
+                .map(|p| byte_idx + p)
+                .unwrap_or(text.len());
+            let line = &text[line_start..line_end];
+            let positions: Vec<usize> = line
+                .char_indices()
+                .filter(|(_, c)| *c == open)
+                .map(|(i, _)| line_start + i)
+                .collect();
+            // Find the pair that encloses char_idx.
+            for pair in positions.windows(2) {
+                if pair[0] < byte_idx && byte_idx <= pair[1] {
+                    let start = self.rope.byte_to_char(pair[0] + open.len_utf8());
+                    let end = self.rope.byte_to_char(pair[1]);
+                    return Some((start, end));
+                }
+            }
+            return None;
+        }
+        let open_byte = open_pos?;
+
+        // Search forward for closing delimiter.
+        depth = 0;
+        let mut close_pos = None;
+        for (i, &b) in bytes.iter().enumerate().skip(open_byte + 1) {
+            let ch = b as char;
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                if depth == 0 {
+                    close_pos = Some(i);
+                    break;
+                }
+                depth -= 1;
+            }
+        }
+        let close_byte = close_pos?;
+
+        let start = self.rope.byte_to_char(open_byte + open.len_utf8());
+        let end = self.rope.byte_to_char(close_byte);
+        Some((start, end))
+    }
+
+    /// Find the around range of a delimiter pair (including delimiters).
+    pub fn find_around_delimited(
+        &self,
+        char_idx: usize,
+        open: char,
+        close: char,
+    ) -> Option<(usize, usize)> {
+        let (inner_start, inner_end) = self.find_inner_delimited(char_idx, open, close)?;
+        let start = inner_start.saturating_sub(1); // include opening delimiter
+        let end = (inner_end + 1).min(self.rope.len_chars()); // include closing delimiter
+        Some((start, end))
+    }
+
+    /// Find the inner word boundaries around `char_idx`.
+    pub fn find_inner_word(&self, char_idx: usize) -> (usize, usize) {
+        let len = self.rope.len_chars();
+        if len == 0 {
+            return (0, 0);
+        }
+        let idx = char_idx.min(len.saturating_sub(1));
+        let ch = self.rope.get_char(idx).unwrap_or(' ');
+        let is_word = |c: char| c.is_alphanumeric() || c == '_';
+        let in_word = is_word(ch);
+
+        let mut start = idx;
+        while start > 0 {
+            let prev = self.rope.get_char(start - 1).unwrap_or(' ');
+            if is_word(prev) != in_word {
+                break;
+            }
+            start -= 1;
+        }
+
+        let mut end = idx + 1;
+        while end < len {
+            let next = self.rope.get_char(end).unwrap_or(' ');
+            if is_word(next) != in_word {
+                break;
+            }
+            end += 1;
+        }
+
+        (start, end)
+    }
+
+    /// Find the around word boundaries (word + trailing whitespace).
+    pub fn find_around_word(&self, char_idx: usize) -> (usize, usize) {
+        let (start, mut end) = self.find_inner_word(char_idx);
+        let len = self.rope.len_chars();
+        // Include trailing whitespace.
+        while end < len {
+            let ch = self.rope.get_char(end).unwrap_or('x');
+            if !ch.is_whitespace() || ch == '\n' {
+                break;
+            }
+            end += 1;
+        }
+        (start, end)
+    }
+
+    /// Get a single character at the given index.
+    pub fn get_char(&self, char_idx: usize) -> Option<char> {
+        self.rope.get_char(char_idx)
+    }
+
     /// Get a reference to the CRDT document.
     pub fn crdt(&self) -> &CrdtDoc {
         &self.crdt

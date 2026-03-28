@@ -31,15 +31,58 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `V` | Visual Line |
 | `:` | Command |
 
+### Operators (+ motion)
+
+| Key | Action |
+|-----|--------|
+| `d{motion}` | Delete range (e.g. `dw`, `d$`, `dd`) |
+| `c{motion}` | Change range (delete + Insert, e.g. `cw`, `ci"`) |
+| `y{motion}` | Yank range (e.g. `yw`, `yy`) |
+| `>{motion}` | Indent range (e.g. `>>`, `>j`) |
+| `<{motion}` | Dedent range (e.g. `<<`, `<k`) |
+| `{count}{op}` | Repeat with count (e.g. `3dd`, `5j`, `2dw`) |
+
+### Text Objects (with operator)
+
+| Key | Action |
+|-----|--------|
+| `i"` / `a"` | Inner / around double quotes |
+| `i'` / `a'` | Inner / around single quotes |
+| `i(` / `a(` | Inner / around parentheses |
+| `i{` / `a{` | Inner / around braces |
+| `i[` / `a[` | Inner / around brackets |
+| `i<` / `a<` | Inner / around angle brackets |
+| `iw` / `aw` | Inner / around word |
+
+### Character Search
+
+| Key | Action |
+|-----|--------|
+| `f{char}` | Jump to next char on line |
+| `F{char}` | Jump to prev char on line |
+| `t{char}` | Jump to before next char |
+| `T{char}` | Jump to after prev char |
+| `;` | Repeat last char search |
+| `,` | Reverse last char search |
+| `*` | Search word under cursor (forward) |
+| `#` | Search word under cursor (backward) |
+
 ### Editing
 
 | Key | Action |
 |-----|--------|
 | `x` | Delete character under cursor |
-| `d` | Delete current line |
-| `y` | Yank (copy) current line |
+| `dd` | Delete line |
+| `yy` / `Y` | Yank line |
 | `p` | Paste from register |
 | `u` | Undo last edit |
+| `D` | Delete to end of line |
+| `C` | Change to end of line |
+| `s` | Substitute character (delete + Insert) |
+| `S` | Substitute line |
+| `r{char}` | Replace character under cursor |
+| `J` | Join current line with next |
+| `~` | Toggle case |
 
 ### LSP Integration
 
