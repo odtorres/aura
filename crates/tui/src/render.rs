@@ -1679,20 +1679,18 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         let is_selected = staged_focused && i == sc.selected;
         let status_style = status_color(entry.status);
-        let display = format!("  {} {}", entry.status.label(), entry.rel_path);
-        let display: String = display.chars().take(inner.width as usize).collect();
+        let (filename, dir) = split_path_filename(&entry.rel_path);
+        let line = format_git_entry(entry.status.label(), &filename, &dir, inner.width as usize);
 
         if is_selected {
             let style = Style::default().add_modifier(Modifier::REVERSED);
             frame.render_widget(
-                Paragraph::new(Span::styled(display, style)),
+                Paragraph::new(line).style(style),
                 Rect::new(inner.x, y, inner.width, 1),
             );
         } else {
-            frame.render_widget(
-                Paragraph::new(Span::styled(display, status_style)),
-                Rect::new(inner.x, y, inner.width, 1),
-            );
+            frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+            let _ = status_style; // used for non-selected coloring via spans
         }
         y += 1;
     }
@@ -1754,20 +1752,18 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         let is_selected = changed_focused && i == sc.selected;
         let status_style = status_color(entry.status);
-        let display = format!("  {} {}", entry.status.label(), entry.rel_path);
-        let display: String = display.chars().take(inner.width as usize).collect();
+        let (filename, dir) = split_path_filename(&entry.rel_path);
+        let line = format_git_entry(entry.status.label(), &filename, &dir, inner.width as usize);
 
         if is_selected {
             let style = Style::default().add_modifier(Modifier::REVERSED);
             frame.render_widget(
-                Paragraph::new(Span::styled(display, style)),
+                Paragraph::new(line).style(style),
                 Rect::new(inner.x, y, inner.width, 1),
             );
         } else {
-            frame.render_widget(
-                Paragraph::new(Span::styled(display, status_style)),
-                Rect::new(inner.x, y, inner.width, 1),
-            );
+            frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+            let _ = status_style;
         }
         y += 1;
     }
@@ -1782,6 +1778,60 @@ fn status_color(status: GitFileStatus) -> Style {
         GitFileStatus::Renamed => Style::default().fg(Color::Blue),
         GitFileStatus::Untracked => Style::default().fg(Color::DarkGray),
     }
+}
+
+/// Split a path into (filename, directory). Like Cursor's git panel format.
+fn split_path_filename(path: &str) -> (String, String) {
+    if let Some(pos) = path.rfind('/') {
+        let filename = path[pos + 1..].to_string();
+        let dir = path[..pos].to_string();
+        (filename, dir)
+    } else {
+        (path.to_string(), String::new())
+    }
+}
+
+/// Format a git entry line: "  M filename  dir/path"
+/// Filename is bright, directory is dimmed gray — like Cursor/VS Code.
+fn format_git_entry<'a>(
+    status_label: &str,
+    filename: &str,
+    dir: &str,
+    max_width: usize,
+) -> ratatui::text::Line<'a> {
+    let status_color = match status_label {
+        "M" => Color::Yellow,
+        "A" => Color::Green,
+        "D" => Color::Red,
+        "R" => Color::Blue,
+        "?" => Color::DarkGray,
+        _ => Color::White,
+    };
+
+    let prefix = format!("  {status_label} ");
+    let dir_display = if dir.is_empty() {
+        String::new()
+    } else {
+        let available = max_width.saturating_sub(prefix.len() + filename.len() + 2);
+        if dir.len() <= available {
+            format!("  {dir}")
+        } else if available > 4 {
+            format!("  {}...", &dir[..available.saturating_sub(3)])
+        } else {
+            String::new()
+        }
+    };
+
+    ratatui::text::Line::from(vec![
+        Span::styled(prefix, Style::default().fg(status_color)),
+        Span::styled(
+            filename.to_string(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(dir_display, Style::default().fg(Color::DarkGray)),
+    ])
 }
 
 /// Return a Nerd Font icon (+ trailing space) for a file based on its extension.
