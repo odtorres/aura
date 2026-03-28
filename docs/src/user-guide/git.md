@@ -77,10 +77,22 @@ When committing, AURA attaches conversation summaries as `Aura-Conversation` tra
 
 ## Branch Management
 
+### Branch Picker
+
+`:branches` or `:br` opens a modal branch picker (like VS Code/Cursor):
+
+- All local branches listed with commit hash
+- Current branch marked with `*` in green
+- Type to filter branches by name
+- `Enter` to switch, `Esc` to cancel
+- Git errors shown in status bar if checkout fails (e.g., uncommitted changes)
+
+### Commands
+
 | Command | Action |
 |---------|--------|
-| `:branches` / `:br` | List all branches (current marked with `*`) |
-| `:checkout <name>` | Switch to a branch |
+| `:branches` / `:br` | Open branch picker modal |
+| `:checkout <name>` | Switch to a branch directly |
 | `:branch <name>` | Create a new branch |
 
 ## Aura Git Log

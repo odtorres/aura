@@ -5,6 +5,20 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.20] - 2026-03-28
+
+### Added
+
+- **Visual block mode** — `Ctrl+V` enters V-BLOCK mode for rectangular column selection. Block delete (`d`), yank (`y`), insert (`I`), and append (`A`).
+- **Branch picker modal** — `:branches` / `:br` opens a VS Code-style branch picker. Filter by typing, Enter to switch, current branch highlighted in green. Git errors shown on failed checkout.
+- **Filename-first git entries** — Git panel shows filename in bold white first, then directory in gray (like Cursor/VS Code). No more truncated filenames.
+- **Dotfiles visible** — File tree now shows `.env`, `.gitignore`, `.eslintrc`, etc. Only `.git`, `.aura`, `target`, `node_modules` are hidden.
+
+### Fixed
+
+- **Diff view colors** — Dark green/red backgrounds instead of blinding bright colors.
+- **TODO.md** — Fixed section 10.7 formatting.
+
 ## [0.1.19] - 2026-03-28
 
 ### Added

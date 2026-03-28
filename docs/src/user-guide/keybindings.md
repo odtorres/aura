@@ -196,6 +196,7 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `:vsplit` | `:vs` | Vertical split pane |
 | `:hsplit` | `:sp` | Horizontal split pane |
 | `:only` | | Close split pane |
+| `:branches` | `:br` | Open branch picker |
 | `:settings` | `:prefs` | Open settings modal |
 | `:update` | `:check-update` | Force check for updates |
 | `:host` | | Start hosting a collab session |

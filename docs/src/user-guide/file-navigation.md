@@ -21,6 +21,10 @@ The file tree shows the directory structure of the current working directory. Wh
 
 When you press `Enter` on a file, it opens in the editor and focus returns to the buffer. Directories expand/collapse in place.
 
+### Visible Files
+
+The file tree shows all files including dotfiles (`.env`, `.gitignore`, `.eslintrc`, etc.). Only noise directories are hidden: `.git`, `.aura`, `target`, `node_modules`.
+
 ## Fuzzy File Picker
 
 Open with `<Space>p` or `:files` (`:fp`).
