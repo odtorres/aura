@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.24] - 2026-03-28
+
+### Added
+
+- **Snippet system** — Tab-triggered code snippets with `${1:placeholder}` syntax. Type a trigger word (`fn`, `if`, `for`, `def`, `class`, etc.) and press Tab to expand. Tab moves between placeholders. Built-in snippets for Rust (10), Python (6), TypeScript/JS (8), Go (6), and generic (2). User-defined snippets from `~/.aura/snippets/*.json` in VS Code format.
+
 ## [0.1.23] - 2026-03-28
 
 ### Added

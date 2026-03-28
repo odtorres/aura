@@ -1587,6 +1587,119 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             tab.cursor.col = tab.cursor.col.saturating_sub(1);
             app.clamp_cursor();
         }
+        KeyCode::Tab => {
+            // 1. If active snippet with remaining placeholders → jump to next.
+            let has_active = app.tab().snippet_engine.active.is_some();
+            if has_active {
+                let done = {
+                    let engine = &mut app.tab_mut().snippet_engine;
+                    if let Some(ref mut active) = engine.active {
+                        if !active.next_placeholder() {
+                            true // done
+                        } else {
+                            false
+                        }
+                    } else {
+                        true
+                    }
+                };
+                if done {
+                    app.tab_mut().snippet_engine.active = None;
+                } else if let Some(ref active) = app.tab().snippet_engine.active {
+                    if let Some(ph) = active.current_placeholder() {
+                        let pos = active.insert_offset + ph.offset;
+                        let cursor = app.tab().buffer.char_idx_to_cursor(pos);
+                        app.tab_mut().cursor = cursor;
+                    }
+                }
+                return;
+            }
+
+            // 2. Check if word before cursor matches a snippet trigger.
+            let lang_name = app.tab().language.map(|l| {
+                match l {
+                    crate::highlight::Language::Rust => "rust",
+                    crate::highlight::Language::Python => "python",
+                    crate::highlight::Language::TypeScript
+                    | crate::highlight::Language::Tsx
+                    | crate::highlight::Language::JavaScript => "typescript",
+                    crate::highlight::Language::Go => "go",
+                    _ => "",
+                }
+                .to_string()
+            });
+
+            let trigger_word = {
+                let tab = app.tab();
+                let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                let (wstart, _wend) = tab.buffer.find_inner_word(pos.saturating_sub(1));
+                let word_pos = wstart;
+                let word: String = tab.buffer.rope().slice(word_pos..pos).to_string();
+                (word, word_pos, pos)
+            };
+            let (word, word_start, word_end) = trigger_word;
+
+            if let Some(snippet) = app
+                .tab()
+                .snippet_engine
+                .find(&word, lang_name.as_deref())
+                .cloned()
+            {
+                // Get current line indent.
+                let indent = {
+                    let tab = app.tab();
+                    let line_text = tab.buffer.line_text(tab.cursor.row).unwrap_or_default();
+                    line_text
+                        .chars()
+                        .take_while(|c| *c == ' ' || *c == '\t')
+                        .collect::<String>()
+                };
+
+                // Delete trigger word.
+                app.tab_mut()
+                    .buffer
+                    .delete(word_start, word_end, aura_core::AuthorId::human());
+
+                // Expand snippet.
+                let (expanded, placeholders) =
+                    crate::snippets::SnippetEngine::expand(&snippet.body, &indent);
+
+                // Insert expanded text.
+                app.tab_mut()
+                    .buffer
+                    .insert(word_start, &expanded, aura_core::AuthorId::human());
+
+                // Set up active snippet for placeholder navigation.
+                if !placeholders.is_empty() {
+                    let active = crate::snippets::ActiveSnippet {
+                        placeholders,
+                        current: 0,
+                        insert_offset: word_start,
+                    };
+                    // Position cursor at first placeholder.
+                    if let Some(ph) = active.current_placeholder() {
+                        let pos = word_start + ph.offset;
+                        app.tab_mut().cursor = app.tab().buffer.char_idx_to_cursor(pos);
+                    }
+                    app.tab_mut().snippet_engine.active = Some(active);
+                } else {
+                    // No placeholders — position at end of inserted text.
+                    let end = word_start + expanded.len();
+                    app.tab_mut().cursor = app.tab().buffer.char_idx_to_cursor(end);
+                }
+                app.mark_highlights_dirty();
+                return;
+            }
+
+            // 3. No snippet match — insert tab/spaces.
+            let indent = app.tab().indent_style.unit();
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            tab.buffer
+                .insert(pos, &indent, aura_core::AuthorId::human());
+            tab.cursor = tab.buffer.char_idx_to_cursor(pos + indent.len());
+            app.mark_highlights_dirty();
+        }
         KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
             // Multi-cursor: insert at all cursor positions (right-to-left).
             let has_secondary = !app.tab().secondary_cursors.is_empty();

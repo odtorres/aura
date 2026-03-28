@@ -452,5 +452,5 @@ When working on this project with Claude Code:
 - [ ] More LSP features (rename, references panel)
 - [ ] Undo tree visualization
 - [x] Multi-cursor editing
-- [ ] Snippet system
+- [x] Snippet system
 - [ ] Integrated debugger (DAP protocol)

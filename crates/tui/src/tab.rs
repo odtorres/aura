@@ -100,6 +100,8 @@ pub struct EditorTab {
     pub visual_anchor: Option<Cursor>,
     /// Secondary cursors for multi-cursor editing.
     pub secondary_cursors: Vec<Cursor>,
+    /// Snippet engine for Tab-triggered code expansion.
+    pub snippet_engine: crate::snippets::SnippetEngine,
     /// Syntax highlighter (None if language not supported).
     pub highlighter: Option<SyntaxHighlighter>,
     /// Cached per-line highlight colours. Regenerated on edits.
@@ -183,6 +185,7 @@ impl EditorTab {
             scroll_col: 0,
             visual_anchor: None,
             secondary_cursors: Vec::new(),
+            snippet_engine: crate::snippets::SnippetEngine::new(),
             highlighter,
             highlight_lines,
             highlights_dirty: false,
