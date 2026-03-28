@@ -45,11 +45,25 @@ LSP data enriches AI context:
 
 ## Supported Languages
 
-AURA ships with Tree-sitter grammars for:
+### Syntax Highlighting (Tree-sitter)
 
-- Rust
-- TypeScript
-- Python
-- Go
+AURA ships with tree-sitter grammars for **17 languages**:
 
-The LSP client works with any language server that implements the Language Server Protocol. Configure the server command in your environment (AURA auto-detects common servers).
+Rust, Python, TypeScript, TSX, Go, JavaScript, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown
+
+### LSP Server Auto-Detection
+
+AURA auto-detects these language servers when they're installed:
+
+| Language | Server | Install |
+|----------|--------|---------|
+| Rust | `rust-analyzer` | `rustup component add rust-analyzer` |
+| Python | `pyright-langserver` | `npm install -g pyright` |
+| TypeScript/JS | `typescript-language-server` | `npm install -g typescript-language-server` |
+| Go | `gopls` | `go install golang.org/x/tools/gopls@latest` |
+| Java | `jdtls` | Eclipse JDT Language Server |
+| C/C++ | `clangd` | LLVM/Clang toolchain |
+| Ruby | `solargraph` | `gem install solargraph` |
+| Bash/Shell | `bash-language-server` | `npm install -g bash-language-server` |
+
+The LSP client works with any language server that implements the Language Server Protocol.

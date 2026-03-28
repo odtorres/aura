@@ -287,8 +287,8 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | Text buffer | ropey | Efficient rope data structure |
 | CRDT | automerge | Multi-author conflict-free editing |
 | TUI framework | ratatui + crossterm | Terminal rendering |
-| Syntax parsing | tree-sitter | Incremental syntax highlighting |
-| Language server | LSP client | Diagnostics, go-to-def, hover, code actions |
+| Syntax parsing | tree-sitter | Incremental syntax highlighting (17 languages) |
+| Language server | LSP client | Diagnostics, go-to-def, hover, code actions (10 servers) |
 | AI API | reqwest + tokio-stream | Anthropic API streaming client |
 | Protocol | MCP (WebSocket) | AI agent-editor communication |
 | Storage | rusqlite | Conversation + decision history |
