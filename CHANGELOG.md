@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.17] - 2026-03-28
+
+### Added
+
+- **Conversation detail modal** — Press Enter twice on a conversation in the AI History panel to open a full-screen modal with word-wrapped messages, file/branch/time header, acceptance rate, and scrollable content. Solves truncated text in the narrow side panel.
+- **AI History panel improvements**: branch grouping, intent-based titles, relative timestamps, search (`/`), acceptance rate badges, smart truncation.
+- **Claude Code activity observer** — Background watcher tails Claude Code's JSONL logs. Shows real-time activity in status bar.
+- **MCP `report_activity` and `get_editor_state` tools** — Claude Code reports activity and queries editor state.
+- **Fuzzy command palette** — `Ctrl+P` for unified search across commands, files, and settings.
+- **LSP auto-restart** — Automatic recovery when LSP server disconnects.
+
 ## [0.1.16] - 2026-03-28
 
 ### Added

@@ -130,6 +130,33 @@ Every AI interaction is stored in a local SQLite database:
 
 Conversations are linked to file paths, line ranges, and git commits, so you can always trace "why was this written this way?"
 
+### AI History Panel (`Ctrl+H`)
+
+The right-side panel shows all conversations with:
+
+- **Branch grouping** — Conversations organized by git branch with colored headers
+- **Intent-based titles** — Shows what you asked instead of generic text
+- **Relative timestamps** — "2h ago" instead of raw ISO dates
+- **Acceptance rate** — Green/red badge showing accepted vs rejected proposals
+- **Search** — Press `/` to filter by title, file, or branch
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate conversations |
+| `Enter` | Expand conversation (show messages inline) |
+| `Enter` (again) | Open **full-screen detail modal** with word-wrapped messages |
+| `/` | Start search |
+| `u` / `d` | Scroll messages |
+| `Esc` | Close panel or modal |
+
+### Detail Modal
+
+The full-screen modal shows the complete conversation with proper formatting:
+- Word-wrapped messages (no truncation)
+- Color-coded roles: green (You), cyan (AI), gray (System)
+- File path, branch, timestamp, and acceptance rate header
+- Scroll with `j`/`k` or page with `d`/`u`
+
 ## Conversation Compaction
 
 The conversation database grows over time. AURA provides automatic and manual compaction to keep it manageable.

@@ -272,6 +272,26 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `Y` | Approve pending tool call |
 | `N` | Deny pending tool call |
 
+## AI History Panel (focused)
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Select next conversation |
+| `k` / `Up` | Select previous conversation |
+| `Enter` | Expand conversation / open detail modal |
+| `/` | Start search (filter by title, file, branch) |
+| `u` | Scroll expanded messages up |
+| `d` | Scroll expanded messages down |
+| `Esc` | Close search / unfocus panel / close modal |
+
+### Detail Modal
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll line by line |
+| `d` / `u` | Page down / up |
+| `Esc` / `q` | Close modal |
+
 ## Git Panel (focused)
 
 | Key | Action |

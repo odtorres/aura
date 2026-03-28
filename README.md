@@ -153,6 +153,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `Ctrl+J` | Toggle chat panel |
 | `Ctrl+H` | Toggle conversation history |
 | `Ctrl+P` | Open command palette |
+| `Ctrl+H` | Toggle AI History panel |
 | `Ctrl+W` | Toggle split pane focus |
 | `Ctrl+,` | Open settings |
 
