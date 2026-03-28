@@ -1,15 +1,61 @@
 # Plugins
 
-AURA supports a plugin system that allows extending the editor with custom functionality.
+AURA supports dynamic plugins written in **Lua 5.4**. Place `.lua` files in `~/.aura/plugins/` and they're automatically loaded on startup.
 
-## Plugin Architecture
+## Quick Start
 
-Plugins implement the `Plugin` trait and register with the `PluginManager`. Each plugin can:
+Create `~/.aura/plugins/hello.lua`:
 
-- Register new intents (AI actions)
-- Add new modes
-- Create custom UI panels
-- Hook into editor lifecycle events
+```lua
+plugin = {
+    name = "hello",
+
+    on_load = function()
+        -- Called once when the plugin loads.
+    end,
+
+    on_save = function(path)
+        -- Called after a file is saved.
+    end,
+
+    on_key = function(mode, key)
+        -- Called on every keypress.
+        -- Return "status:message" to show in status bar.
+        -- Return "cmd:w" to execute a command.
+        -- Return "insert:text" to insert text at cursor.
+        -- Return nil to do nothing.
+        return nil
+    end,
+
+    on_intent = function(intent)
+        -- Called before an intent is sent to AI.
+        -- Return a modified string to change the intent.
+        -- Return nil to leave it unchanged.
+        return nil
+    end,
+}
+```
+
+## Plugin API
+
+Each Lua plugin must define a global `plugin` table with at least a `name` field. All callback functions are optional.
+
+### Callbacks
+
+| Callback | Arguments | Return | When |
+|----------|-----------|--------|------|
+| `on_load()` | none | none | Once, at startup |
+| `on_key(mode, key)` | mode string, key string | action string or nil | Every keypress |
+| `on_save(path)` | file path string | none | After file save |
+| `on_intent(intent)` | intent string | modified string or nil | Before AI intent |
+
+### Return Actions (from `on_key`)
+
+| Prefix | Effect | Example |
+|--------|--------|---------|
+| `cmd:` | Execute editor command | `"cmd:w"` (save) |
+| `insert:` | Insert text at cursor | `"insert:hello"` |
+| `status:` | Show status bar message | `"status:Plugin active"` |
 
 ## Listing Plugins
 
@@ -17,25 +63,54 @@ Plugins implement the `Plugin` trait and register with the `PluginManager`. Each
 :plugins
 ```
 
-Shows all currently loaded plugins.
+Shows all currently loaded plugins (both Lua and built-in).
 
-## Built-in Plugins
+## Example: Auto-format on Save
 
-AURA ships with core functionality implemented as plugins:
+```lua
+plugin = {
+    name = "auto-format",
 
-- **File picker**: Fuzzy file finder (`<Space>p` / `:files`)
-- **File tree**: Directory sidebar (`Ctrl+N` / `:tree`)
-- **Terminal**: Embedded PTY terminal (`Ctrl+J` / `:term`)
+    on_save = function(path)
+        if path:match("%.rs$") then
+            os.execute("rustfmt " .. path)
+        end
+    end,
+}
+```
 
-## Plugin Lifecycle
+## Example: Custom Keybinding
 
-Plugins are initialized when the editor starts and receive events throughout the editing session:
+```lua
+plugin = {
+    name = "quick-save",
 
-1. **Registration**: Plugin registers with the `PluginManager`
-2. **Initialization**: Plugin sets up its state
-3. **Event handling**: Plugin responds to editor events (file open, edit, save, etc.)
-4. **Teardown**: Plugin cleans up on editor exit
+    on_key = function(mode, key)
+        if mode == "NORMAL" and key == "Q" then
+            return "cmd:wq"
+        end
+        return nil
+    end,
+}
+```
 
-## Developing Plugins
+## Plugin Directory
 
-Plugins implement the `Plugin` trait defined in `crates/tui/src/plugin.rs`. See the [Architecture: TUI](../architecture/tui.md) section for details on the trait interface.
+Plugins are loaded from `~/.aura/plugins/`. Create the directory if it doesn't exist:
+
+```bash
+mkdir -p ~/.aura/plugins
+```
+
+Each `.lua` file is an independent plugin with its own Lua VM instance. Plugins are sandboxed — they can't access other plugins' state.
+
+## Architecture
+
+Plugins implement the `Plugin` trait (Rust) via a Lua bridge. The bridge:
+
+- Creates a Lua 5.4 VM per plugin (via `mlua` crate)
+- Wraps each `.lua` file as a `LuaPlugin` struct implementing `Plugin`
+- Routes editor events through the `PluginManager` to all loaded plugins
+- Collects return actions and applies them to the editor
+
+See the [Architecture: TUI](../architecture/tui.md) section for details on the internal trait interface.

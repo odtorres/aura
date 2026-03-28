@@ -621,6 +621,15 @@ impl App {
         // Kick off background summarization for eligible conversations.
         app.maybe_summarize_next();
 
+        // Discover and load Lua plugins from ~/.aura/plugins/.
+        for plugin in crate::plugin::discover_lua_plugins() {
+            app.plugin_manager.register(plugin);
+        }
+        let plugin_count = app.plugin_manager.plugin_names().len();
+        if plugin_count > 0 {
+            tracing::info!("Loaded {plugin_count} plugin(s)");
+        }
+
         // Spawn background update checker.
         if config.update.check_for_updates {
             let (tx, rx) = mpsc::channel();

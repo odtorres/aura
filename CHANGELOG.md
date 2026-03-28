@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2026-03-27
+
+### Added
+
+- **Lua plugin runtime** — Dynamic plugin loading from `~/.aura/plugins/*.lua`. Each Lua script defines a `plugin` table with callbacks: `on_load()`, `on_key(mode, key)`, `on_save(path)`, `on_intent(intent)`. Plugins can return actions (`cmd:`, `insert:`, `status:`) to control the editor. Auto-discovered on startup.
+
 ## [0.1.10] - 2026-03-27
 
 ### Fixed

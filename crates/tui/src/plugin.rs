@@ -58,6 +58,177 @@ pub trait Plugin: Send + Sync {
     fn on_intent(&mut self, intent: &str) -> Option<String>;
 }
 
+// ---------------------------------------------------------------------------
+// Lua plugin bridge
+// ---------------------------------------------------------------------------
+
+/// A plugin loaded from a Lua script file.
+///
+/// Each `LuaPlugin` owns its own Lua VM instance. The Lua script must define
+/// a global table called `plugin` with at least a `name` field. Optional
+/// callback functions: `on_load()`, `on_key(mode, key)`, `on_save(path)`,
+/// `on_intent(intent)`.
+pub struct LuaPlugin {
+    plugin_name: String,
+    lua: std::sync::Mutex<mlua::Lua>,
+}
+
+impl LuaPlugin {
+    /// Load a Lua plugin from a file path.
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let lua = mlua::Lua::new();
+        let source = std::fs::read_to_string(path)?;
+
+        lua.load(&source)
+            .set_name(path.display().to_string())
+            .exec()
+            .map_err(|e| anyhow::anyhow!("Lua load error in {}: {e}", path.display()))?;
+
+        let name: String = lua
+            .globals()
+            .get::<mlua::Table>("plugin")
+            .and_then(|t| t.get::<String>("name"))
+            .map_err(|e| {
+                anyhow::anyhow!("Lua plugin {} must define plugin.name: {e}", path.display())
+            })?;
+
+        Ok(Self {
+            plugin_name: name,
+            lua: std::sync::Mutex::new(lua),
+        })
+    }
+
+    /// Call a Lua function with a single string arg, no return.
+    fn call_void_str(&self, func_name: &str, arg: &str) {
+        let lua = match self.lua.lock() {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        if let Ok(table) = lua.globals().get::<mlua::Table>("plugin") {
+            if let Ok(func) = table.get::<mlua::Function>(func_name) {
+                if let Err(e) = func.call::<()>(arg.to_string()) {
+                    tracing::warn!("Lua plugin '{}' {func_name}() error: {e}", self.plugin_name);
+                }
+            }
+        }
+    }
+
+    /// Call a Lua function with two string args, return optional string.
+    fn call_str2_ret(&self, func_name: &str, arg1: &str, arg2: &str) -> Option<String> {
+        let lua = self.lua.lock().ok()?;
+        let table = lua.globals().get::<mlua::Table>("plugin").ok()?;
+        let func = table.get::<mlua::Function>(func_name).ok()?;
+        match func.call::<Option<String>>((arg1.to_string(), arg2.to_string())) {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!("Lua plugin '{}' {func_name}() error: {e}", self.plugin_name);
+                None
+            }
+        }
+    }
+
+    /// Call a Lua function with one string arg, return optional string.
+    fn call_str1_ret(&self, func_name: &str, arg: &str) -> Option<String> {
+        let lua = self.lua.lock().ok()?;
+        let table = lua.globals().get::<mlua::Table>("plugin").ok()?;
+        let func = table.get::<mlua::Function>(func_name).ok()?;
+        match func.call::<Option<String>>(arg.to_string()) {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!("Lua plugin '{}' {func_name}() error: {e}", self.plugin_name);
+                None
+            }
+        }
+    }
+}
+
+impl Plugin for LuaPlugin {
+    fn name(&self) -> &str {
+        &self.plugin_name
+    }
+
+    fn on_load(&mut self) -> anyhow::Result<()> {
+        // Call on_load with no args.
+        let lua = self
+            .lua
+            .lock()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        if let Ok(table) = lua.globals().get::<mlua::Table>("plugin") {
+            if let Ok(func) = table.get::<mlua::Function>("on_load") {
+                func.call::<()>(())
+                    .map_err(|e| anyhow::anyhow!("on_load error: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn on_key(&mut self, mode: &str, key: &str) -> Option<PluginAction> {
+        let result = self.call_str2_ret("on_key", mode, key)?;
+        // Parse the return string as an action.
+        if let Some(cmd) = result.strip_prefix("cmd:") {
+            Some(PluginAction::RunCommand(cmd.to_string()))
+        } else if let Some(text) = result.strip_prefix("insert:") {
+            Some(PluginAction::InsertText(text.to_string()))
+        } else {
+            result
+                .strip_prefix("status:")
+                .map(|msg| PluginAction::SetStatus(msg.to_string()))
+        }
+    }
+
+    fn on_save(&mut self, path: &str) -> anyhow::Result<()> {
+        self.call_void_str("on_save", path);
+        Ok(())
+    }
+
+    fn on_intent(&mut self, intent: &str) -> Option<String> {
+        self.call_str1_ret("on_intent", intent)
+    }
+}
+
+/// Discover and load all `.lua` plugins from `~/.aura/plugins/`.
+pub fn discover_lua_plugins() -> Vec<Box<dyn Plugin>> {
+    let mut plugins: Vec<Box<dyn Plugin>> = Vec::new();
+
+    let plugins_dir = dirs_path_home().map(|h| h.join(".aura").join("plugins"));
+
+    let dir = match plugins_dir {
+        Some(d) if d.is_dir() => d,
+        _ => return plugins,
+    };
+
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return plugins,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("lua") {
+            match LuaPlugin::from_file(&path) {
+                Ok(plugin) => {
+                    tracing::info!(
+                        "Discovered Lua plugin: {} ({})",
+                        plugin.plugin_name,
+                        path.display()
+                    );
+                    plugins.push(Box::new(plugin));
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load Lua plugin {}: {e}", path.display());
+                }
+            }
+        }
+    }
+
+    plugins
+}
+
+/// Get the user's home directory.
+fn dirs_path_home() -> Option<std::path::PathBuf> {
+    std::env::var("HOME").ok().map(std::path::PathBuf::from)
+}
+
 /// Manages the collection of active plugins and routes editor events to them.
 pub struct PluginManager {
     plugins: Vec<Box<dyn Plugin>>,

@@ -1906,6 +1906,11 @@ fn execute_command(app: &mut App, cmd: &str) {
                 if app.sidebar_view == SidebarView::Git {
                     app.refresh_source_control();
                 }
+                // Notify plugins of the save.
+                if let Some(path) = app.tab().buffer.file_path() {
+                    let path_str = path.display().to_string();
+                    app.plugin_manager.notify_save(&path_str);
+                }
             }
             Err(e) => app.set_status(format!("Error: {}", e)),
         },
