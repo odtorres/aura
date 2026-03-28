@@ -77,6 +77,145 @@ pub fn generate_auth_token() -> String {
     format!("{h1:016x}{h2:016x}")
 }
 
+// TLS infrastructure — cert generation, server/client configs, and relay.
+// Stream wrapping will be integrated when the reader/writer architecture
+// is refactored to support non-cloneable streams (TLS can't be split).
+#[allow(dead_code)]
+/// Generate a self-signed TLS certificate and private key for collab hosting.
+///
+/// Returns (cert_der, key_der) suitable for building a rustls ServerConfig.
+fn generate_tls_cert() -> Result<
+    (
+        Vec<rustls::pki_types::CertificateDer<'static>>,
+        rustls::pki_types::PrivateKeyDer<'static>,
+    ),
+    String,
+> {
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+        .map_err(|e| format!("cert generation failed: {e}"))?;
+    let cert_der = rustls::pki_types::CertificateDer::from(cert.cert.der().to_vec());
+    let key_der = rustls::pki_types::PrivateKeyDer::Pkcs8(
+        rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der().to_vec()),
+    );
+    Ok((vec![cert_der], key_der))
+}
+
+#[allow(dead_code)]
+/// Build a rustls ServerConfig from a self-signed cert.
+fn build_tls_server_config() -> Result<Arc<rustls::ServerConfig>, String> {
+    let (certs, key) = generate_tls_cert()?;
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("TLS server config failed: {e}"))?;
+    Ok(Arc::new(config))
+}
+
+#[allow(dead_code)]
+/// Build a rustls ClientConfig that accepts any certificate (for self-signed).
+fn build_tls_client_config() -> Arc<rustls::ClientConfig> {
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
+        .with_no_client_auth();
+    Arc::new(config)
+}
+
+#[allow(dead_code)]
+/// Certificate verifier that accepts any certificate (for self-signed collab).
+#[derive(Debug)]
+struct NoCertVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+#[allow(dead_code)]
+/// Run a TLS relay: owns the TLS stream and bridges between wire reads/writes
+/// and channels. Used because rustls::StreamOwned can't be split like TcpStream.
+fn tls_relay_host(
+    tls_stream: rustls::StreamOwned<rustls::ServerConnection, TcpStream>,
+    wire_tx: mpsc::Sender<(u8, Vec<u8>)>,
+    wire_rx: mpsc::Receiver<(u8, Vec<u8>)>,
+    shutdown: Arc<Mutex<bool>>,
+) {
+    use std::io::Write;
+    let stream = std::sync::Mutex::new(tls_stream);
+
+    // Reader thread.
+    let stream_r = Arc::new(stream);
+    let stream_w = stream_r.clone();
+    let shutdown_r = shutdown.clone();
+
+    let reader = thread::Builder::new()
+        .name("tls-relay-read".into())
+        .spawn(move || loop {
+            if *shutdown_r.lock().expect("lock poisoned") {
+                break;
+            }
+            let mut guard = stream_r.lock().expect("lock poisoned");
+            match read_wire(&mut *guard) {
+                Ok((msg_type, payload)) => {
+                    drop(guard);
+                    if wire_tx.send((msg_type, payload)).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        });
+
+    // Writer: forward outgoing messages.
+    let _ = reader;
+    loop {
+        if *shutdown.lock().expect("lock poisoned") {
+            break;
+        }
+        match wire_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok((msg_type, payload)) => {
+                let mut guard = stream_w.lock().expect("lock poisoned");
+                let _ = write_wire(&mut *guard, msg_type, &payload);
+                let _ = guard.flush();
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
 /// Compute a deterministic file identifier from a canonical path.
 ///
 /// Uses `DefaultHasher` to produce a `u64` that is consistent across peers
@@ -365,12 +504,29 @@ impl CollabSession {
         let clients_for_cmd = clients.clone();
         let file_snapshots = Arc::new(Mutex::new(files));
 
+        // Build TLS server config if enabled.
+        let tls_server_config = if tls_auth.use_tls {
+            match build_tls_server_config() {
+                Ok(config) => {
+                    tracing::info!("TLS enabled for collab session");
+                    Some(config)
+                }
+                Err(e) => {
+                    tracing::warn!("TLS setup failed, falling back to plaintext: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Accept thread: listen for incoming connections.
         let event_tx_accept = event_tx.clone();
         let shutdown_accept = shutdown_clone.clone();
         let file_snaps_for_accept = file_snapshots.clone();
         let file_snaps_for_cmd = file_snapshots;
         let auth_token_for_accept = tls_auth.auth_token.clone().map(Arc::new);
+        let tls_config_for_accept = tls_server_config;
         thread::Builder::new()
             .name("collab-accept".to_string())
             .spawn(move || {
@@ -389,6 +545,7 @@ impl CollabSession {
                     let snaps = file_snaps_for_accept.lock().expect("lock poisoned").clone();
                     let shutdown_peer = shutdown_accept.clone();
                     let auth_token = auth_token_for_accept.clone();
+                    let tls_config = tls_config_for_accept.clone();
 
                     thread::Builder::new()
                         .name("collab-peer".to_string())
