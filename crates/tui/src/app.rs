@@ -1753,6 +1753,29 @@ impl App {
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);
                     self.tab_mut().lsp_client = None;
+                    // Attempt to restart the LSP server.
+                    if let Some(path) = self.tab().buffer.file_path() {
+                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                            if let Some(config) = crate::lsp::detect_server(ext) {
+                                let file_path = path.to_path_buf();
+                                let workspace =
+                                    file_path.parent().unwrap_or(&file_path).to_path_buf();
+                                let content = self.tab().buffer.rope().to_string();
+                                match crate::lsp::LspClient::start(
+                                    &config, &workspace, &file_path, &content,
+                                ) {
+                                    Ok(client) => {
+                                        self.tab_mut().lsp_client = Some(client);
+                                        self.set_status("LSP server restarted");
+                                        return;
+                                    }
+                                    Err(restart_err) => {
+                                        tracing::warn!("LSP restart failed: {restart_err}");
+                                    }
+                                }
+                            }
+                        }
+                    }
                     self.set_status(format!("LSP error: {e}"));
                 }
             }
