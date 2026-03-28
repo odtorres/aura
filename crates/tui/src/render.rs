@@ -3069,6 +3069,7 @@ fn draw_editor_pane(
     draw_editor(frame, app, content_area, &git_status);
     if is_focused {
         draw_peer_cursors(frame, app, content_area);
+        draw_secondary_cursors(frame, app, content_area);
     }
 
     // Minimap.
@@ -3197,6 +3198,38 @@ fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Draw secondary cursors (multi-cursor editing) as colored blocks.
+fn draw_secondary_cursors(frame: &mut Frame, app: &App, area: Rect) {
+    let tab = app.tab();
+    if tab.secondary_cursors.is_empty() {
+        return;
+    }
+
+    let gutter_width = 6u16;
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_area_x = area.x + gutter_width;
+    let text_area_width = area.width.saturating_sub(gutter_width) as usize;
+
+    for cursor in &tab.secondary_cursors {
+        if cursor.row >= scroll_row
+            && cursor.row < scroll_row + visible_rows
+            && cursor.col >= scroll_col
+            && cursor.col < scroll_col + text_area_width
+        {
+            let screen_y = area.y + (cursor.row - scroll_row) as u16;
+            let screen_x = text_area_x + (cursor.col - scroll_col) as u16;
+
+            if screen_x < area.x + area.width {
+                let cell = &mut frame.buffer_mut()[(screen_x, screen_y)];
+                cell.set_bg(Color::Yellow);
+                cell.set_fg(Color::Black);
             }
         }
     }

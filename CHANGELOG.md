@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.23] - 2026-03-28
+
+### Added
+
+- **Multi-cursor editing** — `Ctrl+D` adds a cursor at the next occurrence of the word under cursor. Type to insert at all cursor positions simultaneously. Secondary cursors rendered as yellow blocks. `Esc` clears all secondary cursors.
+
 ## [0.1.22] - 2026-03-28
 
 ### Added

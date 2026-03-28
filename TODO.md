@@ -451,6 +451,6 @@ When working on this project with Claude Code:
 - [ ] Wire TLS into actual streams (needs reader/writer refactor)
 - [ ] More LSP features (rename, references panel)
 - [ ] Undo tree visualization
-- [ ] Multi-cursor editing
+- [x] Multi-cursor editing
 - [ ] Snippet system
 - [ ] Integrated debugger (DAP protocol)

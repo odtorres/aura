@@ -1415,6 +1415,49 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
         }
 
+        // Ctrl+D — add cursor at next occurrence of word under cursor.
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+            let tab = app.tab();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            let (wstart, wend) = tab.buffer.find_inner_word(pos);
+            if wend > wstart {
+                let word = tab.buffer.rope().slice(wstart..wend).to_string();
+                let text = tab.buffer.rope().to_string();
+                // Search forward from the last cursor (primary or last secondary).
+                let search_from = {
+                    let last = app
+                        .tab()
+                        .secondary_cursors
+                        .last()
+                        .map(|c| app.tab().buffer.cursor_to_char_idx(c))
+                        .unwrap_or(wend);
+                    last
+                };
+                if let Some(found) = text[search_from..].find(&word) {
+                    let match_pos = search_from + found;
+                    let new_cursor = app.tab().buffer.char_idx_to_cursor(match_pos);
+                    app.tab_mut().secondary_cursors.push(new_cursor);
+                    let count = app.tab().secondary_cursors.len() + 1;
+                    app.set_status(format!("{count} cursors"));
+                } else {
+                    // Wrap around — search from beginning.
+                    if let Some(found) = text.find(&word) {
+                        let match_pos = found;
+                        let existing = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                        if match_pos != existing {
+                            let new_cursor = app.tab().buffer.char_idx_to_cursor(match_pos);
+                            // Check it's not already a cursor.
+                            if !app.tab().secondary_cursors.contains(&new_cursor) {
+                                app.tab_mut().secondary_cursors.push(new_cursor);
+                            }
+                        }
+                        let count = app.tab().secondary_cursors.len() + 1;
+                        app.set_status(format!("{count} cursors"));
+                    }
+                }
+            }
+        }
+
         // . — dot repeat last edit.
         KeyCode::Char('.') => {
             app.dot_repeat();
@@ -1537,15 +1580,50 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
+            // Clear multi-cursors.
+            app.tab_mut().secondary_cursors.clear();
             // In normal mode, cursor sits on the last char, not after it.
             let tab = app.tab_mut();
             tab.cursor.col = tab.cursor.col.saturating_sub(1);
             app.clamp_cursor();
         }
         KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
-            let tab = app.tab_mut();
-            let new_pos = tab.buffer.insert_char(&tab.cursor, c, AuthorId::human());
-            tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+            // Multi-cursor: insert at all cursor positions (right-to-left).
+            let has_secondary = !app.tab().secondary_cursors.is_empty();
+            if has_secondary {
+                let mut all_positions: Vec<usize> = {
+                    let tab = app.tab();
+                    let mut pos = vec![tab.buffer.cursor_to_char_idx(&tab.cursor)];
+                    for sc in &tab.secondary_cursors {
+                        pos.push(tab.buffer.cursor_to_char_idx(sc));
+                    }
+                    pos.sort_unstable();
+                    pos.dedup();
+                    pos
+                };
+                // Insert right-to-left to avoid index shifting.
+                all_positions.sort_unstable_by(|a, b| b.cmp(a));
+                let ch_str = c.to_string();
+                for &pos in &all_positions {
+                    app.tab_mut().buffer.insert(pos, &ch_str, AuthorId::human());
+                }
+                // Update all cursor positions (each shifted by insertions before it).
+                all_positions.sort_unstable();
+                let tab = app.tab_mut();
+                for (i, &pos) in all_positions.iter().enumerate() {
+                    let new_pos = pos + i + 1; // +1 for the char, +i for prior insertions
+                    let new_cursor = tab.buffer.char_idx_to_cursor(new_pos);
+                    if i == 0 {
+                        tab.cursor = new_cursor;
+                    } else if let Some(sc) = tab.secondary_cursors.get_mut(i - 1) {
+                        *sc = new_cursor;
+                    }
+                }
+            } else {
+                let tab = app.tab_mut();
+                let new_pos = tab.buffer.insert_char(&tab.cursor, c, AuthorId::human());
+                tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+            }
             app.mark_highlights_dirty();
 
             // Auto-dedent: if we just typed a closing bracket on an

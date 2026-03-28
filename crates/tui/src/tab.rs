@@ -98,6 +98,8 @@ pub struct EditorTab {
     pub scroll_col: usize,
     /// Anchor position for visual mode selection.
     pub visual_anchor: Option<Cursor>,
+    /// Secondary cursors for multi-cursor editing.
+    pub secondary_cursors: Vec<Cursor>,
     /// Syntax highlighter (None if language not supported).
     pub highlighter: Option<SyntaxHighlighter>,
     /// Cached per-line highlight colours. Regenerated on edits.
@@ -180,6 +182,7 @@ impl EditorTab {
             scroll_row: 0,
             scroll_col: 0,
             visual_anchor: None,
+            secondary_cursors: Vec::new(),
             highlighter,
             highlight_lines,
             highlights_dirty: false,

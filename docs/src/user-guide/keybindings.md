@@ -120,6 +120,7 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `Ctrl+T` | Toggle terminal pane (and focus) |
 | `Ctrl+J` | Toggle chat panel (and focus) |
 | `Ctrl+H` | Toggle conversation history panel |
+| `Ctrl+D` | Add cursor at next word match (multi-cursor) |
 | `Ctrl+B` | Open branch picker |
 | `Ctrl+P` | Open command palette |
 | `Ctrl+W` | Toggle split pane focus |

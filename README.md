@@ -153,6 +153,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `Ctrl+T` | Toggle terminal pane |
 | `Ctrl+J` | Toggle chat panel |
 | `Ctrl+H` | Toggle conversation history |
+| `Ctrl+D` | Add cursor at next word match (multi-cursor) |
 | `Ctrl+B` | Open branch picker |
 | `Ctrl+P` | Open command palette |
 | `Ctrl+H` | Toggle AI History panel |
