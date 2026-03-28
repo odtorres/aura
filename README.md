@@ -104,6 +104,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `o` | Open line below (enter Insert) |
 | `v` | Enter Visual mode |
 | `V` | Enter Visual Line mode |
+| `Ctrl+V` | Enter Visual Block mode (column select) |
 | `:` | Enter Command mode |
 | `h` / `Left` | Move left |
 | `j` / `Down` | Move down |

@@ -98,6 +98,8 @@ pub enum Mode {
     Visual,
     /// Line-wise visual selection mode.
     VisualLine,
+    /// Block (column) visual selection mode.
+    VisualBlock,
     /// User is typing a natural-language intent for the AI.
     Intent,
     /// Reviewing an AI-proposed change.
@@ -115,6 +117,7 @@ impl Mode {
             Mode::Command => "COMMAND",
             Mode::Visual => "VISUAL",
             Mode::VisualLine => "V-LINE",
+            Mode::VisualBlock => "V-BLOCK",
             Mode::Intent => "INTENT",
             Mode::Review => "REVIEW",
             Mode::Diff => "DIFF",
@@ -831,7 +834,10 @@ impl App {
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             // Clear the drag anchor if no selection was made.
-                            if self.mode != Mode::Visual && self.mode != Mode::VisualLine {
+                            if !matches!(
+                                self.mode,
+                                Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+                            ) {
                                 self.tab_mut().visual_anchor = None;
                             }
                         }
@@ -1038,7 +1044,9 @@ impl App {
             Mode::Normal => crate::input::handle_normal(self, code, modifiers),
             Mode::Insert => crate::input::handle_insert(self, code, modifiers),
             Mode::Command => crate::input::handle_command(self, code, modifiers),
-            Mode::Visual | Mode::VisualLine => crate::input::handle_visual(self, code, modifiers),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
+                crate::input::handle_visual(self, code, modifiers)
+            }
             Mode::Intent => crate::input::handle_intent(self, code, modifiers),
             Mode::Review => crate::input::handle_review(self, code, modifiers),
             Mode::Diff => crate::input::handle_diff(self, code, modifiers),
@@ -4735,6 +4743,19 @@ impl App {
                 let (start, end) = if a <= b { (a, b + 1) } else { (b, a + 1) };
                 Some((start, end.min(tab.buffer.len_chars())))
             }
+            Mode::VisualBlock => {
+                // Block selection: rectangular area from anchor to cursor.
+                // Return the full range covering all lines in the block.
+                let (start_row, end_row) = if anchor.row <= tab.cursor.row {
+                    (anchor.row, tab.cursor.row)
+                } else {
+                    (tab.cursor.row, anchor.row)
+                };
+                let start = tab.buffer.cursor_to_char_idx(&Cursor::new(start_row, 0));
+                let end_cursor = Cursor::new(end_row + 1, 0);
+                let end = tab.buffer.cursor_to_char_idx(&end_cursor);
+                Some((start, end.min(tab.buffer.len_chars())))
+            }
             Mode::VisualLine => {
                 let (start_row, end_row) = if anchor.row <= tab.cursor.row {
                     (anchor.row, tab.cursor.row)
@@ -4748,6 +4769,26 @@ impl App {
             }
             _ => None,
         }
+    }
+
+    /// Get the visual block selection rectangle (start_row, end_row, start_col, end_col).
+    pub fn visual_block_rect(&self) -> Option<(usize, usize, usize, usize)> {
+        if self.mode != Mode::VisualBlock {
+            return None;
+        }
+        let tab = self.tab();
+        let anchor = tab.visual_anchor?;
+        let (start_row, end_row) = if anchor.row <= tab.cursor.row {
+            (anchor.row, tab.cursor.row)
+        } else {
+            (tab.cursor.row, anchor.row)
+        };
+        let (start_col, end_col) = if anchor.col <= tab.cursor.col {
+            (anchor.col, tab.cursor.col)
+        } else {
+            (tab.cursor.col, anchor.col)
+        };
+        Some((start_row, end_row, start_col, end_col))
     }
 
     // ----- Collaboration -----

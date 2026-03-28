@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.19] - 2026-03-28
+
+### Added
+
+- **Visual block mode** — `Ctrl+V` enters column selection mode (V-BLOCK). Select rectangular regions, delete columns with `d`, yank blocks with `y`, insert at block start with `I`, append with `A`. Block selections highlighted per-cell in the editor.
+
+### Fixed
+
+- **Diff view colors** — Toned down additions (dark green bg) and deletions (dark red bg) for much better readability.
+- **TODO.md formatting** — Fixed section 10.7 heading and checklist formatting.
+
 ## [0.1.18] - 2026-03-28
 
 ### Added

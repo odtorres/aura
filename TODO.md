@@ -445,3 +445,12 @@ When working on this project with Claude Code:
 - [x] How aggressive should the speculative execution be by default? → **Decided: Configurable via `<leader>g`** (minimal/moderate/proactive)
 - [x] Should AURA support Vim emulation deeply, or define its own keybinding paradigm? → **Decided: Vim-inspired essentials**, not full emulation
 - [x] How to handle very long conversations — auto-compact with configurable retention, AI summarization, context window capping
+
+### 10.7 Potential future work
+- [x] Visual block mode (Ctrl+V column editing)
+- [ ] Wire TLS into actual streams (needs reader/writer refactor)
+- [ ] More LSP features (rename, references panel)
+- [ ] Undo tree visualization
+- [ ] Multi-cursor editing
+- [ ] Snippet system
+- [ ] Integrated debugger (DAP protocol)

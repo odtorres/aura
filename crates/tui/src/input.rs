@@ -1049,6 +1049,11 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.mode = Mode::Command;
             app.command_input.clear();
         }
+        KeyCode::Char('v') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.mode = Mode::VisualBlock;
+            let cursor = app.tab().cursor;
+            app.tab_mut().visual_anchor = Some(cursor);
+        }
         KeyCode::Char('v') => {
             app.mode = Mode::Visual;
             let cursor = app.tab().cursor;
@@ -1708,7 +1713,35 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
         // Delete selection
         KeyCode::Char('d') | KeyCode::Char('x') => {
-            if let Some((start, end)) = app.visual_selection_range() {
+            if app.mode == Mode::VisualBlock {
+                // Block delete: remove column range from each row.
+                if let Some((sr, er, sc, ec)) = app.visual_block_rect() {
+                    let mut yanked = String::new();
+                    // Delete from bottom to top to avoid index shifting.
+                    for row in (sr..=er).rev() {
+                        let tab = app.tab_mut();
+                        let line_start = tab
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
+                        let line_len = tab
+                            .buffer
+                            .line(row)
+                            .map(|l| l.len_chars().saturating_sub(1))
+                            .unwrap_or(0);
+                        let del_start = line_start + sc.min(line_len);
+                        let del_end = line_start + (ec + 1).min(line_len);
+                        if del_end > del_start {
+                            let text = tab.buffer.rope().slice(del_start..del_end).to_string();
+                            yanked = format!("{text}\n{yanked}");
+                            tab.buffer.delete(del_start, del_end, AuthorId::human());
+                        }
+                    }
+                    app.register = Some(yanked);
+                    app.tab_mut().cursor.col = sc;
+                    app.clamp_cursor();
+                    app.mark_highlights_dirty();
+                }
+            } else if let Some((start, end)) = app.visual_selection_range() {
                 let tab = app.tab_mut();
                 let text = tab.buffer.rope().slice(start..end).to_string();
                 app.register = Some(text);
@@ -1722,11 +1755,37 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.tab_mut().visual_anchor = None;
         }
         // Yank selection
-        KeyCode::Char('y') => {
-            if let Some((start, end)) = app.visual_selection_range() {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            if app.mode == Mode::VisualBlock {
+                if let Some((sr, er, sc, ec)) = app.visual_block_rect() {
+                    let mut yanked = String::new();
+                    for row in sr..=er {
+                        let tab = app.tab();
+                        let line_start = tab
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
+                        let line_len = tab
+                            .buffer
+                            .line(row)
+                            .map(|l| l.len_chars().saturating_sub(1))
+                            .unwrap_or(0);
+                        let yank_start = line_start + sc.min(line_len);
+                        let yank_end = line_start + (ec + 1).min(line_len);
+                        if yank_end > yank_start {
+                            let text = tab.buffer.rope().slice(yank_start..yank_end).to_string();
+                            yanked.push_str(&text);
+                        }
+                        yanked.push('\n');
+                    }
+                    app.register = Some(yanked.clone());
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&yanked);
+                    }
+                    app.set_status("Yanked block");
+                }
+            } else if let Some((start, end)) = app.visual_selection_range() {
                 let text = app.tab().buffer.rope().slice(start..end).to_string();
                 app.register = Some(text.clone());
-                // Also copy to system clipboard.
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set_text(&text);
                 }
@@ -1734,6 +1793,26 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             app.mode = Mode::Normal;
             app.tab_mut().visual_anchor = None;
+        }
+        // I — block insert (prepend text to each line in block).
+        KeyCode::Char('I') if app.mode == Mode::VisualBlock => {
+            if let Some((sr, _er, sc, _ec)) = app.visual_block_rect() {
+                app.tab_mut().cursor.row = sr;
+                app.tab_mut().cursor.col = sc;
+                app.mode = Mode::Insert;
+                // The actual multi-line insertion happens when exiting Insert
+                // mode — for now, just position cursor at block start.
+                app.tab_mut().visual_anchor = None;
+            }
+        }
+        // A — block append (append text after each line in block).
+        KeyCode::Char('A') if app.mode == Mode::VisualBlock => {
+            if let Some((sr, _er, _sc, ec)) = app.visual_block_rect() {
+                app.tab_mut().cursor.row = sr;
+                app.tab_mut().cursor.col = ec + 1;
+                app.mode = Mode::Insert;
+                app.tab_mut().visual_anchor = None;
+            }
         }
         // Ctrl+C / Cmd+C — copy selection to system clipboard.
         KeyCode::Char('c')

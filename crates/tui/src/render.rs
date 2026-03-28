@@ -2576,11 +2576,24 @@ fn draw_editor(
             let mut current_span = String::new();
             let mut current_style: Option<Style> = None;
 
+            // Get block selection rectangle if in VisualBlock mode.
+            let block_rect = app.visual_block_rect();
+
             for (col, ch) in visible_chars.iter().enumerate() {
                 let char_abs = line_start_idx + visible_start + col;
-                let in_selection = selection
-                    .map(|(s, e)| char_abs >= s && char_abs < e)
+                let actual_col = visible_start + col;
+
+                // Block selection: check if this cell is within the rectangle.
+                let in_block = block_rect
+                    .map(|(sr, er, sc, ec)| {
+                        line_idx >= sr && line_idx <= er && actual_col >= sc && actual_col <= ec
+                    })
                     .unwrap_or(false);
+
+                let in_selection = in_block
+                    || selection
+                        .map(|(s, e)| char_abs >= s && char_abs < e)
+                        .unwrap_or(false);
 
                 // Check bracket match highlight.
                 let is_bracket_match = app
@@ -2893,7 +2906,9 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => Style::default().fg(Color::Black).bg(theme.mode_normal),
         Mode::Insert => Style::default().fg(Color::Black).bg(theme.mode_insert),
         Mode::Command => Style::default().fg(Color::Black).bg(theme.mode_command),
-        Mode::Visual | Mode::VisualLine => Style::default().fg(Color::Black).bg(theme.mode_visual),
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
+            Style::default().fg(Color::Black).bg(theme.mode_visual)
+        }
         Mode::Intent => Style::default().fg(Color::Black).bg(theme.mode_intent),
         Mode::Review => Style::default().fg(Color::Black).bg(theme.mode_review),
         Mode::Diff => Style::default().fg(Color::Black).bg(Color::Cyan),
@@ -3008,7 +3023,10 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         update_indicator
     );
     // Show selection info when in visual mode.
-    let selection_info = if matches!(app.mode, Mode::Visual | Mode::VisualLine) {
+    let selection_info = if matches!(
+        app.mode,
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+    ) {
         if let Some((sel_start, sel_end)) = app.visual_selection_range() {
             let start_cur = app.buffer().char_idx_to_cursor(sel_start);
             let end_cur = app.buffer().char_idx_to_cursor(sel_end);

@@ -545,7 +545,7 @@ impl CollabSession {
                     let snaps = file_snaps_for_accept.lock().expect("lock poisoned").clone();
                     let shutdown_peer = shutdown_accept.clone();
                     let auth_token = auth_token_for_accept.clone();
-                    let tls_config = tls_config_for_accept.clone();
+                    let _tls_config = tls_config_for_accept.clone();
 
                     thread::Builder::new()
                         .name("collab-peer".to_string())
