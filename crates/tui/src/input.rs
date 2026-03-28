@@ -645,6 +645,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Ctrl+B — open branch picker from any mode.
+    if code == KeyCode::Char('b') && modifiers.contains(KeyModifiers::CONTROL) {
+        app.open_branch_picker();
+        return;
+    }
+
     // Route keys to the branch picker when visible.
     if app.branch_picker.visible {
         match code {
