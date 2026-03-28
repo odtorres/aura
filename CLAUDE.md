@@ -149,6 +149,7 @@ aura-editor/
     │       ├── command_palette.rs      # Fuzzy command palette (Ctrl+P)
     │       ├── branch_picker.rs        # Git branch picker modal (Ctrl+B)
     │       ├── claude_watcher.rs       # Claude Code JSONL activity observer
+    │       ├── git_graph.rs            # Visual git graph modal (:graph)
     │       ├── session.rs              # Session persistence (save/restore)
     │       └── help.rs                 # In-editor help overlay
     ├── ai/

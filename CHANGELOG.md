@@ -5,6 +5,20 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.27] - 2026-03-28
+
+### Summary — Session Highlights (v0.1.2 → v0.1.27)
+
+This release consolidates 27 versions of feature development:
+
+- **Collaborative editing** — Real-time multi-file collab with auth tokens and peer cursors
+- **Vim power features** — Operator+motion, text objects, char search, visual block, multi-cursor, dot repeat, macros
+- **17+ languages** — Tree-sitter highlighting + LSP for Rust, Python, TypeScript, Go, Java, C/C++, Ruby, HTML, CSS, JSON, YAML, TOML, Bash, Markdown, JSX/TSX
+- **Git integration** — Visual graph modal, branch picker, stage-all button, AI commit messages, syntax-highlighted diff view, filename-first entries, dotfiles visible
+- **AI features** — Conversation compaction with AI summarization, Claude Code activity observer, command palette, interactive chat with tool execution
+- **Editor UX** — Split panes, settings modal, optional minimap, tab close buttons, Lua plugin runtime, code snippets (32 built-in)
+- **Code quality** — No unwrap() in library code, LSP auto-restart, community standards
+
 ## [0.1.26] - 2026-03-28
 
 ### Added
