@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.15] - 2026-03-28
+
+### Added
+
+- **Claude Code activity observer** — Background watcher that tails Claude Code's JSONL conversation logs (`~/.claude/projects/`) in real-time. Displays tool calls, responses, and progress events in AURA's status bar (e.g., "CC: Read: main.rs", "CC: Running cargo test...").
+- **MCP `report_activity` tool** — Claude Code can proactively report what it's doing to AURA's agent registry (activity type, description, current task).
+- **MCP `get_editor_state` tool** — Claude Code can query AURA's full state: current mode, open files, cursor position, diagnostics count, modification status.
+- **Enhanced agent registry** — Agents now track `last_activity`, `current_task`, and `activity_count`.
+
+### Fixed
+
+- **LSP auto-restart** — When the LSP server disconnects (crash/OOM), AURA now automatically restarts it instead of leaving it dead.
+
 ## [0.1.14] - 2026-03-28
 
 ### Added

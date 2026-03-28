@@ -258,6 +258,8 @@ pub struct App {
     pub settings_modal: crate::settings_modal::SettingsModal,
     /// Command palette overlay.
     pub command_palette: crate::command_palette::CommandPalette,
+    /// Claude Code activity watcher.
+    pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
     // --- Split panes ---
     /// Whether a split pane is active.
@@ -594,6 +596,7 @@ impl App {
             help: HelpOverlay::new(),
             settings_modal: crate::settings_modal::SettingsModal::new(),
             command_palette: crate::command_palette::CommandPalette::new(),
+            claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,
             split_tab_idx: 0,
@@ -771,6 +774,21 @@ impl App {
             // Poll for AI commit message tokens and conversation summarization.
             self.poll_commit_msg();
             self.poll_summarize();
+
+            // Poll for Claude Code activity.
+            if let Some(watcher) = &mut self.claude_watcher {
+                let events = watcher.poll_events();
+                for event in &events {
+                    if let crate::claude_watcher::ClaudeActivity::ToolCall {
+                        name,
+                        input_summary,
+                        ..
+                    } = event
+                    {
+                        tracing::debug!("Claude Code: {name}({input_summary})");
+                    }
+                }
+            }
 
             // Poll for collaboration events and broadcast awareness.
             self.poll_collab_events();
@@ -2556,6 +2574,51 @@ impl App {
                         success: false,
                         data: serde_json::json!({ "error": "Failed to create conversation" }),
                     },
+                }
+            }
+            McpAction::ReportActivity {
+                agent_id,
+                activity_type,
+                description,
+            } => {
+                if let Some(agent) = self.agent_registry.agents.get_mut(agent_id) {
+                    agent.last_activity = Some(format!("{activity_type}: {description}"));
+                    agent.current_task = Some(description.clone());
+                    agent.activity_count += 1;
+                }
+                tracing::debug!("Agent {agent_id} activity: {activity_type}: {description}");
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "recorded": true }),
+                }
+            }
+            McpAction::GetEditorState => {
+                let tab = self.tab();
+                let file_path = tab
+                    .buffer
+                    .file_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                let open_files: Vec<String> = self
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .map(|t| t.file_name().to_string())
+                    .collect();
+                let diagnostics_count = tab.diagnostics.len();
+                McpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "mode": self.mode.label(),
+                        "current_file": file_path,
+                        "cursor_row": tab.cursor.row,
+                        "cursor_col": tab.cursor.col,
+                        "open_files": open_files,
+                        "tab_count": self.tabs.count(),
+                        "diagnostics_count": diagnostics_count,
+                        "modified": tab.buffer.is_modified(),
+                        "line_count": tab.buffer.line_count(),
+                    }),
                 }
             }
         }

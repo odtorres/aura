@@ -2802,8 +2802,15 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         crate::collab::CollabStatus::Inactive => String::new(),
     };
 
+    let claude_indicator = app
+        .claude_watcher
+        .as_ref()
+        .and_then(|w| w.latest_activity.as_ref())
+        .map(|a| format!(" │ {a}"))
+        .unwrap_or_default();
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -2813,6 +2820,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         lsp_indicator,
         mcp_indicator,
         collab_indicator,
+        claude_indicator,
         experiment_indicator,
         update_indicator
     );

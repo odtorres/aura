@@ -127,6 +127,17 @@ pub enum McpAction {
         /// Optional end line the message relates to.
         line_end: Option<usize>,
     },
+    /// Report agent activity (what the agent is currently doing).
+    ReportActivity {
+        /// Agent identifier.
+        agent_id: String,
+        /// Activity type (e.g., "thinking", "tool_call", "editing").
+        activity_type: String,
+        /// Description of the activity.
+        description: String,
+    },
+    /// Get the current editor state (open files, mode, diagnostics).
+    GetEditorState,
 }
 
 /// Response from the App event loop back to the MCP server thread.
@@ -178,6 +189,12 @@ pub struct AgentInfo {
     pub edit_count: usize,
     /// Role assigned to this agent (e.g., "tests", "implementation", "review").
     pub role: Option<String>,
+    /// Latest activity description (reported by the agent).
+    pub last_activity: Option<String>,
+    /// What the agent is currently working on.
+    pub current_task: Option<String>,
+    /// Total number of activity reports.
+    pub activity_count: usize,
 }
 
 /// Tracks connected MCP agents.
@@ -200,6 +217,9 @@ impl AgentRegistry {
                 connected_at: now_iso(),
                 edit_count: 0,
                 role: None,
+                last_activity: None,
+                current_task: None,
+                activity_count: 0,
             },
         );
         true
@@ -217,6 +237,9 @@ impl AgentRegistry {
                 connected_at: now_iso(),
                 edit_count: 0,
                 role,
+                last_activity: None,
+                current_task: None,
+                activity_count: 0,
             },
         );
         true

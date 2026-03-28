@@ -7,6 +7,7 @@
 pub mod app;
 pub mod chat_panel;
 pub mod chat_tools;
+pub mod claude_watcher;
 pub mod collab;
 pub mod command_palette;
 pub mod config;
