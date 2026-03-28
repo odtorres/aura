@@ -2487,13 +2487,7 @@ impl App {
     pub fn run_update(&mut self) {
         self.update_modal_visible = false;
         if let Some(UpdateStatus::Available { ref version, .. }) = self.update_status {
-            let method = update::detect_install_method();
-            let cmd = match method {
-                update::InstallMethod::Homebrew => "brew upgrade aura".to_string(),
-                update::InstallMethod::CargoInstall => "cargo install aura".to_string(),
-                update::InstallMethod::Aur => "yay -S aura-editor".to_string(),
-                _ => "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh".to_string(),
-            };
+            let cmd = "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh".to_string();
             self.set_status(format!("Updating to v{}...", version));
             // Run the update command in the embedded terminal.
             self.terminal.visible = true;

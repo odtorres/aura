@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-03-27
+
+### Fixed
+
+- **Update installer** — The in-app updater now always uses the shell installer (`curl ... | sh`) instead of `cargo install` which requires crates.io publishing. Works reliably for all installation methods.
+
 ## [0.1.9] - 2026-03-27
 
 ### Added

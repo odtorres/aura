@@ -255,24 +255,11 @@ pub fn detect_install_method() -> InstallMethod {
 }
 
 /// Return a user-friendly upgrade instruction string.
-pub fn upgrade_instructions(method: &InstallMethod, version: &str) -> String {
-    match method {
-        InstallMethod::Homebrew => {
-            format!("Run: brew upgrade aura  (v{version})")
-        }
-        InstallMethod::CargoInstall => {
-            format!("Run: cargo install aura  (v{version})")
-        }
-        InstallMethod::Aur => {
-            format!("Update via your AUR helper, e.g.: yay -S aura-editor  (v{version})")
-        }
-        InstallMethod::ShellInstaller | InstallMethod::Unknown => {
-            format!(
-                "Run: curl --proto '=https' --tlsv1.2 -LsSf \
-                 https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh  (v{version})"
-            )
-        }
-    }
+pub fn upgrade_instructions(_method: &InstallMethod, version: &str) -> String {
+    format!(
+        "Run: curl --proto '=https' --tlsv1.2 -LsSf \
+         https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh  (v{version})"
+    )
 }
 
 #[cfg(test)]
@@ -288,13 +275,11 @@ mod tests {
     #[test]
     fn upgrade_instructions_formatting() {
         let instr = upgrade_instructions(&InstallMethod::Homebrew, "0.2.0");
-        assert!(instr.contains("brew upgrade"));
-
-        let instr = upgrade_instructions(&InstallMethod::CargoInstall, "0.2.0");
-        assert!(instr.contains("cargo install"));
+        assert!(instr.contains("curl"));
+        assert!(instr.contains("0.2.0"));
 
         let instr = upgrade_instructions(&InstallMethod::ShellInstaller, "0.2.0");
-        assert!(instr.contains("curl"));
+        assert!(instr.contains("aura-installer.sh"));
     }
 
     #[test]
