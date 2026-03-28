@@ -263,6 +263,8 @@ pub struct App {
     pub command_palette: crate::command_palette::CommandPalette,
     /// Branch picker modal.
     pub branch_picker: crate::branch_picker::BranchPicker,
+    /// Git graph modal.
+    pub git_graph: crate::git_graph::GitGraphModal,
     /// Claude Code activity watcher.
     pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
@@ -602,6 +604,7 @@ impl App {
             settings_modal: crate::settings_modal::SettingsModal::new(),
             command_palette: crate::command_palette::CommandPalette::new(),
             branch_picker: crate::branch_picker::BranchPicker::new(),
+            git_graph: crate::git_graph::GitGraphModal::new(),
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,
@@ -3234,6 +3237,33 @@ impl App {
             .as_ref()
             .and_then(|r| r.list_branches().ok())
             .unwrap_or_default()
+    }
+
+    /// Open the git graph modal.
+    pub fn open_git_graph(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            match repo.graph_log(100) {
+                Ok(commits) => {
+                    self.git_graph.open(commits);
+                    // Load files for first commit.
+                    self.load_graph_commit_files();
+                }
+                Err(e) => self.set_status(format!("Git graph failed: {e}")),
+            }
+        } else {
+            self.set_status("Not a git repository");
+        }
+    }
+
+    /// Load changed files for the selected commit in the git graph.
+    pub fn load_graph_commit_files(&mut self) {
+        let hash = match self.git_graph.selected_hash() {
+            Some(h) => h.to_string(),
+            None => return,
+        };
+        if let Some(repo) = &self.git_repo {
+            self.git_graph.detail_files = repo.commit_files(&hash).unwrap_or_default();
+        }
     }
 
     /// Open the branch picker modal.

@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.26] - 2026-03-28
+
+### Added
+
+- **Visual git graph modal** — `:graph` opens a full-screen modal showing commit history with ASCII branch graph lines, colored by branch. Left panel shows graph + commit hash + message + time. Right panel shows selected commit detail: full hash, author, date, refs, and changed files with status (M/A/D) and filename-first display. Navigate with j/k, page with d/u, Enter toggles detail panel, Esc closes.
+
 ## [0.1.25] - 2026-03-28
 
 ### Added

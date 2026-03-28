@@ -728,6 +728,101 @@ impl GitRepo {
             Ok(truncated)
         }
     }
+
+    /// Get extended commit log with parent hashes and decorations for graph view.
+    pub fn graph_log(&self, limit: usize) -> anyhow::Result<Vec<GraphCommit>> {
+        let output = std::process::Command::new("git")
+            .args([
+                "log",
+                "--all",
+                &format!("-n{limit}"),
+                "--format=%H%x00%h%x00%an%x00%s%x00%P%x00%ct%x00%D",
+            ])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut commits = Vec::new();
+
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split('\x00').collect();
+            if parts.len() >= 6 {
+                commits.push(GraphCommit {
+                    hash: parts[0].to_string(),
+                    short: parts[1].to_string(),
+                    author: parts[2].to_string(),
+                    summary: parts[3].to_string(),
+                    parents: parts[4].split_whitespace().map(String::from).collect(),
+                    timestamp: parts[5].parse().unwrap_or(0),
+                    refs: if parts.len() > 6 && !parts[6].is_empty() {
+                        parts[6].split(", ").map(|s| s.trim().to_string()).collect()
+                    } else {
+                        Vec::new()
+                    },
+                });
+            }
+        }
+        Ok(commits)
+    }
+
+    /// Get the list of files changed in a specific commit.
+    pub fn commit_files(&self, hash: &str) -> anyhow::Result<Vec<(char, String)>> {
+        let output = std::process::Command::new("git")
+            .args(["diff-tree", "--name-status", "-r", "--no-commit-id", hash])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut files = Vec::new();
+        for line in stdout.lines() {
+            if let Some((status, path)) = line.split_once('\t') {
+                let status_char = status.chars().next().unwrap_or('?');
+                files.push((status_char, path.to_string()));
+            }
+        }
+        Ok(files)
+    }
+}
+
+/// A commit with parent/ancestry info for graph visualization.
+#[derive(Debug, Clone)]
+pub struct GraphCommit {
+    /// Full commit hash.
+    pub hash: String,
+    /// Short (7-char) commit hash.
+    pub short: String,
+    /// Author name.
+    pub author: String,
+    /// First line of commit message.
+    pub summary: String,
+    /// Parent commit hashes.
+    pub parents: Vec<String>,
+    /// Unix timestamp.
+    pub timestamp: i64,
+    /// Branch/tag decorations.
+    pub refs: Vec<String>,
+}
+
+impl GraphCommit {
+    /// Format the timestamp as a relative time string.
+    pub fn time_ago(&self) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let diff = now - self.timestamp;
+        if diff < 60 {
+            "just now".to_string()
+        } else if diff < 3600 {
+            format!("{}m ago", diff / 60)
+        } else if diff < 86400 {
+            format!("{}h ago", diff / 3600)
+        } else if diff < 604800 {
+            format!("{}d ago", diff / 86400)
+        } else {
+            format!("{}w ago", diff / 604800)
+        }
+    }
 }
 
 /// Simple line diff using a longest common subsequence approach.

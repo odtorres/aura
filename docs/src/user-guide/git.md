@@ -84,6 +84,22 @@ Commits staged changes immediately with the provided message.
 
 When committing, AURA attaches conversation summaries as `Aura-Conversation` trailers in the commit message. This links the "why" (AI conversation) to the "what" (git diff).
 
+## Git Graph
+
+`:graph` opens a full-screen modal showing the project's commit history:
+
+- **Left panel (65%)**: ASCII branch graph with colored lines, commit hash (yellow), message, relative time
+- **Right panel (35%)**: Selected commit detail — full hash, author, date, branch refs, and changed files with M/A/D status
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate commits |
+| `d` / `u` | Page down / up |
+| `Enter` | Toggle detail panel |
+| `Esc` / `q` | Close modal |
+
+Branch decorations shown as green badges (e.g., `[HEAD -> main, origin/main]`). Merge commits create branch lines in the graph.
+
 ## Branch Management
 
 ### Branch Picker

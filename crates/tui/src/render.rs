@@ -237,6 +237,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_help(frame, app, area);
         }
 
+        // Render git graph modal if visible.
+        if app.git_graph.visible {
+            draw_git_graph_modal(frame, &app.git_graph, area);
+        }
+
         // Render branch picker if visible.
         if app.branch_picker.visible {
             draw_branch_picker(frame, &app.branch_picker, area);
@@ -2285,6 +2290,289 @@ fn draw_conversation_detail(
     let hint = " j/k:scroll  d/u:page  Esc:close ";
     frame.render_widget(
         Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+        Rect::new(rect.x + 1, footer_y, rect.width.saturating_sub(2), 1),
+    );
+}
+
+/// Draw the git graph modal (near full-screen with commit list + detail panel).
+fn draw_git_graph_modal(frame: &mut Frame, modal: &crate::git_graph::GitGraphModal, area: Rect) {
+    let margin = 1u16;
+    let width = area.width.saturating_sub(margin * 2);
+    let height = area.height.saturating_sub(margin * 2);
+    let x = area.x + margin;
+    let y = area.y + margin;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+
+    // Split: left (commit list) + right (detail).
+    let (list_area, detail_area) = if modal.show_detail && width > 60 {
+        let hsplit = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+            .split(rect);
+        (hsplit[0], Some(hsplit[1]))
+    } else {
+        (rect, None)
+    };
+
+    // Left panel: commit graph + list.
+    let left_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Git Graph ")
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    let left_inner = left_block.inner(list_area);
+    frame.render_widget(left_block, list_area);
+
+    if left_inner.height == 0 || modal.commits.is_empty() {
+        return;
+    }
+
+    let graph_colors: [Color; 6] = [
+        Color::Green,
+        Color::Cyan,
+        Color::Magenta,
+        Color::Yellow,
+        Color::Blue,
+        Color::Red,
+    ];
+
+    let visible_h = left_inner.height as usize;
+    let selected = modal.selected;
+    let scroll = if selected >= visible_h {
+        selected - visible_h + 1
+    } else {
+        0
+    };
+
+    for (vis_idx, commit_idx) in (scroll..).take(visible_h).enumerate() {
+        if commit_idx >= modal.commits.len() {
+            break;
+        }
+        let row_y = left_inner.y + vis_idx as u16;
+        let commit = &modal.commits[commit_idx];
+        let is_selected = commit_idx == selected;
+        let max_w = left_inner.width as usize;
+
+        // Graph chars.
+        let graph_str = modal
+            .graph_lines
+            .get(commit_idx)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let graph_w = graph_str.len().min(12);
+
+        // Refs badges.
+        let refs_str = if commit.refs.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " [{}]",
+                commit
+                    .refs
+                    .iter()
+                    .map(|r| r.replace("HEAD -> ", ""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+
+        // Time.
+        let time = commit.time_ago();
+
+        // Build spans.
+        let avail_msg = max_w.saturating_sub(graph_w + 1 + 8 + refs_str.len() + time.len() + 4);
+        let msg: String = commit.summary.chars().take(avail_msg).collect();
+
+        let bg = if is_selected {
+            Style::default().bg(Color::Rgb(30, 30, 60))
+        } else {
+            Style::default()
+        };
+
+        let mut spans: Vec<Span> = Vec::new();
+
+        // Graph characters with colors.
+        for (ci, ch) in graph_str.chars().take(graph_w).enumerate() {
+            let color_idx = modal
+                .graph_colors
+                .get(commit_idx)
+                .and_then(|c| c.get(ci))
+                .copied()
+                .unwrap_or(7);
+            let color = if color_idx < 6 {
+                graph_colors[color_idx as usize]
+            } else {
+                Color::DarkGray
+            };
+            spans.push(Span::styled(
+                ch.to_string(),
+                bg.fg(if ch == '*' { Color::White } else { color }),
+            ));
+        }
+
+        spans.push(Span::styled(
+            format!(" {} ", commit.short),
+            bg.fg(Color::Yellow),
+        ));
+
+        if !refs_str.is_empty() {
+            spans.push(Span::styled(
+                refs_str,
+                bg.fg(Color::Green).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        spans.push(Span::styled(
+            msg,
+            if is_selected {
+                bg.fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                bg.fg(Color::White)
+            },
+        ));
+
+        spans.push(Span::styled(format!("  {time}"), bg.fg(Color::DarkGray)));
+
+        let line = ratatui::text::Line::from(spans);
+        frame.render_widget(
+            Paragraph::new(line).style(bg),
+            Rect::new(left_inner.x, row_y, left_inner.width, 1),
+        );
+    }
+
+    // Right panel: commit detail.
+    if let Some(detail_rect) = detail_area {
+        let detail_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .title(" Commit Detail ")
+            .title_style(Style::default().fg(Color::DarkGray));
+        let detail_inner = detail_block.inner(detail_rect);
+        frame.render_widget(detail_block, detail_rect);
+
+        if let Some(commit) = modal.commits.get(selected) {
+            let mut row_y = detail_inner.y;
+            let dw = detail_inner.width as usize;
+
+            // Hash.
+            if row_y < detail_inner.y + detail_inner.height {
+                let h: String = format!("  {}", commit.hash).chars().take(dw).collect();
+                frame.render_widget(
+                    Paragraph::new(h).style(Style::default().fg(Color::Yellow)),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+            // Author + time.
+            if row_y < detail_inner.y + detail_inner.height {
+                let info: String = format!("  {} | {}", commit.author, commit.time_ago())
+                    .chars()
+                    .take(dw)
+                    .collect();
+                frame.render_widget(
+                    Paragraph::new(info).style(Style::default().fg(Color::Cyan)),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+            // Refs.
+            if !commit.refs.is_empty() && row_y < detail_inner.y + detail_inner.height {
+                let r: String = format!("  {}", commit.refs.join(", "))
+                    .chars()
+                    .take(dw)
+                    .collect();
+                frame.render_widget(
+                    Paragraph::new(r).style(Style::default().fg(Color::Green)),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+            // Message.
+            if row_y < detail_inner.y + detail_inner.height {
+                let m: String = format!("  {}", commit.summary).chars().take(dw).collect();
+                frame.render_widget(
+                    Paragraph::new(m).style(Style::default().fg(Color::White)),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+            // Separator.
+            if row_y < detail_inner.y + detail_inner.height {
+                frame.render_widget(
+                    Paragraph::new("─".repeat(dw)).style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+            // Changed files.
+            if row_y < detail_inner.y + detail_inner.height {
+                let header = format!("  Files ({})", modal.detail_files.len());
+                frame.render_widget(
+                    Paragraph::new(header).style(
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+            for (status, path) in &modal.detail_files {
+                if row_y >= detail_inner.y + detail_inner.height {
+                    break;
+                }
+                let color = match status {
+                    'M' => Color::Yellow,
+                    'A' => Color::Green,
+                    'D' => Color::Red,
+                    'R' => Color::Blue,
+                    _ => Color::DarkGray,
+                };
+                let filename = path.rsplit('/').next().unwrap_or(path);
+                let dir = if path.contains('/') {
+                    &path[..path.len() - filename.len() - 1]
+                } else {
+                    ""
+                };
+                let line = ratatui::text::Line::from(vec![
+                    Span::styled(format!("  {status} "), Style::default().fg(color)),
+                    Span::styled(
+                        filename.to_string(),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        if dir.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  {dir}")
+                        },
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]);
+                frame.render_widget(
+                    Paragraph::new(line),
+                    Rect::new(detail_inner.x, row_y, detail_inner.width, 1),
+                );
+                row_y += 1;
+            }
+        }
+    }
+
+    // Footer hint.
+    let footer_y = rect.y + rect.height.saturating_sub(1);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            " j/k:navigate  d/u:page  Enter:detail  Esc:close ",
+            Style::default().fg(Color::DarkGray),
+        )),
         Rect::new(rect.x + 1, footer_y, rect.width.saturating_sub(2), 1),
     );
 }

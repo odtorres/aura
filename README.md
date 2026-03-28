@@ -232,6 +232,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `:compact` | Compact conversation database |
 | `:host` | Start hosting a collab session |
 | `:join <addr:port>` | Join a collab session |
+| `:graph` | Open git graph modal |
 | `:branches` / `:br` | Open branch picker |
 | `:collab-stop` | End the collab session |
 

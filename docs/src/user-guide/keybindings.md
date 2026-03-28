@@ -213,6 +213,7 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `:vsplit` | `:vs` | Vertical split pane |
 | `:hsplit` | `:sp` | Horizontal split pane |
 | `:only` | | Close split pane |
+| `:graph` | | Open git graph modal |
 | `:branches` | `:br` | Open branch picker |
 | `:settings` | `:prefs` | Open settings modal |
 | `:update` | `:check-update` | Force check for updates |

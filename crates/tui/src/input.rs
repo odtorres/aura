@@ -651,6 +651,28 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Route keys to the git graph modal when visible.
+    if app.git_graph.visible {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => app.git_graph.close(),
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.git_graph.select_down();
+                app.load_graph_commit_files();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.git_graph.select_up();
+                app.load_graph_commit_files();
+            }
+            KeyCode::Char('d') => app.git_graph.page_down(10),
+            KeyCode::Char('u') => app.git_graph.page_up(10),
+            KeyCode::Enter => {
+                app.git_graph.show_detail = !app.git_graph.show_detail;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Route keys to the branch picker when visible.
     if app.branch_picker.visible {
         match code {
@@ -2430,6 +2452,9 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "branches" | "br" => {
             app.open_branch_picker();
+        }
+        "graph" | "git-graph" => {
+            app.open_git_graph();
         }
         _ if cmd.trim().starts_with("checkout ") => {
             let branch = cmd.trim().strip_prefix("checkout ").unwrap_or("").trim();
