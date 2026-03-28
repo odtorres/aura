@@ -534,7 +534,9 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
             DiffLine::LeftOnly(l) => {
                 old_line_no += 1;
 
-                let del_style = Style::default().fg(Color::White).bg(Color::Red);
+                let del_style = Style::default()
+                    .fg(Color::LightRed)
+                    .bg(Color::Rgb(60, 20, 20));
 
                 // Left gutter.
                 let left_gutter = format!("{:>4} ", old_line_no);
@@ -568,7 +570,9 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
             DiffLine::RightOnly(r) => {
                 new_line_no += 1;
 
-                let add_style = Style::default().fg(Color::White).bg(Color::Green);
+                let add_style = Style::default()
+                    .fg(Color::LightGreen)
+                    .bg(Color::Rgb(20, 50, 20));
 
                 // Left side: empty.
                 let empty = " ".repeat(left_inner.width as usize);
