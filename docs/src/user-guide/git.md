@@ -39,6 +39,15 @@ Open the git sidebar with `Ctrl+G` (or click the "Git" tab in the sidebar). The 
 | `i` / `Enter` | Edit commit message |
 | `Enter` (on file) | Open side-by-side diff view |
 
+### Side-by-Side Diff View
+
+Press `Enter` on a file entry to open a side-by-side diff with:
+
+- **Full syntax highlighting** — tree-sitter colors for all 17+ languages (keywords, strings, types, etc.)
+- **Dark-tinted backgrounds** — additions on dark green, deletions on dark red (readable)
+- **Minimap** with colored markers for added/deleted lines
+- Scroll with `j`/`k`, `Esc` to close
+
 ### Stage All Button
 
 A green `+` button appears on the "Changes (N)" header when there are unstaged files. Click it to stage all files at once. Same as pressing `S`.

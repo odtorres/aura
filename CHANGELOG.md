@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.22] - 2026-03-28
+
+### Added
+
+- **Syntax highlighting in diff view** — The side-by-side git diff view now applies tree-sitter syntax highlighting to all lines (unchanged, added, deleted). Supports all 17+ languages including JS/TS/JSX/TSX/React.
+- **Branch picker shortcut** — `Ctrl+B` opens the branch picker modal from any mode.
+- **Improved JS/TS/React/Next.js support** — `.jsx` uses TSX grammar for JSX highlighting. `.mjs`, `.cjs`, `.mts` extensions added. Full typescript-language-server LSP support.
+- **Dotfiles visible** — File tree shows `.env`, `.gitignore`, `.eslintrc`, etc.
+- **Filename-first git entries** — Git panel shows filename bold first, directory dimmed after.
+- **Branch picker modal** — `:branches` / `:br` / `Ctrl+B` opens VS Code-style branch switcher with filter.
+
 ## [0.1.21] - 2026-03-28
 
 ### Added
