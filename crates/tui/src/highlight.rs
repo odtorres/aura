@@ -76,6 +76,30 @@ pub enum Language {
     Tsx,
     /// Go language.
     Go,
+    /// JavaScript language.
+    JavaScript,
+    /// Java language.
+    Java,
+    /// C language.
+    C,
+    /// C++ language.
+    Cpp,
+    /// Ruby language.
+    Ruby,
+    /// HTML language.
+    Html,
+    /// CSS language.
+    Css,
+    /// JSON language.
+    Json,
+    /// Bash / Shell language.
+    Bash,
+    /// TOML language.
+    Toml,
+    /// YAML language.
+    Yaml,
+    /// Markdown language.
+    Markdown,
 }
 
 impl Language {
@@ -87,6 +111,19 @@ impl Language {
             "ts" => Some(Self::TypeScript),
             "tsx" => Some(Self::Tsx),
             "go" => Some(Self::Go),
+            "js" => Some(Self::JavaScript),
+            "jsx" => Some(Self::JavaScript),
+            "java" => Some(Self::Java),
+            "c" | "h" => Some(Self::C),
+            "cpp" | "cxx" | "cc" | "hpp" | "hxx" | "hh" => Some(Self::Cpp),
+            "rb" => Some(Self::Ruby),
+            "html" | "htm" => Some(Self::Html),
+            "css" => Some(Self::Css),
+            "json" => Some(Self::Json),
+            "sh" | "bash" | "zsh" => Some(Self::Bash),
+            "toml" => Some(Self::Toml),
+            "yaml" | "yml" => Some(Self::Yaml),
+            "md" | "markdown" => Some(Self::Markdown),
             _ => None,
         }
     }
@@ -131,6 +168,54 @@ impl SyntaxHighlighter {
             Language::Go => (
                 tree_sitter_go::LANGUAGE.into(),
                 tree_sitter_go::HIGHLIGHTS_QUERY,
+            ),
+            Language::JavaScript => (
+                tree_sitter_javascript::LANGUAGE.into(),
+                tree_sitter_javascript::HIGHLIGHT_QUERY,
+            ),
+            Language::Java => (
+                tree_sitter_java::LANGUAGE.into(),
+                tree_sitter_java::HIGHLIGHTS_QUERY,
+            ),
+            Language::C => (
+                tree_sitter_c::LANGUAGE.into(),
+                tree_sitter_c::HIGHLIGHT_QUERY,
+            ),
+            Language::Cpp => (
+                tree_sitter_cpp::LANGUAGE.into(),
+                tree_sitter_cpp::HIGHLIGHT_QUERY,
+            ),
+            Language::Ruby => (
+                tree_sitter_ruby::LANGUAGE.into(),
+                tree_sitter_ruby::HIGHLIGHTS_QUERY,
+            ),
+            Language::Html => (
+                tree_sitter_html::LANGUAGE.into(),
+                tree_sitter_html::HIGHLIGHTS_QUERY,
+            ),
+            Language::Css => (
+                tree_sitter_css::LANGUAGE.into(),
+                tree_sitter_css::HIGHLIGHTS_QUERY,
+            ),
+            Language::Json => (
+                tree_sitter_json::LANGUAGE.into(),
+                tree_sitter_json::HIGHLIGHTS_QUERY,
+            ),
+            Language::Bash => (
+                tree_sitter_bash::LANGUAGE.into(),
+                tree_sitter_bash::HIGHLIGHT_QUERY,
+            ),
+            Language::Toml => (
+                tree_sitter_toml_ng::LANGUAGE.into(),
+                tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
+            ),
+            Language::Yaml => (
+                tree_sitter_yaml::LANGUAGE.into(),
+                tree_sitter_yaml::HIGHLIGHTS_QUERY,
+            ),
+            Language::Markdown => (
+                tree_sitter_md::LANGUAGE.into(),
+                tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
             ),
         };
 

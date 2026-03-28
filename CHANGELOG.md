@@ -5,6 +5,13 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-03-27
+
+### Added
+
+- **12 new language grammars** — Tree-sitter syntax highlighting for JavaScript, Java, C, C++, Ruby, HTML, CSS, JSON, Bash, TOML, YAML, and Markdown. Total: 17 languages supported.
+- **6 new LSP servers** — Language server detection for Java (jdtls), C/C++ (clangd), Ruby (solargraph), and Bash (bash-language-server), in addition to existing Rust, Python, TypeScript, and Go servers.
+
 ## [0.1.8] - 2026-03-27
 
 ### Added

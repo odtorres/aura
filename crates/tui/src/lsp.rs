@@ -198,6 +198,15 @@ pub fn detect_server(extension: &str) -> Option<LspServerConfig> {
             "typescriptreact",
         ),
         "go" => ("gopls", vec!["serve".to_string()], "go"),
+        "java" => ("jdtls", vec![], "java"),
+        "c" | "h" => ("clangd", vec![], "c"),
+        "cpp" | "cxx" | "cc" | "hpp" | "hxx" | "hh" => ("clangd", vec![], "cpp"),
+        "rb" => ("solargraph", vec!["stdio".to_string()], "ruby"),
+        "sh" | "bash" | "zsh" => (
+            "bash-language-server",
+            vec!["start".to_string()],
+            "shellscript",
+        ),
         _ => return None,
     };
 

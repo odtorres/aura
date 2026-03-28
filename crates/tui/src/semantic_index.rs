@@ -28,6 +28,19 @@ impl SemanticIndexer {
             Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::Java => tree_sitter_java::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+            Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+            // Languages without semantic indexing support yet — return None.
+            Language::Html
+            | Language::Css
+            | Language::Json
+            | Language::Bash
+            | Language::Toml
+            | Language::Yaml
+            | Language::Markdown => return None,
         };
 
         let mut parser = Parser::new();
@@ -62,8 +75,15 @@ impl SemanticIndexer {
         match language {
             Language::Rust => self.extract_rust(root, source, path),
             Language::Python => self.extract_python(root, source, path),
-            Language::TypeScript | Language::Tsx => self.extract_typescript(root, source, path),
+            Language::TypeScript | Language::Tsx | Language::JavaScript => {
+                self.extract_typescript(root, source, path)
+            }
             Language::Go => self.extract_go(root, source, path),
+            Language::Java | Language::C | Language::Cpp | Language::Ruby => {
+                // Basic extraction using generic C-like patterns.
+                self.extract_rust(root, source, path)
+            }
+            _ => {} // No semantic extraction for markup/config languages.
         }
 
         self.resolve_deferred();
