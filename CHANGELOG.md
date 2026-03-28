@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.21] - 2026-03-28
+
+### Added
+
+- **Improved JS/TS/React/Next.js support** — `.jsx` now uses the TSX grammar for proper JSX syntax highlighting. Added `.mjs`, `.cjs`, `.mts` extensions for ES modules and CommonJS. All get typescript-language-server LSP support. Covers Next.js config files (`next.config.mjs`, etc.).
+
 ## [0.1.20] - 2026-03-28
 
 ### Added

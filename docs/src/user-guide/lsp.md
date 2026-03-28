@@ -49,7 +49,9 @@ LSP data enriches AI context:
 
 AURA ships with tree-sitter grammars for **17 languages**:
 
-Rust, Python, TypeScript, TSX, Go, JavaScript, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown
+Rust, Python, TypeScript, TSX, Go, JavaScript, JSX, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown
+
+**React/Next.js**: `.jsx` uses the TSX grammar for proper JSX highlighting. `.mjs`, `.cjs`, `.mts` supported for ES modules and CommonJS.
 
 ### LSP Server Auto-Detection
 
@@ -59,7 +61,7 @@ AURA auto-detects these language servers when they're installed:
 |----------|--------|---------|
 | Rust | `rust-analyzer` | `rustup component add rust-analyzer` |
 | Python | `pyright-langserver` | `npm install -g pyright` |
-| TypeScript/JS | `typescript-language-server` | `npm install -g typescript-language-server` |
+| TypeScript/JS/JSX/TSX | `typescript-language-server` | `npm install -g typescript-language-server` |
 | Go | `gopls` | `go install golang.org/x/tools/gopls@latest` |
 | Java | `jdtls` | Eclipse JDT Language Server |
 | C/C++ | `clangd` | LLVM/Clang toolchain |
