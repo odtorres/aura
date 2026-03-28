@@ -178,6 +178,22 @@ pub struct App {
     pub replace_char_pending: bool,
     /// Text object pending: true = inner (i), false = around (a). Waiting for delimiter.
     pub text_object_pending: Option<bool>,
+    /// Last edit keys for dot repeat (Normal mode key sequence that performed an edit).
+    pub last_edit_keys: Vec<crossterm::event::KeyEvent>,
+    /// Whether we are currently recording keys for dot repeat.
+    pub recording_edit: bool,
+    /// Current edit key accumulator (reset on mode change back to Normal).
+    pub current_edit_keys: Vec<crossterm::event::KeyEvent>,
+    /// Macro recording: which register (a-z) is being recorded, if any.
+    pub macro_recording: Option<char>,
+    /// Macro registers: named key sequences (a-z).
+    pub macro_registers: std::collections::HashMap<char, Vec<crossterm::event::KeyEvent>>,
+    /// Whether we are currently playing back a macro (prevents recursive recording).
+    pub macro_playing: bool,
+    /// Waiting for register key to start recording (q was pressed).
+    pub macro_record_pending: bool,
+    /// Waiting for register key to play macro (@ was pressed).
+    pub macro_play_pending: bool,
     /// Intent input buffer (what the user types in Intent mode).
     pub intent_input: String,
     /// Active AI proposal for review.
@@ -530,6 +546,14 @@ impl App {
             last_find_char: None,
             replace_char_pending: false,
             text_object_pending: None,
+            last_edit_keys: Vec::new(),
+            recording_edit: false,
+            current_edit_keys: Vec::new(),
+            macro_recording: None,
+            macro_registers: std::collections::HashMap::new(),
+            macro_playing: false,
+            macro_record_pending: false,
+            macro_play_pending: false,
             show_authorship: true,
             leader_pending: false,
             intent_input: String::new(),
@@ -969,6 +993,26 @@ impl App {
 
     /// Route key events based on the current mode.
     fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        let key_event = crossterm::event::KeyEvent::new(code, modifiers);
+        let prev_mode = self.mode;
+
+        // Record key for macro if recording (and not playing back).
+        if self.macro_recording.is_some() && !self.macro_playing {
+            // Don't record the 'q' that stops recording.
+            let is_stop_q =
+                self.mode == Mode::Normal && code == KeyCode::Char('q') && modifiers.is_empty();
+            if !is_stop_q {
+                if let Some(reg) = self.macro_recording {
+                    self.macro_registers.entry(reg).or_default().push(key_event);
+                }
+            }
+        }
+
+        // Record keys for dot repeat (edits in Normal/Insert).
+        if self.recording_edit {
+            self.current_edit_keys.push(key_event);
+        }
+
         match self.mode {
             Mode::Normal => crate::input::handle_normal(self, code, modifiers),
             Mode::Insert => crate::input::handle_insert(self, code, modifiers),
@@ -978,6 +1022,87 @@ impl App {
             Mode::Review => crate::input::handle_review(self, code, modifiers),
             Mode::Diff => crate::input::handle_diff(self, code, modifiers),
         }
+
+        // Detect when an edit starts (Normal → Insert via c, s, o, etc.)
+        // and when it ends (Insert → Normal via Esc).
+        if prev_mode == Mode::Normal && self.mode == Mode::Insert && !self.recording_edit {
+            self.recording_edit = true;
+            // The key(s) that triggered the mode change are already in current_edit_keys
+            // if recording started this frame.
+        }
+        if prev_mode == Mode::Insert && self.mode == Mode::Normal && self.recording_edit {
+            self.recording_edit = false;
+            if !self.current_edit_keys.is_empty() {
+                self.last_edit_keys = std::mem::take(&mut self.current_edit_keys);
+            }
+        }
+        // For single-key edits in Normal mode (x, dd, J, ~, r, etc.),
+        // the edit is complete immediately — no Insert mode involved.
+        // These are captured by start_edit_record/stop_edit_record calls
+        // in the input handler.
+    }
+
+    /// Start recording keys for dot repeat (called by input handlers for
+    /// single-key edits like x, dd, J, ~).
+    pub fn start_dot_record(&mut self) {
+        if !self.recording_edit && !self.macro_playing {
+            self.current_edit_keys.clear();
+            self.recording_edit = true;
+        }
+    }
+
+    /// Stop recording and save as last edit (for single-key edits).
+    pub fn stop_dot_record(&mut self) {
+        if self.recording_edit {
+            self.recording_edit = false;
+            if !self.current_edit_keys.is_empty() {
+                self.last_edit_keys = std::mem::take(&mut self.current_edit_keys);
+            }
+        }
+    }
+
+    /// Replay the last edit (dot repeat).
+    pub fn dot_repeat(&mut self) {
+        if self.last_edit_keys.is_empty() {
+            return;
+        }
+        let keys = self.last_edit_keys.clone();
+        self.macro_playing = true; // Prevent re-recording.
+        for key in &keys {
+            self.handle_key(key.code, key.modifiers);
+        }
+        self.macro_playing = false;
+    }
+
+    /// Start recording a macro into register.
+    pub fn start_macro_recording(&mut self, register: char) {
+        self.macro_recording = Some(register);
+        self.macro_registers.insert(register, Vec::new());
+        self.set_status(format!("Recording @{register}..."));
+    }
+
+    /// Stop recording the current macro.
+    pub fn stop_macro_recording(&mut self) {
+        if let Some(reg) = self.macro_recording.take() {
+            let count = self.macro_registers.get(&reg).map(|v| v.len()).unwrap_or(0);
+            self.set_status(format!("Recorded @{reg} ({count} keys)"));
+        }
+    }
+
+    /// Play back a macro from register.
+    pub fn play_macro(&mut self, register: char) {
+        let keys = match self.macro_registers.get(&register) {
+            Some(k) if !k.is_empty() => k.clone(),
+            _ => {
+                self.set_status(format!("Empty macro @{register}"));
+                return;
+            }
+        };
+        self.macro_playing = true;
+        for key in &keys {
+            self.handle_key(key.code, key.modifiers);
+        }
+        self.macro_playing = false;
     }
 
     /// Poll the AI receiver for streaming events.

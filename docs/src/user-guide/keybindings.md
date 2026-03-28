@@ -84,6 +84,15 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `J` | Join current line with next |
 | `~` | Toggle case |
 
+### Repeat & Macros
+
+| Key | Action |
+|-----|--------|
+| `.` | Repeat last edit |
+| `q{a-z}` | Start recording macro into register |
+| `q` | Stop recording macro |
+| `@{a-z}` | Play back macro from register |
+
 ### LSP Integration
 
 | Key | Action |

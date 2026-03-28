@@ -687,6 +687,28 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // --- Macro record pending (q + {a-z}) ---
+    if app.macro_record_pending {
+        app.macro_record_pending = false;
+        if let KeyCode::Char(c @ 'a'..='z') = code {
+            app.start_macro_recording(c);
+        } else {
+            app.set_status("Cancelled — use a-z for macro register");
+        }
+        return;
+    }
+
+    // --- Macro play pending (@ + {a-z}) ---
+    if app.macro_play_pending {
+        app.macro_play_pending = false;
+        if let KeyCode::Char(c @ 'a'..='z') = code {
+            app.play_macro(c);
+        } else {
+            app.set_status("Cancelled — use a-z for macro register");
+        }
+        return;
+    }
+
     // --- Replace char pending (r{char}) ---
     if app.replace_char_pending {
         app.replace_char_pending = false;
@@ -1296,6 +1318,27 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 Ok(_) => app.set_status("Saved"),
                 Err(e) => app.set_status(format!("Error saving: {}", e)),
             }
+        }
+
+        // . — dot repeat last edit.
+        KeyCode::Char('.') => {
+            app.dot_repeat();
+        }
+        // q — toggle macro recording.
+        KeyCode::Char('q') if !app.source_control_focused => {
+            if app.macro_recording.is_some() {
+                app.stop_macro_recording();
+            } else {
+                // Wait for next key to determine register.
+                app.set_status("Record macro: press a-z for register");
+                // We'll handle this via a pending state.
+                app.find_char_pending = None; // Reset any pending.
+                app.macro_record_pending = true;
+            }
+        }
+        // @ — play macro.
+        KeyCode::Char('@') => {
+            app.macro_play_pending = true;
         }
 
         // % — jump to matching bracket.

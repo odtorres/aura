@@ -5,6 +5,13 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.13] - 2026-03-28
+
+### Added
+
+- **Dot repeat** — `.` replays the last edit (Insert-mode change sequences like `cw`, `s`, `o` + typed text). Press `.` to repeat the same change at a new cursor position.
+- **Macro recording** — `q{a-z}` starts recording all keystrokes into a named register. `q` stops recording. `@{a-z}` plays back the macro. Record complex edit sequences and replay them instantly.
+
 ## [0.1.12] - 2026-03-28
 
 ### Added

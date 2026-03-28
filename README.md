@@ -138,6 +138,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 | `~` | Toggle case |
 | `>>` / `<<` | Indent / dedent |
 | `{count}{motion}` | Repeat motion (e.g. `3j`, `5dw`) |
+| `.` | Repeat last edit |
+| `q{a-z}` | Start/stop macro recording |
+| `@{a-z}` | Play macro |
 | `p` | Paste |
 | `u` | Undo |
 | `Tab` | Accept ghost suggestion |
