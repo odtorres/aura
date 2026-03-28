@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.16] - 2026-03-28
+
+### Added
+
+- **AI History panel improvements**:
+  - **Branch grouping** — Conversations grouped by git branch with colored section headers
+  - **Intent-based titles** — Shows the user's original request instead of generic "The developer and AI"
+  - **Relative timestamps** — "2h ago", "3d ago" instead of raw ISO-8601
+  - **Search/filter** — Press `/` to search conversations by title, file, or branch
+  - **Acceptance rate badges** — Green/red `[2/3]` indicator showing accepted vs rejected proposals
+  - **Smart truncation** — Text truncated at word boundaries, not mid-word
+  - **Decision stats** — New `decision_stats()` query for per-conversation accept/reject counts
+
 ## [0.1.15] - 2026-03-28
 
 ### Added

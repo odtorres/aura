@@ -817,6 +817,21 @@ impl ConversationStore {
         Ok(count as usize)
     }
 
+    /// Get the accepted/rejected decision counts for a conversation.
+    pub fn decision_stats(&self, conversation_id: &str) -> Result<(usize, usize)> {
+        let accepted: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edit_decisions WHERE conversation_id = ?1 AND decision = 'accepted'",
+            params![conversation_id],
+            |r| r.get(0),
+        ).unwrap_or(0);
+        let rejected: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM edit_decisions WHERE conversation_id = ?1 AND decision = 'rejected'",
+            params![conversation_id],
+            |r| r.get(0),
+        ).unwrap_or(0);
+        Ok((accepted as usize, rejected as usize))
+    }
+
     /// Delete all but the N most recent messages for a conversation.
     /// Returns the number of messages deleted.
     pub fn delete_messages_except_recent(

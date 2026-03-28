@@ -1,4 +1,7 @@
 //! Right-side panel listing all AI conversation history.
+//!
+//! Shows conversations grouped by git branch with human-friendly timestamps,
+//! intent-based titles, search/filter, and acceptance rate indicators.
 
 use aura_core::conversation::{ConversationMessage, ConversationStore};
 
@@ -21,6 +24,54 @@ pub struct ConversationEntry {
     pub git_commit: Option<String>,
     /// Git branch name at conversation creation time.
     pub branch: Option<String>,
+    /// Latest intent text (what the user asked).
+    pub intent: Option<String>,
+    /// Accepted edit count.
+    pub accepted: usize,
+    /// Rejected edit count.
+    pub rejected: usize,
+}
+
+impl ConversationEntry {
+    /// Get the best display title: intent > summary > file path basename.
+    pub fn display_title(&self) -> String {
+        if let Some(ref intent) = self.intent {
+            if !intent.is_empty() {
+                return smart_truncate(intent, 60);
+            }
+        }
+        if let Some(ref summary) = self.summary {
+            if !summary.is_empty() {
+                return smart_truncate(summary, 60);
+            }
+        }
+        // Fall back to file basename.
+        self.file_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&self.file_path)
+            .to_string()
+    }
+
+    /// Get the branch name or "no branch".
+    pub fn branch_name(&self) -> &str {
+        self.branch.as_deref().unwrap_or("no branch")
+    }
+
+    /// Get a human-friendly relative timestamp.
+    pub fn relative_time(&self) -> String {
+        relative_timestamp(&self.updated_at)
+    }
+
+    /// Get acceptance rate string (e.g., "2/3" or empty).
+    pub fn acceptance_badge(&self) -> Option<String> {
+        let total = self.accepted + self.rejected;
+        if total > 0 {
+            Some(format!("{}/{}", self.accepted, total))
+        } else {
+            None
+        }
+    }
 }
 
 /// Persistent right-side panel showing all AI conversations.
@@ -41,6 +92,12 @@ pub struct ConversationHistoryPanel {
     pub expanded_messages: Vec<ConversationMessage>,
     /// Scroll offset within the expanded message view.
     pub message_scroll: usize,
+    /// Search query for filtering conversations.
+    pub search_query: String,
+    /// Whether the search input is active.
+    pub search_active: bool,
+    /// Filtered indices into `conversations` (None = show all).
+    pub filtered: Option<Vec<usize>>,
 }
 
 impl ConversationHistoryPanel {
@@ -55,6 +112,9 @@ impl ConversationHistoryPanel {
             expanded: None,
             expanded_messages: Vec::new(),
             message_scroll: 0,
+            search_query: String::new(),
+            search_active: false,
+            filtered: None,
         }
     }
 
@@ -69,23 +129,66 @@ impl ConversationHistoryPanel {
             Ok(rows) => {
                 self.conversations = rows
                     .into_iter()
-                    .map(|(conv, files_changed, message_count)| ConversationEntry {
-                        id: conv.id,
-                        summary: conv.summary,
-                        file_path: conv.file_path,
-                        files_changed,
-                        message_count,
-                        updated_at: conv.updated_at,
-                        git_commit: conv.git_commit,
-                        branch: conv.branch,
+                    .map(|(conv, files_changed, message_count)| {
+                        // Load latest intent for this conversation.
+                        let intent = store
+                            .latest_intent(&conv.id)
+                            .ok()
+                            .flatten()
+                            .map(|i| i.intent_text);
+                        // Load decision stats.
+                        let (accepted, rejected) = store.decision_stats(&conv.id).unwrap_or((0, 0));
+                        ConversationEntry {
+                            id: conv.id,
+                            summary: conv.summary,
+                            file_path: conv.file_path,
+                            files_changed,
+                            message_count,
+                            updated_at: conv.updated_at,
+                            git_commit: conv.git_commit,
+                            branch: conv.branch,
+                            intent,
+                            accepted,
+                            rejected,
+                        }
                     })
                     .collect();
                 self.clamp_selected();
+                if self.search_active {
+                    self.apply_filter();
+                }
             }
             Err(e) => {
                 tracing::warn!("Failed to load conversations: {}", e);
             }
         }
+    }
+
+    /// Get the visible entries (filtered or all).
+    pub fn visible_entries(&self) -> Vec<usize> {
+        self.filtered
+            .clone()
+            .unwrap_or_else(|| (0..self.conversations.len()).collect())
+    }
+
+    /// Get conversations grouped by branch.
+    pub fn grouped_by_branch(&self) -> Vec<(String, Vec<usize>)> {
+        let indices = self.visible_entries();
+        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        let mut branch_map: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        for idx in indices {
+            let branch = self.conversations[idx].branch_name().to_string();
+            if let Some(&group_idx) = branch_map.get(&branch) {
+                groups[group_idx].1.push(idx);
+            } else {
+                branch_map.insert(branch.clone(), groups.len());
+                groups.push((branch, vec![idx]));
+            }
+        }
+
+        groups
     }
 
     /// Move selection up.
@@ -96,7 +199,7 @@ impl ConversationHistoryPanel {
 
     /// Move selection down.
     pub fn select_down(&mut self) {
-        let max = self.conversations.len().saturating_sub(1);
+        let max = self.visible_entries().len().saturating_sub(1);
         if self.selected < max {
             self.selected += 1;
         }
@@ -105,20 +208,21 @@ impl ConversationHistoryPanel {
 
     /// Toggle expand/collapse of the selected conversation.
     pub fn toggle_expand(&mut self, store: &ConversationStore) {
-        if self.conversations.is_empty() {
+        let entries = self.visible_entries();
+        if entries.is_empty() {
             return;
         }
-        if self.expanded == Some(self.selected) {
-            // Collapse.
+        let actual_idx = entries.get(self.selected).copied().unwrap_or(0);
+
+        if self.expanded == Some(actual_idx) {
             self.expanded = None;
             self.expanded_messages.clear();
             self.message_scroll = 0;
         } else {
-            // Expand.
-            let id = &self.conversations[self.selected].id;
+            let id = &self.conversations[actual_idx].id;
             match store.messages_for_conversation(id) {
                 Ok(msgs) => {
-                    self.expanded = Some(self.selected);
+                    self.expanded = Some(actual_idx);
                     self.expanded_messages = msgs;
                     self.message_scroll = 0;
                 }
@@ -127,6 +231,59 @@ impl ConversationHistoryPanel {
                 }
             }
         }
+    }
+
+    /// Start search mode.
+    pub fn start_search(&mut self) {
+        self.search_active = true;
+        self.search_query.clear();
+    }
+
+    /// Type a character into the search query.
+    pub fn search_type_char(&mut self, c: char) {
+        self.search_query.push(c);
+        self.apply_filter();
+    }
+
+    /// Delete last character from search query.
+    pub fn search_backspace(&mut self) {
+        self.search_query.pop();
+        if self.search_query.is_empty() {
+            self.search_active = false;
+            self.filtered = None;
+        } else {
+            self.apply_filter();
+        }
+    }
+
+    /// Cancel search.
+    pub fn cancel_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+        self.filtered = None;
+        self.selected = 0;
+    }
+
+    /// Apply the current search filter.
+    fn apply_filter(&mut self) {
+        let query = self.search_query.to_lowercase();
+        if query.is_empty() {
+            self.filtered = None;
+            return;
+        }
+        self.filtered = Some(
+            self.conversations
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| {
+                    entry.display_title().to_lowercase().contains(&query)
+                        || entry.file_path.to_lowercase().contains(&query)
+                        || entry.branch_name().to_lowercase().contains(&query)
+                })
+                .map(|(i, _)| i)
+                .collect(),
+        );
+        self.selected = 0;
     }
 
     /// Scroll expanded messages up.
@@ -157,9 +314,89 @@ impl ConversationHistoryPanel {
         if self.selected < self.scroll {
             self.scroll = self.selected;
         }
-        // We don't know height here, so we just ensure scroll <= selected.
-        // The renderer will handle the rest.
     }
+}
+
+/// Convert an ISO-8601 timestamp to a human-friendly relative time.
+fn relative_timestamp(iso: &str) -> String {
+    // Parse "2026-03-28T01:33:46Z" or similar.
+    // Simple approach: extract date components and compare to now.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Try to parse the ISO timestamp to Unix seconds.
+    let ts_secs = parse_iso_to_unix(iso).unwrap_or(now_secs);
+    let diff = now_secs.saturating_sub(ts_secs);
+
+    if diff < 60 {
+        "just now".to_string()
+    } else if diff < 3600 {
+        let mins = diff / 60;
+        format!("{mins}m ago")
+    } else if diff < 86400 {
+        let hours = diff / 3600;
+        format!("{hours}h ago")
+    } else if diff < 604800 {
+        let days = diff / 86400;
+        format!("{days}d ago")
+    } else {
+        // Show the date portion only.
+        iso.split('T').next().unwrap_or(iso).to_string()
+    }
+}
+
+/// Parse an ISO-8601 timestamp to Unix seconds (simple implementation).
+fn parse_iso_to_unix(iso: &str) -> Option<u64> {
+    // Expected format: "2026-03-28T01:33:46Z" or "2026-03-28 01:33:46"
+    let s = iso.replace('T', " ").replace('Z', "");
+    let parts: Vec<&str> = s.split(' ').collect();
+    let date_parts: Vec<u64> = parts
+        .first()?
+        .split('-')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    if date_parts.len() != 3 {
+        return None;
+    }
+    let (year, month, day) = (date_parts[0], date_parts[1], date_parts[2]);
+
+    let time_parts: Vec<u64> = parts
+        .get(1)
+        .unwrap_or(&"00:00:00")
+        .split(':')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    let (hour, min, sec) = (
+        *time_parts.first().unwrap_or(&0),
+        *time_parts.get(1).unwrap_or(&0),
+        *time_parts.get(2).unwrap_or(&0),
+    );
+
+    // Rough days-since-epoch (not accounting for leap years perfectly).
+    let days_in_year = 365u64;
+    let days = (year - 1970) * days_in_year
+        + (year - 1970) / 4 // leap years (approximate)
+        + (month - 1) * 30 // approximate days per month
+        + day
+        - 1;
+    Some(days * 86400 + hour * 3600 + min * 60 + sec)
+}
+
+/// Truncate a string at a word boundary.
+fn smart_truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let truncated = &s[..max.min(s.len())];
+    // Find the last space to break at a word boundary.
+    if let Some(last_space) = truncated.rfind(' ') {
+        if last_space > max / 2 {
+            return format!("{}...", &truncated[..last_space]);
+        }
+    }
+    format!("{truncated}...")
 }
 
 #[cfg(test)]
@@ -170,13 +407,11 @@ mod tests {
     #[test]
     fn test_navigation_clamping() {
         let mut panel = ConversationHistoryPanel::new(30);
-        // Empty list — selection should stay at 0.
         panel.select_up();
         assert_eq!(panel.selected, 0);
         panel.select_down();
         assert_eq!(panel.selected, 0);
 
-        // Add some entries manually.
         for i in 0..3 {
             panel.conversations.push(ConversationEntry {
                 id: format!("conv-{i}"),
@@ -187,6 +422,9 @@ mod tests {
                 updated_at: String::new(),
                 git_commit: None,
                 branch: None,
+                intent: None,
+                accepted: 0,
+                rejected: 0,
             });
         }
 
@@ -194,7 +432,7 @@ mod tests {
         assert_eq!(panel.selected, 1);
         panel.select_down();
         assert_eq!(panel.selected, 2);
-        panel.select_down(); // should clamp
+        panel.select_down();
         assert_eq!(panel.selected, 2);
         panel.select_up();
         assert_eq!(panel.selected, 1);
@@ -216,12 +454,10 @@ mod tests {
         assert_eq!(panel.conversations.len(), 1);
         assert!(panel.expanded.is_none());
 
-        // Expand.
         panel.toggle_expand(&store);
         assert_eq!(panel.expanded, Some(0));
         assert_eq!(panel.expanded_messages.len(), 1);
 
-        // Collapse.
         panel.toggle_expand(&store);
         assert!(panel.expanded.is_none());
         assert!(panel.expanded_messages.is_empty());
@@ -243,7 +479,107 @@ mod tests {
         let mut panel = ConversationHistoryPanel::new(30);
         panel.scroll_messages_up();
         assert_eq!(panel.message_scroll, 0);
-        panel.scroll_messages_down(); // no messages
+        panel.scroll_messages_down();
         assert_eq!(panel.message_scroll, 0);
+    }
+
+    #[test]
+    fn test_smart_truncate() {
+        assert_eq!(smart_truncate("hello world", 20), "hello world");
+        let result = smart_truncate("hello beautiful world today", 15);
+        assert!(result.ends_with("..."), "got: {result}");
+        assert!(result.len() <= 20);
+    }
+
+    #[test]
+    fn test_relative_timestamp() {
+        // Just verify it doesn't panic.
+        let result = relative_timestamp("2026-03-28T01:33:46Z");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_display_title() {
+        let entry = ConversationEntry {
+            id: "test".into(),
+            summary: None,
+            file_path: "/Users/test/project/src/main.rs".into(),
+            files_changed: 0,
+            message_count: 0,
+            updated_at: String::new(),
+            git_commit: None,
+            branch: None,
+            intent: Some("Fix the null pointer bug in parser".into()),
+            accepted: 0,
+            rejected: 0,
+        };
+        assert_eq!(entry.display_title(), "Fix the null pointer bug in parser");
+
+        let entry2 = ConversationEntry {
+            intent: None,
+            summary: Some("Refactored error handling".into()),
+            ..entry.clone()
+        };
+        assert_eq!(entry2.display_title(), "Refactored error handling");
+
+        let entry3 = ConversationEntry {
+            intent: None,
+            summary: None,
+            ..entry
+        };
+        assert_eq!(entry3.display_title(), "main.rs");
+    }
+
+    #[test]
+    fn test_branch_grouping() {
+        let mut panel = ConversationHistoryPanel::new(30);
+        panel.conversations = vec![
+            ConversationEntry {
+                id: "1".into(),
+                summary: None,
+                file_path: "a.rs".into(),
+                files_changed: 0,
+                message_count: 0,
+                updated_at: String::new(),
+                git_commit: None,
+                branch: Some("main".into()),
+                intent: None,
+                accepted: 0,
+                rejected: 0,
+            },
+            ConversationEntry {
+                id: "2".into(),
+                summary: None,
+                file_path: "b.rs".into(),
+                files_changed: 0,
+                message_count: 0,
+                updated_at: String::new(),
+                git_commit: None,
+                branch: Some("feature".into()),
+                intent: None,
+                accepted: 0,
+                rejected: 0,
+            },
+            ConversationEntry {
+                id: "3".into(),
+                summary: None,
+                file_path: "c.rs".into(),
+                files_changed: 0,
+                message_count: 0,
+                updated_at: String::new(),
+                git_commit: None,
+                branch: Some("main".into()),
+                intent: None,
+                accepted: 0,
+                rejected: 0,
+            },
+        ];
+
+        let groups = panel.grouped_by_branch();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, "main");
+        assert_eq!(groups[0].1.len(), 2);
+        assert_eq!(groups[1].0, "feature");
+        assert_eq!(groups[1].1.len(), 1);
     }
 }

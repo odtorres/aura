@@ -950,6 +950,7 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
 /// Draw the source control sidebar panel.
 fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.conversation_history_focused;
+    let panel = &app.conversation_history;
     let (title, border_color) = if focused {
         (" AI History [focused] ", Color::Yellow)
     } else {
@@ -967,10 +968,24 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let panel = &app.conversation_history;
     let max_width = inner.width as usize;
     let mut y = inner.y;
     let end_y = inner.y + inner.height;
+
+    // Search bar (if active).
+    if panel.search_active {
+        let query_line = format!("/{}", panel.search_query);
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                query_line,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
 
     if panel.conversations.is_empty() {
         let msg = Paragraph::new("No conversations").style(Style::default().fg(Color::DarkGray));
@@ -978,105 +993,140 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let visible_start = panel.scroll;
-    for (i, entry) in panel.conversations.iter().enumerate().skip(visible_start) {
+    // Render grouped by branch.
+    let groups = panel.grouped_by_branch();
+    let mut flat_idx = 0usize; // Index into the flat visible list.
+
+    for (branch, entry_indices) in &groups {
         if y >= end_y {
             break;
         }
 
-        let is_selected = i == panel.selected;
-        let is_expanded = panel.expanded == Some(i);
-
-        // Conversation header line: summary or file path + badge.
-        let label = entry.summary.as_deref().unwrap_or(&entry.file_path);
-        let badge = format!(" {}f {}m", entry.files_changed, entry.message_count);
-        let avail = max_width.saturating_sub(badge.len());
-        let truncated: String = label.chars().take(avail).collect();
-        let line = format!("{truncated}{badge}");
-
-        let style = if is_selected && focused {
-            Style::default().fg(Color::Black).bg(Color::Yellow)
-        } else if is_selected {
-            Style::default().fg(Color::Black).bg(Color::DarkGray)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        let prefix = if is_expanded { "v " } else { "> " };
-        let display: String = format!("{prefix}{line}").chars().take(max_width).collect();
-
+        // Branch header.
+        let header: String = format!(" {branch} ({}) ", entry_indices.len())
+            .chars()
+            .take(max_width)
+            .collect();
         frame.render_widget(
-            Paragraph::new(display).style(style),
+            Paragraph::new(Span::styled(
+                header,
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Rect::new(inner.x, y, inner.width, 1),
         );
         y += 1;
 
-        // Timestamp line.
-        if y < end_y {
-            let ts: String = entry
-                .updated_at
-                .chars()
-                .take(max_width.saturating_sub(2))
-                .collect();
-            let ts_line = format!("  {ts}");
-            frame.render_widget(
-                Paragraph::new(ts_line).style(Style::default().fg(Color::DarkGray)),
-                Rect::new(inner.x, y, inner.width, 1),
-            );
+        // Entries in this branch group.
+        for &entry_idx in entry_indices {
+            if y >= end_y {
+                break;
+            }
+
+            let entry = &panel.conversations[entry_idx];
+            let is_selected = flat_idx == panel.selected;
+            let is_expanded = panel.expanded == Some(entry_idx);
+            flat_idx += 1;
+
+            // Title line: intent > summary > file basename + badges.
+            let title = entry.display_title();
+            let badge = format!(" {}m", entry.message_count);
+            let acceptance = entry
+                .acceptance_badge()
+                .map(|b| format!(" [{b}]"))
+                .unwrap_or_default();
+            let avail = max_width.saturating_sub(badge.len() + acceptance.len() + 2);
+            let truncated: String = title.chars().take(avail).collect();
+
+            let style = if is_selected && focused {
+                Style::default().fg(Color::Black).bg(Color::Yellow)
+            } else if is_selected {
+                Style::default().fg(Color::Black).bg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let prefix = if is_expanded { "v " } else { "> " };
+            let line = ratatui::text::Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(truncated, style),
+                Span::styled(
+                    badge,
+                    if is_selected {
+                        style
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ),
+                Span::styled(
+                    acceptance,
+                    if is_selected {
+                        style
+                    } else if entry.accepted > entry.rejected {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::Red)
+                    },
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
             y += 1;
-        }
 
-        // Git context line (branch @ commit).
-        let git_info = match (entry.branch.as_deref(), entry.git_commit.as_deref()) {
-            (Some(b), Some(c)) => Some(format!("{b} @ {c}")),
-            (Some(b), None) => Some(b.to_string()),
-            (None, Some(c)) => Some(format!("@ {c}")),
-            (None, None) => None,
-        };
-        if let Some(info) = git_info {
+            // Relative timestamp.
             if y < end_y {
-                let git_line: String = format!("  {info}").chars().take(max_width).collect();
+                let time_str = entry.relative_time();
                 frame.render_widget(
-                    Paragraph::new(git_line).style(Style::default().fg(Color::Magenta)),
+                    Paragraph::new(format!("  {time_str}"))
+                        .style(Style::default().fg(Color::DarkGray)),
                     Rect::new(inner.x, y, inner.width, 1),
                 );
                 y += 1;
             }
-        }
 
-        // If expanded, show messages.
-        if is_expanded {
-            let msgs = &panel.expanded_messages;
-            for (mi, msg) in msgs.iter().enumerate().skip(panel.message_scroll) {
-                if y >= end_y {
-                    break;
+            // Expanded messages.
+            if is_expanded {
+                let msgs = &panel.expanded_messages;
+                for msg in msgs.iter().skip(panel.message_scroll) {
+                    if y >= end_y {
+                        break;
+                    }
+                    let role_color = match msg.role {
+                        MessageRole::HumanIntent => Color::Green,
+                        MessageRole::AiResponse => Color::Cyan,
+                        MessageRole::System => Color::DarkGray,
+                    };
+                    let role_label = match msg.role {
+                        MessageRole::HumanIntent => "  You: ",
+                        MessageRole::AiResponse => "  AI: ",
+                        MessageRole::System => "  Sys: ",
+                    };
+                    let content_avail = max_width.saturating_sub(role_label.len());
+                    let content: String = msg
+                        .content
+                        .replace('\n', " ")
+                        .chars()
+                        .take(content_avail)
+                        .collect();
+                    let display: String = format!("{role_label}{content}")
+                        .chars()
+                        .take(max_width)
+                        .collect();
+
+                    frame.render_widget(
+                        Paragraph::new(display).style(Style::default().fg(role_color)),
+                        Rect::new(inner.x, y, inner.width, 1),
+                    );
+                    y += 1;
                 }
-                let _ = mi;
-                let role_color = match msg.role {
-                    MessageRole::HumanIntent => Color::Green,
-                    MessageRole::AiResponse => Color::Cyan,
-                    MessageRole::System => Color::DarkGray,
-                };
-                let role_label = format!("  {}: ", msg.role);
-                let content_avail = max_width.saturating_sub(role_label.len());
-                let content: String = msg.content.chars().take(content_avail).collect();
-                let line = format!("{role_label}{content}");
-                let display: String = line.chars().take(max_width).collect();
-
-                frame.render_widget(
-                    Paragraph::new(display).style(Style::default().fg(role_color)),
-                    Rect::new(inner.x, y, inner.width, 1),
-                );
-                y += 1;
-            }
-            // Separator after messages.
-            if y < end_y {
-                let sep: String = "─".repeat(max_width);
-                frame.render_widget(
-                    Paragraph::new(sep).style(Style::default().fg(Color::DarkGray)),
-                    Rect::new(inner.x, y, inner.width, 1),
-                );
-                y += 1;
+                if y < end_y {
+                    frame.render_widget(
+                        Paragraph::new("─".repeat(max_width))
+                            .style(Style::default().fg(Color::DarkGray)),
+                        Rect::new(inner.x, y, inner.width, 1),
+                    );
+                    y += 1;
+                }
             }
         }
     }

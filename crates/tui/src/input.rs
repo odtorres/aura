@@ -436,6 +436,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.conversation_history_focused = false;
                 app.toggle_chat_panel();
             }
+            KeyCode::Char('/') if !app.conversation_history.search_active => {
+                app.conversation_history.start_search();
+            }
+            // Search mode input.
+            KeyCode::Char(c) if app.conversation_history.search_active => {
+                app.conversation_history.search_type_char(c);
+            }
+            KeyCode::Backspace if app.conversation_history.search_active => {
+                app.conversation_history.search_backspace();
+            }
+            KeyCode::Esc if app.conversation_history.search_active => {
+                app.conversation_history.cancel_search();
+            }
+            // Normal navigation.
             KeyCode::Char('j') | KeyCode::Down => {
                 app.conversation_history.select_down();
             }
