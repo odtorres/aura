@@ -242,6 +242,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_settings_modal(frame, &app.settings_modal, area);
         }
 
+        // Render conversation detail modal if visible.
+        if app.conversation_history.detail_view {
+            draw_conversation_detail(frame, &app.conversation_history, area);
+        }
+
         // Render update notification toast.
         if app.update_notification_visible {
             draw_update_notification(frame, app, area);
@@ -1938,6 +1943,130 @@ fn draw_file_picker(frame: &mut Frame, app: &App, area: Rect) {
         let line_widget = Paragraph::new(Span::styled(display, style));
         frame.render_widget(line_widget, Rect::new(inner.x, row_y, inner.width, 1));
     }
+}
+
+/// Draw the conversation detail modal (near full-screen popup with word-wrapped messages).
+fn draw_conversation_detail(
+    frame: &mut Frame,
+    panel: &crate::conversation_history::ConversationHistoryPanel,
+    area: Rect,
+) {
+    // Get the expanded conversation and messages.
+    let conv_idx = match panel.expanded {
+        Some(idx) => idx,
+        None => return,
+    };
+    let entry = match panel.conversations.get(conv_idx) {
+        Some(e) => e,
+        None => return,
+    };
+    let messages = &panel.expanded_messages;
+
+    // Full-screen popup with margin.
+    let margin = 2u16;
+    let width = area.width.saturating_sub(margin * 2);
+    let height = area.height.saturating_sub(margin * 2);
+    let x = area.x + margin;
+    let y = area.y + margin;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+    let title = format!(" {} ", entry.display_title());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(title)
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let content_width = inner.width as usize;
+
+    // Build wrapped lines from all messages.
+    let mut lines: Vec<(Color, String)> = Vec::new();
+
+    // Header info.
+    lines.push((
+        Color::DarkGray,
+        format!(
+            "File: {}  |  Branch: {}  |  {}",
+            entry.file_path,
+            entry.branch_name(),
+            entry.relative_time()
+        ),
+    ));
+    if let Some(badge) = entry.acceptance_badge() {
+        lines.push((Color::DarkGray, format!("Decisions: {badge} accepted")));
+    }
+    lines.push((Color::DarkGray, "─".repeat(content_width)));
+
+    // Messages with word wrapping.
+    for msg in messages {
+        let (role_color, role_label) = match msg.role {
+            MessageRole::HumanIntent => (Color::Green, "You"),
+            MessageRole::AiResponse => (Color::Cyan, "AI"),
+            MessageRole::System => (Color::DarkGray, "System"),
+        };
+
+        lines.push((role_color, format!("{role_label}:")));
+
+        // Word-wrap the content.
+        let indent = "  ";
+        let _wrap_width = content_width.saturating_sub(indent.len());
+        for paragraph in msg.content.split('\n') {
+            if paragraph.is_empty() {
+                lines.push((role_color, String::new()));
+                continue;
+            }
+            let mut current_line = String::from(indent);
+            for word in paragraph.split_whitespace() {
+                if current_line.len() + word.len() + 1 > content_width
+                    && current_line.len() > indent.len()
+                {
+                    lines.push((role_color, current_line));
+                    current_line = String::from(indent);
+                }
+                if current_line.len() > indent.len() {
+                    current_line.push(' ');
+                }
+                current_line.push_str(word);
+            }
+            if !current_line.trim().is_empty() {
+                lines.push((role_color, current_line));
+            }
+        }
+        lines.push((Color::DarkGray, String::new())); // Blank line between messages.
+    }
+
+    // Render with scroll.
+    let visible_height = inner.height as usize;
+    let max_scroll = lines.len().saturating_sub(visible_height);
+    let scroll = panel.detail_scroll.min(max_scroll);
+
+    for (i, (color, text)) in lines.iter().enumerate().skip(scroll).take(visible_height) {
+        let row_y = inner.y + (i - scroll) as u16;
+        let display: String = text.chars().take(content_width).collect();
+        frame.render_widget(
+            Paragraph::new(display).style(Style::default().fg(*color)),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+
+    // Footer hint.
+    let footer_y = rect.y + rect.height.saturating_sub(1);
+    let hint = " j/k:scroll  d/u:page  Esc:close ";
+    frame.render_widget(
+        Paragraph::new(Span::styled(hint, Style::default().fg(Color::DarkGray))),
+        Rect::new(rect.x + 1, footer_y, rect.width.saturating_sub(2), 1),
+    );
 }
 
 /// Draw the command palette (centered popup).

@@ -418,6 +418,29 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // When the conversation history panel is focused, route keys to it.
     if app.conversation_history_focused {
+        // Detail modal: full-screen conversation view.
+        if app.conversation_history.detail_view {
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.conversation_history.close_detail();
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.conversation_history.detail_scroll_down();
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.conversation_history.detail_scroll_up();
+                }
+                KeyCode::Char('d') => {
+                    app.conversation_history.detail_page_down(10);
+                }
+                KeyCode::Char('u') => {
+                    app.conversation_history.detail_page_up(10);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match code {
             KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
                 app.conversation_history_focused = false;
@@ -457,7 +480,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.conversation_history.select_up();
             }
             KeyCode::Enter => {
-                app.conversation_history_toggle_expand();
+                if app.conversation_history.expanded.is_some() {
+                    // Already expanded — open the detail modal.
+                    app.conversation_history.open_detail();
+                } else {
+                    app.conversation_history_toggle_expand();
+                }
             }
             KeyCode::Char('u') => {
                 app.conversation_history.scroll_messages_up();

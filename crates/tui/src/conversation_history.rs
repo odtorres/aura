@@ -98,6 +98,10 @@ pub struct ConversationHistoryPanel {
     pub search_active: bool,
     /// Filtered indices into `conversations` (None = show all).
     pub filtered: Option<Vec<usize>>,
+    /// Whether the detail modal is open (full-screen view of a conversation).
+    pub detail_view: bool,
+    /// Scroll offset within the detail modal.
+    pub detail_scroll: usize,
 }
 
 impl ConversationHistoryPanel {
@@ -115,6 +119,8 @@ impl ConversationHistoryPanel {
             search_query: String::new(),
             search_active: false,
             filtered: None,
+            detail_view: false,
+            detail_scroll: 0,
         }
     }
 
@@ -254,6 +260,40 @@ impl ConversationHistoryPanel {
         } else {
             self.apply_filter();
         }
+    }
+
+    /// Open the detail modal for the currently expanded conversation.
+    pub fn open_detail(&mut self) {
+        if self.expanded.is_some() {
+            self.detail_view = true;
+            self.detail_scroll = 0;
+        }
+    }
+
+    /// Close the detail modal.
+    pub fn close_detail(&mut self) {
+        self.detail_view = false;
+        self.detail_scroll = 0;
+    }
+
+    /// Scroll the detail view up.
+    pub fn detail_scroll_up(&mut self) {
+        self.detail_scroll = self.detail_scroll.saturating_sub(1);
+    }
+
+    /// Scroll the detail view down.
+    pub fn detail_scroll_down(&mut self) {
+        self.detail_scroll = self.detail_scroll.saturating_add(1);
+    }
+
+    /// Page up in the detail view.
+    pub fn detail_page_up(&mut self, lines: usize) {
+        self.detail_scroll = self.detail_scroll.saturating_sub(lines);
+    }
+
+    /// Page down in the detail view.
+    pub fn detail_page_down(&mut self, lines: usize) {
+        self.detail_scroll = self.detail_scroll.saturating_add(lines);
     }
 
     /// Cancel search.
