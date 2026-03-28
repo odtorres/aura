@@ -113,8 +113,50 @@ AURA supports multi-file collaboration in a single session. When the host starts
 - Peer cursors and selections are filtered per file — you only see cursors for the file you're currently viewing
 - Scratch buffers (unsaved, no file path) are excluded from multi-file sharing
 
+## Remote Collaboration
+
+AURA supports collaboration over the internet with token-based authentication.
+
+### Hosting for Remote Access
+
+Configure in `aura.toml`:
+
+```toml
+[collab]
+bind_address = "0.0.0.0"   # Listen on all interfaces (not just localhost)
+require_auth = true          # Require token to join
+```
+
+When you run `:host`, the status bar shows the port and auth token:
+
+```
+Hosting on port 9000 | Token: a1b2c3d4e5f6...
+```
+
+Share the token with collaborators securely.
+
+### Joining a Remote Session
+
+```
+:join 192.168.1.100:9000 a1b2c3d4e5f6...
+```
+
+Or from the command line:
+
+```bash
+aura --join 192.168.1.100:9000 --token a1b2c3d4e5f6...
+```
+
+If the token is wrong, the connection is rejected with a clear error message.
+
+### Security Notes
+
+- The auth token is generated randomly per session (32 hex chars)
+- Tokens are ephemeral — they expire when the host closes the session
+- For internet use, consider running behind a VPN or SSH tunnel for additional encryption
+- The wire protocol itself is not encrypted (TLS support planned for a future release)
+
 ## Limitations
 
-- **Localhost only**: Currently limited to TCP on localhost. Remote collaboration over the internet requires manual port forwarding or a VPN.
-- **No authentication**: Any client that can reach the host's port can join. Use network-level access control for security.
+- **No TLS encryption yet**: Traffic is unencrypted. For sensitive code, use a VPN or SSH tunnel.
 - **Scratch buffers excluded**: Unsaved buffers without a file path are not shared in multi-file sessions.

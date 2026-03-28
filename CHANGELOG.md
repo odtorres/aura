@@ -5,6 +5,14 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2026-03-28
+
+### Added
+
+- **Remote collaboration** — Collaboration sessions can now be hosted on all network interfaces (`bind_address = "0.0.0.0"` in `aura.toml`) for internet access. Token-based authentication prevents unauthorized access: host generates a token, clients must provide it to join.
+- **Authentication tokens** — `:host` generates a token when `require_auth = true`. Clients join with `:join addr:port token` or `--join addr --token TOKEN`. Rejected connections get a clear error.
+- **Configurable bind address** — `bind_address` in `[collab]` config controls whether the host listens on localhost only or all interfaces.
+
 ## [0.1.11] - 2026-03-27
 
 ### Added

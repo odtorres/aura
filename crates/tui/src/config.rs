@@ -77,6 +77,12 @@ pub struct CollabConfig {
     pub display_name: String,
     /// Default port to listen on when hosting (0 = random available port).
     pub default_port: u16,
+    /// Enable TLS encryption for collaboration sessions.
+    pub use_tls: bool,
+    /// Bind address: "127.0.0.1" for local only, "0.0.0.0" for internet.
+    pub bind_address: String,
+    /// Require authentication token to join a session.
+    pub require_auth: bool,
 }
 
 impl Default for CollabConfig {
@@ -87,6 +93,9 @@ impl Default for CollabConfig {
         Self {
             display_name,
             default_port: 0,
+            use_tls: false,
+            bind_address: "127.0.0.1".to_string(),
+            require_auth: false,
         }
     }
 }

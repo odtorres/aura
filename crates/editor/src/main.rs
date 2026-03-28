@@ -23,6 +23,7 @@ fn main() -> anyhow::Result<()> {
     let mut collab_host = false;
     let mut collab_join: Option<String> = None;
     let mut collab_name: Option<String> = None;
+    let mut collab_token: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -38,6 +39,12 @@ fn main() -> anyhow::Result<()> {
                 i += 1;
                 if i < args.len() {
                     collab_name = Some(args[i].clone());
+                }
+            }
+            "--token" => {
+                i += 1;
+                if i < args.len() {
+                    collab_token = Some(args[i].clone());
                 }
             }
             other => {
@@ -76,7 +83,7 @@ fn main() -> anyhow::Result<()> {
     if collab_host {
         app.start_collab_host();
     } else if let Some(addr) = collab_join {
-        app.join_collab_session(&addr);
+        app.join_collab_with_token(&addr, collab_token.as_deref());
     }
 
     // When launched without a specific file, restore the previous session.

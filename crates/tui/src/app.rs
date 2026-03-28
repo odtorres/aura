@@ -4558,11 +4558,27 @@ impl App {
             files.push((0, String::new(), snapshot));
         }
 
-        match crate::collab::CollabSession::host(&name, port, files) {
+        // Build TLS/auth config.
+        let tls_auth = crate::collab::TlsAuthConfig {
+            use_tls: self.config.collab.use_tls,
+            bind_address: self.config.collab.bind_address.clone(),
+            auth_token: if self.config.collab.require_auth {
+                Some(crate::collab::generate_auth_token())
+            } else {
+                None
+            },
+        };
+
+        match crate::collab::CollabSession::host(&name, port, files, &tls_auth) {
             Ok(session) => {
                 let port = session.port.unwrap_or(0);
+                let token_msg = session
+                    .auth_token
+                    .as_ref()
+                    .map(|t| format!(" | Token: {t}"))
+                    .unwrap_or_default();
+                self.set_status(format!("Hosting on port {port}{token_msg}"));
                 self.collab = Some(session);
-                self.set_status(format!("Hosting collab session on port {port}"));
             }
             Err(e) => self.set_status(format!("Failed to host: {e}")),
         }
@@ -4570,9 +4586,14 @@ impl App {
 
     /// Join an existing collaboration session.
     pub fn join_collab_session(&mut self, addr: &str) {
+        self.join_collab_with_token(addr, None);
+    }
+
+    /// Join a collaboration session with an optional auth token.
+    pub fn join_collab_with_token(&mut self, addr: &str, token: Option<&str>) {
         let name = self.config.collab.display_name.clone();
 
-        match crate::collab::CollabSession::join(&name, addr) {
+        match crate::collab::CollabSession::join(&name, addr, token) {
             Ok(session) => {
                 self.collab = Some(session);
                 self.set_status(format!("Joining collab session at {addr}"));

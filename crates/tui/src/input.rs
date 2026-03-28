@@ -2282,8 +2282,12 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         other => {
             // Handle commands with arguments.
-            if let Some(addr) = other.strip_prefix("join ") {
-                app.join_collab_session(addr.trim());
+            if let Some(rest) = other.strip_prefix("join ") {
+                // Support ":join addr:port token" format.
+                let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
+                let addr = parts[0];
+                let token = parts.get(1).map(|t| t.trim());
+                app.join_collab_with_token(addr, token);
             } else {
                 app.set_status(format!("Unknown command: {}", other));
             }

@@ -33,6 +33,49 @@ const MSG_PEER_LEFT: u8 = 0x04;
 const MSG_DOC_SNAPSHOT: u8 = 0x05;
 const MSG_FILE_OPENED: u8 = 0x06;
 const MSG_FILE_CLOSED: u8 = 0x07;
+const MSG_AUTHENTICATE: u8 = 0x08;
+
+// ---------------------------------------------------------------------------
+// TLS + Auth configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for TLS and authentication in collab sessions.
+#[derive(Debug, Clone)]
+pub struct TlsAuthConfig {
+    /// Whether TLS is enabled.
+    pub use_tls: bool,
+    /// Bind address for the host (e.g., "0.0.0.0" for internet).
+    pub bind_address: String,
+    /// Authentication token (None = no auth required).
+    pub auth_token: Option<String>,
+}
+
+impl Default for TlsAuthConfig {
+    fn default() -> Self {
+        Self {
+            use_tls: false,
+            bind_address: "127.0.0.1".to_string(),
+            auth_token: None,
+        }
+    }
+}
+
+/// Generate a random authentication token (16-byte hex string).
+pub fn generate_auth_token() -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .hash(&mut hasher);
+    std::thread::current().id().hash(&mut hasher);
+    let h1 = hasher.finish();
+    // Second hash for more entropy.
+    h1.hash(&mut hasher);
+    let h2 = hasher.finish();
+    format!("{h1:016x}{h2:016x}")
+}
 
 /// Compute a deterministic file identifier from a canonical path.
 ///
@@ -287,6 +330,8 @@ pub struct CollabSession {
     /// Disconnected peers with retained sync states (host only).
     /// Maps peer_id → (per-file sync states, disconnect_time).
     disconnected_peers: HashMap<u64, (HashMap<u64, SyncState>, std::time::Instant)>,
+    /// Authentication token for this session (host only, for display).
+    pub auth_token: Option<String>,
     /// Shutdown flag shared with threads.
     shutdown: Arc<Mutex<bool>>,
 }
@@ -299,8 +344,10 @@ impl CollabSession {
         display_name: &str,
         port: u16,
         files: Vec<(u64, String, Vec<u8>)>,
+        tls_auth: &TlsAuthConfig,
     ) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
+        let bind_addr = format!("{}:{port}", tls_auth.bind_address);
+        let listener = TcpListener::bind(&bind_addr)?;
         let actual_port = listener.local_addr()?.port();
         listener.set_nonblocking(false)?;
 
@@ -323,6 +370,7 @@ impl CollabSession {
         let shutdown_accept = shutdown_clone.clone();
         let file_snaps_for_accept = file_snapshots.clone();
         let file_snaps_for_cmd = file_snapshots;
+        let auth_token_for_accept = tls_auth.auth_token.clone().map(Arc::new);
         thread::Builder::new()
             .name("collab-accept".to_string())
             .spawn(move || {
@@ -340,11 +388,19 @@ impl CollabSession {
                     let clients = clients_for_accept.clone();
                     let snaps = file_snaps_for_accept.lock().expect("lock poisoned").clone();
                     let shutdown_peer = shutdown_accept.clone();
+                    let auth_token = auth_token_for_accept.clone();
 
                     thread::Builder::new()
                         .name("collab-peer".to_string())
                         .spawn(move || {
-                            host_handle_peer(stream, event_tx, clients, snaps, shutdown_peer);
+                            host_handle_peer(
+                                stream,
+                                event_tx,
+                                clients,
+                                snaps,
+                                shutdown_peer,
+                                auth_token,
+                            );
                         })
                         .ok();
                 }
@@ -409,12 +465,13 @@ impl CollabSession {
             reconnecting: false,
             reconnect_attempt: 0,
             disconnected_peers: HashMap::new(),
+            auth_token: tls_auth.auth_token.clone(),
             shutdown,
         })
     }
 
     /// Join an existing collaboration session.
-    pub fn join(display_name: &str, addr: &str) -> std::io::Result<Self> {
+    pub fn join(display_name: &str, addr: &str, auth_token: Option<&str>) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
@@ -426,14 +483,38 @@ impl CollabSession {
         let name = display_name.to_string();
         let reconnect_addr = addr.to_string();
 
+        let mut writer = stream.try_clone()?;
+
+        // Send auth token if provided.
+        if let Some(token) = auth_token {
+            write_wire(&mut writer, MSG_AUTHENTICATE, token.as_bytes())?;
+            // Wait for acceptance.
+            let mut reader_tmp = stream.try_clone()?;
+            match read_wire(&mut reader_tmp) {
+                Ok((MSG_AUTHENTICATE, payload)) => {
+                    let response = String::from_utf8_lossy(&payload).to_string();
+                    if response != "accepted" {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "Authentication rejected by host",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Invalid auth response from host",
+                    ));
+                }
+            }
+        }
+
         // Send our PeerJoined message.
         let join_payload = serde_json::to_vec(&serde_json::json!({
             "peer_id": local_peer_id,
             "name": name,
         }))
         .unwrap();
-
-        let mut writer = stream.try_clone()?;
         write_wire(&mut writer, MSG_PEER_JOINED, &join_payload)?;
 
         let writer = Arc::new(Mutex::new(writer));
@@ -500,6 +581,7 @@ impl CollabSession {
             reconnecting: false,
             reconnect_attempt: 0,
             disconnected_peers: HashMap::new(),
+            auth_token: None,
             shutdown,
         })
     }
@@ -640,6 +722,7 @@ fn host_handle_peer(
     clients: ClientList,
     file_snapshots: Vec<(u64, String, Vec<u8>)>,
     shutdown: Arc<Mutex<bool>>,
+    expected_token: Option<Arc<String>>,
 ) {
     let mut reader = match stream.try_clone() {
         Ok(s) => s,
@@ -649,6 +732,33 @@ fn host_handle_peer(
         }
     };
     let writer = Arc::new(Mutex::new(stream));
+
+    // If authentication is required, validate the token first.
+    if let Some(ref expected) = expected_token {
+        match read_wire(&mut reader) {
+            Ok((MSG_AUTHENTICATE, payload)) => {
+                let token = String::from_utf8_lossy(&payload).to_string();
+                if token.trim() != expected.as_str() {
+                    tracing::warn!("Peer failed authentication");
+                    let _ = write_wire(
+                        &mut *writer.lock().expect("lock poisoned"),
+                        MSG_AUTHENTICATE,
+                        b"rejected",
+                    );
+                    return;
+                }
+                let _ = write_wire(
+                    &mut *writer.lock().expect("lock poisoned"),
+                    MSG_AUTHENTICATE,
+                    b"accepted",
+                );
+            }
+            _ => {
+                tracing::warn!("Expected auth token, got something else");
+                return;
+            }
+        }
+    }
 
     // Wait for the PeerJoined message.
     let peer_id = match read_wire(&mut reader) {
@@ -1040,7 +1150,7 @@ mod tests {
         let mut doc = aura_core::CrdtDoc::with_text("hello").unwrap();
         let snapshot = doc.save_bytes();
         let files = vec![(42u64, "/tmp/test.rs".to_string(), snapshot)];
-        let session = CollabSession::host("host", 0, files).unwrap();
+        let session = CollabSession::host("host", 0, files, &TlsAuthConfig::default()).unwrap();
         let port = session.port.unwrap();
 
         // Give the listener a moment.
@@ -1048,7 +1158,7 @@ mod tests {
 
         // Connect a client.
         let addr = format!("127.0.0.1:{port}");
-        let client = CollabSession::join("client", &addr).unwrap();
+        let client = CollabSession::join("client", &addr, None).unwrap();
 
         // Wait for the snapshot to arrive.
         std::thread::sleep(Duration::from_millis(200));
@@ -1084,13 +1194,13 @@ mod tests {
             (1u64, "/tmp/one.rs".to_string(), doc1.save_bytes()),
             (2u64, "/tmp/two.rs".to_string(), doc2.save_bytes()),
         ];
-        let session = CollabSession::host("host", 0, files).unwrap();
+        let session = CollabSession::host("host", 0, files, &TlsAuthConfig::default()).unwrap();
         let port = session.port.unwrap();
 
         std::thread::sleep(Duration::from_millis(50));
 
         let addr = format!("127.0.0.1:{port}");
-        let client = CollabSession::join("client", &addr).unwrap();
+        let client = CollabSession::join("client", &addr, None).unwrap();
 
         std::thread::sleep(Duration::from_millis(200));
 
