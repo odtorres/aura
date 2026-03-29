@@ -135,6 +135,63 @@ Shows recent commits with Aura-Conversation trailers, connecting code changes to
 
 Shows the last 100 entries.
 
+## Merge Conflict Editor
+
+When a file has git merge conflicts, AURA provides a 3-panel merge editor (like VS Code). Files with conflicts appear with a magenta **C** status in the source control panel.
+
+### Opening the Merge Editor
+
+- Press **Enter** on a conflict file in the source control panel
+- Or use `:merge` command
+
+### 3-Panel Layout
+
+```
+┌─────────────────────────┬─────────────────────────┐
+│  Incoming (theirs)      │  Current (ours/HEAD)     │
+│  Green-tinted conflicts │  Blue-tinted conflicts   │
+├─────────────────────────┴─────────────────────────┤
+│  Result — N Conflicts Remaining                   │
+│  Live preview of resolved file                    │
+└───────────────────────────────────────────────────┘
+```
+
+- **Top-left**: Incoming branch changes (theirs)
+- **Top-right**: Current branch changes (ours/HEAD)
+- **Bottom**: Result — shows the merged file with resolved content
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `1` | Accept Current (keep ours) |
+| `2` | Accept Incoming (keep theirs) |
+| `3` | Accept Both (Current first, then Incoming) |
+| `4` | Accept Both (Incoming first, then Current) |
+| `5` / `i` | Ignore (remove markers, keep current) |
+| `n` / `N` | Jump to next / previous unresolved conflict |
+| `j` / `k` | Scroll in focused panel |
+| `Tab` | Cycle focus between panels |
+| `c` | Complete merge (writes file and stages it) |
+| `Esc` / `q` | Close merge editor |
+
+### Resolution Flow
+
+1. Navigate conflicts with `n`/`N`
+2. The active conflict is highlighted in yellow
+3. Press `1`-`5` to resolve — the result panel updates in real-time
+4. When all conflicts are resolved, press `c` to complete the merge
+5. AURA writes the resolved content to the file and stages it automatically
+
+### Color Coding
+
+| Color | Meaning |
+|-------|---------|
+| Green tint | Incoming (theirs) conflict lines |
+| Blue tint | Current (ours) conflict lines |
+| Yellow tint | Active/unresolved conflict |
+| Green tint (result) | Resolved conflict |
+
 ## Experimental Mode
 
 ```

@@ -24,6 +24,8 @@ pub enum GitFileStatus {
     Renamed,
     /// File is untracked.
     Untracked,
+    /// File has merge conflicts.
+    Conflict,
 }
 
 impl GitFileStatus {
@@ -33,6 +35,7 @@ impl GitFileStatus {
             Self::Modified => "M",
             Self::Added => "A",
             Self::Deleted => "D",
+            Self::Conflict => "C",
             Self::Renamed => "R",
             Self::Untracked => "?",
         }
@@ -131,6 +134,16 @@ impl SourceControlPanel {
                 .next()
                 .unwrap_or(&entry.rel_path)
                 .to_string();
+
+            // Check for merge conflicts first.
+            if crate::git::is_conflict_entry(&entry) {
+                self.changed.push(GitFileEntry {
+                    rel_path: entry.rel_path.clone(),
+                    name,
+                    status: GitFileStatus::Conflict,
+                });
+                continue;
+            }
 
             // Index status (X) — staged changes.
             if entry.index_status != ' ' && entry.index_status != '?' {
@@ -278,6 +291,15 @@ impl SourceControlPanel {
             GitPanelSection::ChangedFiles => {
                 self.changed.get(self.selected).map(|e| e.rel_path.as_str())
             }
+            GitPanelSection::CommitMessage => None,
+        }
+    }
+
+    /// Get the currently selected file entry (if any).
+    pub fn selected_entry(&self) -> Option<&GitFileEntry> {
+        match self.focused_section {
+            GitPanelSection::StagedFiles => self.staged.get(self.selected),
+            GitPanelSection::ChangedFiles => self.changed.get(self.selected),
             GitPanelSection::CommitMessage => None,
         }
     }

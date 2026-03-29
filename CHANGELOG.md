@@ -5,6 +5,24 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.30] - 2026-03-29
+
+### Added
+
+- **3-panel merge conflict editor** — VS Code-style merge resolution with Incoming (theirs) | Current (ours) | Result panels.
+  - Conflict files shown with magenta **C** status in source control panel.
+  - Press Enter on a conflict file to open the merge editor.
+  - Resolve conflicts with `1` (current), `2` (incoming), `3`/`4` (both), `5` (ignore).
+  - Navigate conflicts with `n`/`N`, cycle panels with `Tab`.
+  - Result panel updates in real-time as you resolve conflicts.
+  - Press `c` to complete merge — writes resolved file and stages it automatically.
+  - Unit tests for conflict parsing, resolution, and result generation.
+- **TLS encryption for collaborative editing** — Enable `use_tls = true` in `[collab]` config to encrypt all peer traffic with rustls.
+  - Self-signed certificates generated automatically via rcgen.
+  - WireReader/WireWriter transport abstraction supports both plaintext TCP and TLS.
+  - Works with authentication tokens for defense in depth.
+- **Global panel-switching shortcuts** — `Ctrl+T/G/N/J/H/,` now work from any focused panel without needing to press `Esc` first.
+
 ## [0.1.29] - 2026-03-29
 
 ### Added

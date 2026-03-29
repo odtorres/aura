@@ -106,6 +106,8 @@ pub enum Mode {
     Review,
     /// Viewing a side-by-side git diff (read-only).
     Diff,
+    /// Merge conflict editor (3-panel: incoming | current | result).
+    MergeConflict,
 }
 
 impl Mode {
@@ -121,6 +123,7 @@ impl Mode {
             Mode::Intent => "INTENT",
             Mode::Review => "REVIEW",
             Mode::Diff => "DIFF",
+            Mode::MergeConflict => "MERGE",
         }
     }
 }
@@ -287,6 +290,8 @@ pub struct App {
     pub source_control_focused: bool,
     /// Side-by-side diff view (None when not active).
     pub diff_view: Option<DiffView>,
+    /// Active merge conflict editor (3-panel).
+    pub merge_view: Option<crate::merge_view::MergeConflictView>,
     /// Last time the source control panel was refreshed.
     last_sc_refresh: std::time::Instant,
     /// Right-side AI conversation history panel.
@@ -625,6 +630,7 @@ impl App {
             source_control: SourceControlPanel::new(30),
             source_control_focused: false,
             diff_view: None,
+            merge_view: None,
             last_sc_refresh: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
@@ -1073,6 +1079,7 @@ impl App {
             Mode::Intent => crate::input::handle_intent(self, code, modifiers),
             Mode::Review => crate::input::handle_review(self, code, modifiers),
             Mode::Diff => crate::input::handle_diff(self, code, modifiers),
+            Mode::MergeConflict => crate::input::handle_merge_conflict(self, code, modifiers),
         }
 
         // Detect when an edit starts (Normal → Insert via c, s, o, etc.)
@@ -5008,6 +5015,78 @@ impl App {
         let lines = crate::git::aligned_diff_lines(&old_content, &new_content);
         self.diff_view = Some(DiffView::new(rel_path.to_string(), lines));
         self.mode = Mode::Diff;
+    }
+
+    /// Open the 3-panel merge conflict editor for a file with conflicts.
+    pub fn open_merge_view(&mut self, rel_path: &str) {
+        let workdir = match self.git_repo.as_ref().map(|r| r.workdir().to_path_buf()) {
+            Some(wd) => wd,
+            None => {
+                self.set_status("No git repository");
+                return;
+            }
+        };
+
+        let full_path = workdir.join(rel_path);
+        let content = match std::fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_status(format!("Cannot read file: {e}"));
+                return;
+            }
+        };
+
+        let segments = crate::merge_view::parse_conflict_markers(&content);
+        let has_conflicts = segments
+            .iter()
+            .any(|s| matches!(s, crate::merge_view::MergeSegment::Conflict(_)));
+
+        if !has_conflicts {
+            self.set_status("No conflicts found in file");
+            return;
+        }
+
+        let view = crate::merge_view::MergeConflictView::new(rel_path.to_string(), segments);
+        self.set_status(format!(
+            "Merge editor: {} conflict(s)",
+            view.total_conflicts
+        ));
+        self.merge_view = Some(view);
+        self.mode = Mode::MergeConflict;
+    }
+
+    /// Complete the merge: write resolved content and stage the file.
+    pub fn complete_merge(&mut self) {
+        let (file_path, result) = match &self.merge_view {
+            Some(view) if view.all_resolved() => (view.file_path.clone(), view.build_result()),
+            Some(view) => {
+                let remaining = view.total_conflicts - view.resolved_count;
+                self.set_status(format!("{remaining} conflict(s) remaining"));
+                return;
+            }
+            None => return,
+        };
+
+        let workdir = match self.git_repo.as_ref().map(|r| r.workdir().to_path_buf()) {
+            Some(wd) => wd,
+            None => return,
+        };
+
+        let full_path = workdir.join(&file_path);
+        if let Err(e) = std::fs::write(&full_path, &result) {
+            self.set_status(format!("Failed to write: {e}"));
+            return;
+        }
+
+        if let Some(ref repo) = self.git_repo {
+            let _ = repo.stage_file(&file_path);
+        }
+
+        self.merge_view = None;
+        self.mode = Mode::Normal;
+        self.source_control_focused = true;
+        self.refresh_source_control();
+        self.set_status(format!("Merge complete: {file_path}"));
     }
 
     /// Load the file currently selected in the file picker into a tab,

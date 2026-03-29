@@ -65,6 +65,17 @@ pub struct GitStatusEntry {
     pub worktree_status: char,
 }
 
+/// Check if a `GitStatusEntry` represents a merge conflict.
+///
+/// Conflicts in porcelain v1 are marked with combinations of U/A/D
+/// in the index and worktree status columns.
+pub fn is_conflict_entry(entry: &GitStatusEntry) -> bool {
+    matches!(
+        (entry.index_status, entry.worktree_status),
+        ('U', 'U') | ('A', 'A') | ('D', 'D') | ('A', 'U') | ('U', 'A') | ('D', 'U') | ('U', 'D')
+    )
+}
+
 /// Aligned diff line for side-by-side diff view.
 #[derive(Debug, Clone)]
 pub enum DiffLine {

@@ -133,6 +133,7 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `Ctrl+S` | Save file |
 | `Ctrl+N` | Toggle file tree sidebar (and focus) |
 | `Ctrl+T` | Toggle terminal pane (and focus) |
+| `Ctrl+G` | Toggle git/source control panel (and focus) |
 | `Ctrl+J` | Toggle chat panel (and focus) |
 | `Ctrl+H` | Toggle conversation history panel |
 | `Ctrl+D` | Add cursor at next word match (multi-cursor) |
@@ -141,6 +142,12 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `Ctrl+W` | Toggle split pane focus |
 | `Ctrl+,` | Open settings modal |
 | `F1` | Open help overlay |
+| `F5` | Start/continue debug session |
+| `F9` | Toggle breakpoint |
+| `F10` | Step over (debugger) |
+| `F11` | Step into (debugger) |
+
+> **Note:** Panel-switching shortcuts (`Ctrl+T/G/N/J/H/,`) work from **any focused panel** — you never need to press `Esc` first to switch between panels.
 
 ## Leader Key Sequences (`Space` + key)
 

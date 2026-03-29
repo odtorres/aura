@@ -134,6 +134,29 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         app.terminal_rect = Rect::default();
     }
 
+    // If merge view is active, render the 3-panel merge conflict editor.
+    if app.merge_view.is_some() {
+        draw_merge_view(frame, app, editor_area);
+
+        if has_terminal {
+            let inner_h = terminal_area.height.saturating_sub(2);
+            let inner_w = terminal_area.width.saturating_sub(2);
+            if inner_h > 0 && inner_w > 0 {
+                app.terminal.resize(inner_w, inner_h);
+            }
+            draw_terminal(frame, app, terminal_area);
+        }
+
+        if has_debug_panel {
+            app.debug_panel_rect = debug_panel_area;
+            draw_debug_panel(frame, app, debug_panel_area);
+        }
+
+        draw_status_bar(frame, app, status_area);
+        draw_command_bar(frame, app, command_area);
+        return;
+    }
+
     // If diff view is active, render it instead of the normal editor.
     if app.diff_view.is_some() {
         draw_diff_view(frame, app, editor_area);
@@ -430,6 +453,184 @@ fn draw_minimap(
 }
 
 /// Draw the side-by-side diff view.
+/// Draw the 3-panel merge conflict editor (Incoming | Current | Result).
+fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
+    use crate::merge_view::{MergeFocus, Resolution};
+
+    let view = match &app.merge_view {
+        Some(v) => v,
+        None => return,
+    };
+
+    // Layout: 55% top (two panels side by side), 45% bottom (result).
+    let vsplit = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
+
+    let top_area = vsplit[0];
+    let bottom_area = vsplit[1];
+
+    let hsplit = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(top_area);
+
+    let incoming_area = hsplit[0];
+    let current_area = hsplit[1];
+
+    // Draw the three panels.
+    let focus = view.focus;
+    let active_conflict = view.active_conflict;
+
+    // --- Incoming (theirs) panel ---
+    {
+        let border_color = if focus == MergeFocus::Incoming {
+            Color::Green
+        } else {
+            Color::DarkGray
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .title(" Incoming (theirs) ");
+        let inner = block.inner(incoming_area);
+        frame.render_widget(block, incoming_area);
+
+        let lines = view.incoming_lines();
+        let scroll = view.scroll_incoming;
+        draw_merge_panel_lines(frame, inner, &lines, scroll, active_conflict, Color::Green);
+    }
+
+    // --- Current (ours) panel ---
+    {
+        let border_color = if focus == MergeFocus::Current {
+            Color::Blue
+        } else {
+            Color::DarkGray
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .title(" Current (ours/HEAD) ");
+        let inner = block.inner(current_area);
+        frame.render_widget(block, current_area);
+
+        let lines = view.current_lines();
+        let scroll = view.scroll_current;
+        draw_merge_panel_lines(frame, inner, &lines, scroll, active_conflict, Color::Blue);
+    }
+
+    // --- Result panel ---
+    {
+        let remaining = view.total_conflicts - view.resolved_count;
+        let (border_color, title) = if remaining == 0 {
+            (
+                Color::Green,
+                " Result — All Resolved  [c] Complete Merge ".to_string(),
+            )
+        } else {
+            (
+                Color::Yellow,
+                format!(" Result — {} Conflict(s) Remaining ", remaining),
+            )
+        };
+        let border_color = if focus == MergeFocus::Result {
+            border_color
+        } else {
+            Color::DarkGray
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .title(title);
+        let inner = block.inner(bottom_area);
+        frame.render_widget(block, bottom_area);
+
+        let lines = view.result_lines();
+        let scroll = view.scroll_result;
+
+        for (i, (line, conflict_idx)) in lines.iter().skip(scroll).enumerate() {
+            if i as u16 >= inner.height {
+                break;
+            }
+            let row_y = inner.y + i as u16;
+            let style = if let Some(idx) = conflict_idx {
+                let res = view.conflict_resolution(*idx);
+                if res == Resolution::Unresolved {
+                    // Unresolved — yellow background.
+                    Style::default().fg(Color::White).bg(Color::Rgb(60, 60, 20))
+                } else {
+                    // Resolved — green background.
+                    Style::default().fg(Color::White).bg(Color::Rgb(20, 50, 20))
+                }
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let display = if line.len() > inner.width as usize {
+                &line[..inner.width as usize]
+            } else {
+                line.as_str()
+            };
+            frame.render_widget(
+                Paragraph::new(display).style(style),
+                Rect::new(inner.x, row_y, inner.width, 1),
+            );
+        }
+    }
+
+    // Draw hint line in the command bar area (handled by command bar already).
+    // The status message shows resolution hints.
+}
+
+/// Render lines for a merge panel (incoming or current) with conflict highlighting.
+fn draw_merge_panel_lines(
+    frame: &mut Frame,
+    area: Rect,
+    lines: &[(String, Option<usize>)],
+    scroll: usize,
+    active_conflict: usize,
+    conflict_color: Color,
+) {
+    for (i, (line, conflict_idx)) in lines.iter().skip(scroll).enumerate() {
+        if i as u16 >= area.height {
+            break;
+        }
+        let row_y = area.y + i as u16;
+
+        let style = if let Some(idx) = conflict_idx {
+            if *idx == active_conflict {
+                // Active conflict — bright highlight.
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Rgb(60, 60, 20))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                // Other conflict — dim tint.
+                let (r, g, b) = match conflict_color {
+                    Color::Green => (20, 50, 20),
+                    Color::Blue => (20, 20, 60),
+                    _ => (40, 40, 40),
+                };
+                Style::default().fg(Color::White).bg(Color::Rgb(r, g, b))
+            }
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let display = if line.len() > area.width as usize {
+            &line[..area.width as usize]
+        } else {
+            line.as_str()
+        };
+        frame.render_widget(
+            Paragraph::new(display).style(style),
+            Rect::new(area.x, row_y, area.width, 1),
+        );
+    }
+}
+
 fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
     let dv = match &app.diff_view {
         Some(dv) => dv,
@@ -2071,6 +2272,9 @@ fn status_color(status: GitFileStatus) -> Style {
         GitFileStatus::Deleted => Style::default().fg(Color::Red),
         GitFileStatus::Renamed => Style::default().fg(Color::Blue),
         GitFileStatus::Untracked => Style::default().fg(Color::DarkGray),
+        GitFileStatus::Conflict => Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
     }
 }
 
@@ -3806,6 +4010,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Intent => Style::default().fg(Color::Black).bg(theme.mode_intent),
         Mode::Review => Style::default().fg(Color::Black).bg(theme.mode_review),
         Mode::Diff => Style::default().fg(Color::Black).bg(Color::Cyan),
+        Mode::MergeConflict => Style::default().fg(Color::Black).bg(Color::Magenta),
     };
 
     let file_name = app

@@ -153,10 +153,25 @@ If the token is wrong, the connection is rejected with a clear error message.
 
 - The auth token is generated randomly per session (32 hex chars)
 - Tokens are ephemeral — they expire when the host closes the session
-- For internet use, consider running behind a VPN or SSH tunnel for additional encryption
-- The wire protocol itself is not encrypted (TLS support planned for a future release)
+- Enable TLS for encrypted traffic (see below)
+
+## TLS Encryption
+
+Enable TLS to encrypt all collaboration traffic with a self-signed certificate:
+
+```toml
+[collab]
+use_tls = true
+```
+
+When TLS is enabled:
+- The host generates a self-signed certificate automatically via `rcgen`
+- All peer traffic (sync messages, awareness, snapshots) is encrypted via `rustls`
+- Clients accept self-signed certificates (suitable for trusted peer-to-peer use)
+- TLS works alongside authentication tokens for defense in depth
+
+Both host and client must have `use_tls = true` in their `aura.toml` (or the connection will fail due to protocol mismatch).
 
 ## Limitations
 
-- **No TLS encryption yet**: Traffic is unencrypted. For sensitive code, use a VPN or SSH tunnel.
 - **Scratch buffers excluded**: Unsaved buffers without a file path are not shared in multi-file sessions.

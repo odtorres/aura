@@ -441,9 +441,18 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.source_control.editing_commit_message = true;
             }
             KeyCode::Enter => {
-                // Open side-by-side diff view for the selected file.
+                // Open merge view for conflicts, diff view for everything else.
                 if let Some(rel_path) = app.source_control.selected_path().map(|s| s.to_string()) {
-                    app.open_diff_view(&rel_path);
+                    let is_conflict = app
+                        .source_control
+                        .selected_entry()
+                        .map(|e| e.status == crate::source_control::GitFileStatus::Conflict)
+                        .unwrap_or(false);
+                    if is_conflict {
+                        app.open_merge_view(&rel_path);
+                    } else {
+                        app.open_diff_view(&rel_path);
+                    }
                 }
             }
             KeyCode::Esc => {
@@ -2773,6 +2782,15 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- Merge conflict ---
+        "merge" => {
+            // Open merge view for the currently selected file in source control.
+            if let Some(rel_path) = app.source_control.selected_path().map(|s| s.to_string()) {
+                app.open_merge_view(&rel_path);
+            } else {
+                app.set_status("Select a conflict file in source control first");
+            }
+        }
         // --- Debugger commands ---
         "debug" | "db" => {
             app.start_debug_session();
@@ -2886,6 +2904,79 @@ pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
 // ---------------------------------------------------------------------------
 // Vim operator/motion helpers
+/// Handle keys in MergeConflict (3-panel merge editor) mode.
+pub fn handle_merge_conflict(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    let view = match app.merge_view.as_mut() {
+        Some(v) => v,
+        None => {
+            app.mode = Mode::Normal;
+            return;
+        }
+    };
+
+    match code {
+        // Close merge view.
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.merge_view = None;
+            app.mode = Mode::Normal;
+            app.source_control_focused = true;
+        }
+        // Scroll.
+        KeyCode::Char('j') | KeyCode::Down => view.scroll_down(1, 20),
+        KeyCode::Char('k') | KeyCode::Up => view.scroll_up(1),
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+            view.scroll_down(10, 20);
+        }
+        KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+            view.scroll_up(10);
+        }
+        // Navigate conflicts.
+        KeyCode::Char('n') => view.next_conflict(),
+        KeyCode::Char('N') => view.prev_conflict(),
+        // Resolution keys.
+        KeyCode::Char('1') => {
+            view.resolve(crate::merge_view::Resolution::AcceptCurrent);
+            let remaining = view.total_conflicts - view.resolved_count;
+            app.set_status(format!(
+                "Accepted current — {remaining} conflict(s) remaining"
+            ));
+        }
+        KeyCode::Char('2') => {
+            view.resolve(crate::merge_view::Resolution::AcceptIncoming);
+            let remaining = view.total_conflicts - view.resolved_count;
+            app.set_status(format!(
+                "Accepted incoming — {remaining} conflict(s) remaining"
+            ));
+        }
+        KeyCode::Char('3') => {
+            view.resolve(crate::merge_view::Resolution::AcceptBothCurrentFirst);
+            let remaining = view.total_conflicts - view.resolved_count;
+            app.set_status(format!(
+                "Accepted both (current first) — {remaining} conflict(s) remaining"
+            ));
+        }
+        KeyCode::Char('4') => {
+            view.resolve(crate::merge_view::Resolution::AcceptBothIncomingFirst);
+            let remaining = view.total_conflicts - view.resolved_count;
+            app.set_status(format!(
+                "Accepted both (incoming first) — {remaining} conflict(s) remaining"
+            ));
+        }
+        KeyCode::Char('5') | KeyCode::Char('i') => {
+            view.resolve(crate::merge_view::Resolution::Ignore);
+            let remaining = view.total_conflicts - view.resolved_count;
+            app.set_status(format!("Ignored — {remaining} conflict(s) remaining"));
+        }
+        // Cycle focus between panels.
+        KeyCode::Tab => view.cycle_focus(),
+        // Complete merge.
+        KeyCode::Char('c') => {
+            app.complete_merge();
+        }
+        _ => {}
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 use crate::app::{FindCharMode, Operator};

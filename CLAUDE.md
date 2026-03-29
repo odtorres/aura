@@ -153,7 +153,8 @@ aura-editor/
     │       ├── session.rs              # Session persistence (save/restore)
     │       ├── help.rs                 # In-editor help overlay
     │       ├── dap.rs                  # DAP debug adapter client (stdio, Content-Length framing)
-    │       └── debug_panel.rs          # Debug panel state (call stack, variables, output)
+    │       ├── debug_panel.rs          # Debug panel state (call stack, variables, output)
+    │       └── merge_view.rs           # 3-panel merge conflict editor (incoming|current|result)
     ├── ai/
     │   └── src/
     │       ├── lib.rs      # Config, re-exports
