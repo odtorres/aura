@@ -449,7 +449,7 @@ When working on this project with Claude Code:
 ### 10.7 Potential future work
 - [x] Visual block mode (Ctrl+V column editing)
 - [x] Wire TLS into actual streams (needs reader/writer refactor)
-- [ ] More LSP features (rename, references panel)
+- [x] More LSP features (rename, references panel)
 - [ ] Undo tree visualization
 - [x] Multi-cursor editing
 - [x] Snippet system

@@ -22,9 +22,30 @@ Press `gd` to jump to the definition of the symbol under the cursor.
 
 Press `K` in Normal mode to show hover info (type signatures, documentation) in a floating popup.
 
-### References
+### Find All References
 
-Find all references to a symbol — integrated into the semantic graph for impact analysis.
+Press `gr` to find all references to the symbol under the cursor. A floating panel shows all locations:
+
+```
+References (5)
+  main.rs:42:5
+  lib.rs:128:12
+  tests.rs:15:20
+```
+
+Navigate with `j`/`k`, press `Enter` to jump to that location, `Esc` to close.
+
+Also available via `:references` or `:ref` command.
+
+### Rename Symbol
+
+Press `F2` or `gn` to rename the symbol under the cursor across all files:
+
+1. A rename prompt appears in the command bar with the current symbol name
+2. Edit the name and press `Enter`
+3. All occurrences are renamed (in the current buffer and on disk for other files)
+
+Also available via `:rename <new_name>` command.
 
 ### Code Actions
 

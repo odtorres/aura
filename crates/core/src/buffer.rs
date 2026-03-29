@@ -745,6 +745,22 @@ impl Buffer {
         (start, end)
     }
 
+    /// Get the word under the cursor at (row, col).
+    pub fn word_at_cursor(&self, row: usize, col: usize) -> String {
+        let cursor = Cursor { row, col };
+        let char_idx = self.cursor_to_char_idx(&cursor);
+        let (start, end) = self.find_inner_word(char_idx);
+        self.rope.slice(start..end).to_string()
+    }
+
+    /// Replace a byte range with new text, preserving authorship as human.
+    pub fn replace_range(&mut self, start_byte: usize, end_byte: usize, new_text: &str) {
+        let start_char = self.rope.byte_to_char(start_byte);
+        let end_char = self.rope.byte_to_char(end_byte);
+        self.delete(start_char, end_char, AuthorId::Human);
+        self.insert(start_char, new_text, AuthorId::Human);
+    }
+
     /// Get a single character at the given index.
     pub fn get_char(&self, char_idx: usize) -> Option<char> {
         self.rope.get_char(char_idx)

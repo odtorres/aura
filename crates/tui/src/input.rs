@@ -196,6 +196,52 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // When rename mode is active, route keys to the rename input.
+    if app.rename_active {
+        match code {
+            KeyCode::Esc => {
+                app.rename_active = false;
+                app.rename_input.clear();
+                app.set_status("Rename cancelled");
+            }
+            KeyCode::Enter => {
+                app.lsp_rename_execute();
+            }
+            KeyCode::Backspace => {
+                app.rename_input.pop();
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.rename_input.push(c);
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // When the references panel is visible, route navigation keys.
+    if app.references_panel.is_some() {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.references_panel = None;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(panel) = &mut app.references_panel {
+                    panel.select_down();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(panel) = &mut app.references_panel {
+                    panel.select_up();
+                }
+            }
+            KeyCode::Enter => {
+                app.goto_reference();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // When the debug panel is focused, route keys to debug navigation.
     if app.debug_panel_focused {
         match code {
@@ -648,6 +694,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // F2 — rename symbol.
+    if code == KeyCode::F(2) {
+        app.lsp_rename_start();
+        return;
+    }
+
     // F9 — toggle breakpoint (works with or without active debug session).
     if code == KeyCode::F(9) {
         app.toggle_breakpoint();
@@ -866,6 +918,14 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Char('d') => {
                 app.lsp_goto_definition();
+                return;
+            }
+            KeyCode::Char('r') => {
+                app.lsp_references();
+                return;
+            }
+            KeyCode::Char('n') => {
+                app.lsp_rename_start();
                 return;
             }
             KeyCode::Char('t') => {
@@ -2782,6 +2842,13 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- LSP features ---
+        "references" | "ref" => {
+            app.lsp_references();
+        }
+        "rename" => {
+            app.lsp_rename_start();
+        }
         // --- Merge conflict ---
         "merge" => {
             // Open merge view for the currently selected file in source control.
@@ -2825,6 +2892,12 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(new_name) = other.strip_prefix("rename ") {
+                let new_name = new_name.trim();
+                if !new_name.is_empty() {
+                    app.rename_input = new_name.to_string();
+                    app.lsp_rename_execute();
+                }
             } else if let Some(program) = other.strip_prefix("debug ") {
                 let program = program.trim();
                 if program == "stop" {

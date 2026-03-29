@@ -154,6 +154,44 @@ pub struct ConversationPanel {
     pub scroll: usize,
 }
 
+/// Floating panel showing all references to a symbol.
+pub struct ReferencesPanel {
+    /// All reference locations.
+    pub locations: Vec<crate::lsp::LspLocation>,
+    /// Currently selected index.
+    pub selected: usize,
+}
+
+impl ReferencesPanel {
+    /// Create a new references panel.
+    pub fn new(locations: Vec<crate::lsp::LspLocation>) -> Self {
+        Self {
+            locations,
+            selected: 0,
+        }
+    }
+
+    /// Navigate up.
+    pub fn select_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    /// Navigate down.
+    pub fn select_down(&mut self) {
+        let max = self.locations.len().saturating_sub(1);
+        if self.selected < max {
+            self.selected += 1;
+        }
+    }
+
+    /// Get the selected location.
+    pub fn selected_location(&self) -> Option<&crate::lsp::LspLocation> {
+        self.locations.get(self.selected)
+    }
+}
+
 /// Top-level application state.
 pub struct App {
     /// Tab manager holding all open editor buffers.
@@ -292,6 +330,12 @@ pub struct App {
     pub diff_view: Option<DiffView>,
     /// Active merge conflict editor (3-panel).
     pub merge_view: Option<crate::merge_view::MergeConflictView>,
+    /// References panel (floating list of symbol references).
+    pub references_panel: Option<ReferencesPanel>,
+    /// Whether rename mode is active (typing new name in command bar).
+    pub rename_active: bool,
+    /// The rename input text.
+    pub rename_input: String,
     /// Last time the source control panel was refreshed.
     last_sc_refresh: std::time::Instant,
     /// Right-side AI conversation history panel.
@@ -631,6 +675,9 @@ impl App {
             source_control_focused: false,
             diff_view: None,
             merge_view: None,
+            references_panel: None,
+            rename_active: false,
+            rename_input: String::new(),
             last_sc_refresh: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
@@ -1806,6 +1853,18 @@ impl App {
                         }
                     }
                 }
+                LspEvent::References(locations) => {
+                    if locations.is_empty() {
+                        self.set_status("No references found");
+                    } else {
+                        let count = locations.len();
+                        self.set_status(format!("{count} reference(s) found"));
+                        self.references_panel = Some(ReferencesPanel::new(locations));
+                    }
+                }
+                LspEvent::RenameApplied(edits) => {
+                    self.apply_rename_edits(edits);
+                }
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);
                     self.tab_mut().lsp_client = None;
@@ -1899,6 +1958,191 @@ impl App {
             self.set_status("Requesting code actions...");
         } else {
             self.set_status("No LSP server");
+        }
+    }
+
+    /// Request all references to the symbol at the cursor.
+    pub fn lsp_references(&mut self) {
+        let row = self.tab().cursor.row as u32;
+        let col = self.tab().cursor.col as u32;
+        if let Some(client) = &mut self.tab_mut().lsp_client {
+            client.references(row, col);
+            self.set_status("Finding references...");
+        } else {
+            self.set_status("No LSP server");
+        }
+    }
+
+    /// Start rename mode: show input prompt with current word.
+    pub fn lsp_rename_start(&mut self) {
+        if self.tab().lsp_client.is_none() {
+            self.set_status("No LSP server");
+            return;
+        }
+        // Get the word under cursor as default input.
+        let word = self
+            .tab()
+            .buffer
+            .word_at_cursor(self.tab().cursor.row, self.tab().cursor.col);
+        self.rename_input = word;
+        self.rename_active = true;
+        self.set_status("Rename: type new name and press Enter");
+    }
+
+    /// Execute a rename request with the given new name.
+    pub fn lsp_rename_execute(&mut self) {
+        let new_name = self.rename_input.clone();
+        self.rename_active = false;
+        if new_name.is_empty() {
+            self.set_status("Rename cancelled (empty name)");
+            return;
+        }
+        let row = self.tab().cursor.row as u32;
+        let col = self.tab().cursor.col as u32;
+        if let Some(client) = &mut self.tab_mut().lsp_client {
+            client.rename(row, col, &new_name);
+            self.set_status(format!("Renaming to '{new_name}'..."));
+        }
+    }
+
+    /// Apply rename edits from the LSP server.
+    fn apply_rename_edits(
+        &mut self,
+        edits: std::collections::HashMap<String, Vec<crate::lsp::TextEdit>>,
+    ) {
+        let mut total_edits = 0usize;
+        let mut files_changed = 0usize;
+
+        for (uri, file_edits) in &edits {
+            // Convert URI to file path.
+            let path_str = uri.strip_prefix("file://").unwrap_or(uri);
+            let path = std::path::PathBuf::from(path_str);
+
+            // Check if this file is the current tab.
+            let is_current = self
+                .tab()
+                .buffer
+                .file_path()
+                .is_some_and(|p| p.canonicalize().ok() == path.canonicalize().ok());
+
+            if is_current {
+                // Apply edits to the current buffer (in reverse order to preserve positions).
+                let mut sorted_edits = file_edits.clone();
+                sorted_edits.sort_by(|a, b| {
+                    b.range
+                        .start
+                        .line
+                        .cmp(&a.range.start.line)
+                        .then(b.range.start.character.cmp(&a.range.start.character))
+                });
+
+                for edit in &sorted_edits {
+                    let start_line = edit.range.start.line as usize;
+                    let start_col = edit.range.start.character as usize;
+                    let end_line = edit.range.end.line as usize;
+                    let end_col = edit.range.end.character as usize;
+
+                    // Calculate byte offsets.
+                    let rope = self.tab().buffer.rope();
+                    if start_line < rope.len_lines() && end_line < rope.len_lines() {
+                        let start_byte = rope.line_to_byte(start_line) + start_col;
+                        let end_byte = rope.line_to_byte(end_line) + end_col;
+                        if end_byte <= rope.len_bytes() && start_byte <= end_byte {
+                            self.tab_mut().buffer.replace_range(
+                                start_byte,
+                                end_byte,
+                                &edit.new_text,
+                            );
+                            total_edits += 1;
+                        }
+                    }
+                }
+                self.tab_mut().mark_highlights_dirty();
+                files_changed += 1;
+            } else {
+                // For other files, read-modify-write on disk.
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+                    let mut sorted_edits = file_edits.clone();
+                    sorted_edits.sort_by(|a, b| {
+                        b.range
+                            .start
+                            .line
+                            .cmp(&a.range.start.line)
+                            .then(b.range.start.character.cmp(&a.range.start.character))
+                    });
+
+                    for edit in &sorted_edits {
+                        let sl = edit.range.start.line as usize;
+                        let sc = edit.range.start.character as usize;
+                        let el = edit.range.end.line as usize;
+                        let ec = edit.range.end.character as usize;
+
+                        if sl < lines.len() && el < lines.len() {
+                            // Single-line edit.
+                            if sl == el {
+                                let line = &lines[sl];
+                                let before = &line[..sc.min(line.len())];
+                                let after = &line[ec.min(line.len())..];
+                                lines[sl] = format!("{before}{}{after}", edit.new_text);
+                            }
+                            // Multi-line edits are rare for renames; skip for now.
+                            total_edits += 1;
+                        }
+                    }
+
+                    let new_content = lines.join("\n");
+                    let _ = std::fs::write(&path, new_content);
+                    files_changed += 1;
+                }
+            }
+        }
+
+        self.set_status(format!(
+            "Renamed: {total_edits} edit(s) in {files_changed} file(s)"
+        ));
+    }
+
+    /// Navigate to a reference location (open file, jump to line).
+    pub fn goto_reference(&mut self) {
+        let location = match &self.references_panel {
+            Some(panel) => panel.selected_location().cloned(),
+            None => return,
+        };
+        let location = match location {
+            Some(l) => l,
+            None => return,
+        };
+
+        self.references_panel = None;
+
+        let path_str = location
+            .uri
+            .strip_prefix("file://")
+            .unwrap_or(&location.uri);
+        let line = location.range.start.line as usize;
+        let col = location.range.start.character as usize;
+
+        // Check if it's the current file.
+        let is_current = self.tab().buffer.file_path().is_some_and(|p| {
+            let abs = std::path::Path::new(path_str);
+            p.canonicalize().ok() == abs.canonicalize().ok()
+        });
+
+        if is_current {
+            self.tab_mut().cursor.row = line;
+            self.tab_mut().cursor.col = col;
+            self.tab_mut().scroll_row = self.tab().cursor.row.saturating_sub(10);
+        } else {
+            // Open file in new tab.
+            let path = std::path::PathBuf::from(path_str);
+            if let Err(e) = self.open_file(path) {
+                self.set_status(e);
+                return;
+            }
+            self.tab_mut().cursor.row = line;
+            self.tab_mut().cursor.col = col;
+            self.tab_mut().scroll_row = self.tab().cursor.row.saturating_sub(10);
         }
     }
 

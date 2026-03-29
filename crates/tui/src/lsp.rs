@@ -5,10 +5,11 @@
 //! sends [`LspEvent`]s to the main event loop through an `mpsc` channel.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 // ── JSON-RPC primitives ───────────────────────────────────────────
 
@@ -118,6 +119,16 @@ pub struct CodeAction {
     pub kind: Option<String>,
 }
 
+/// A text edit from the language server (used in rename results).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TextEdit {
+    /// Range to replace.
+    pub range: LspRange,
+    /// New text to insert.
+    #[serde(rename = "newText")]
+    pub new_text: String,
+}
+
 impl HoverResult {
     /// Extract plain text from the hover contents.
     pub fn to_text(&self) -> String {
@@ -163,6 +174,10 @@ pub enum LspEvent {
     Hover(Option<HoverResult>),
     /// Response to a textDocument/codeAction request.
     CodeActions(Vec<CodeAction>),
+    /// Response to a textDocument/references request.
+    References(Vec<LspLocation>),
+    /// Response to a textDocument/rename request (uri → edits).
+    RenameApplied(HashMap<String, Vec<TextEdit>>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
 }
@@ -247,6 +262,8 @@ pub struct LspClient {
     _language_id: String,
     /// Child process handle.
     child: Option<Child>,
+    /// Pending request tracking: id → method name (shared with reader thread).
+    pending_requests: Arc<Mutex<HashMap<u64, String>>>,
 }
 
 impl LspClient {
@@ -285,9 +302,14 @@ impl LspClient {
             writer_thread(stdin, writer_rx);
         });
 
+        // Shared pending request map for ID-based dispatch.
+        let pending_requests: Arc<Mutex<HashMap<u64, String>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let pending_for_reader = pending_requests.clone();
+
         // Reader thread: reads framed messages from stdout.
         std::thread::spawn(move || {
-            reader_thread(stdout, event_tx);
+            reader_thread(stdout, event_tx, pending_for_reader);
         });
 
         let document_uri = path_to_uri(file_path);
@@ -301,6 +323,7 @@ impl LspClient {
             document_version: 0,
             _language_id: config.language_id.clone(),
             child: Some(child),
+            pending_requests,
         };
 
         // Send initialize request.
@@ -416,6 +439,34 @@ impl LspClient {
         );
     }
 
+    /// Request all references to a symbol at the given position.
+    pub fn references(&mut self, line: u32, character: u32) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/references",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "position": { "line": line, "character": character },
+                "context": { "includeDeclaration": true }
+            }),
+        );
+    }
+
+    /// Request a rename of the symbol at the given position.
+    pub fn rename(&mut self, line: u32, character: u32, new_name: &str) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/rename",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "position": { "line": line, "character": character },
+                "newName": new_name
+            }),
+        );
+    }
+
     /// Send shutdown + exit to the server.
     pub fn shutdown(&mut self) {
         let id = self.alloc_id();
@@ -448,6 +499,10 @@ impl LspClient {
     }
 
     fn send_request(&self, id: u64, method: &str, params: serde_json::Value) {
+        // Track the method for ID-based dispatch in the reader thread.
+        if let Ok(mut pending) = self.pending_requests.lock() {
+            pending.insert(id, method.to_string());
+        }
         let msg = JsonRpcMessage {
             jsonrpc: "2.0",
             id: Some(id),
@@ -505,7 +560,11 @@ fn writer_thread(mut stdin: std::process::ChildStdin, rx: mpsc::Receiver<Vec<u8>
 
 /// Read Content-Length framed messages from the server's stdout and
 /// dispatch them as [`LspEvent`]s.
-fn reader_thread(stdout: std::process::ChildStdout, tx: mpsc::Sender<LspEvent>) {
+fn reader_thread(
+    stdout: std::process::ChildStdout,
+    tx: mpsc::Sender<LspEvent>,
+    pending: Arc<Mutex<HashMap<u64, String>>>,
+) {
     let mut reader = BufReader::new(stdout);
 
     loop {
@@ -531,23 +590,106 @@ fn reader_thread(stdout: std::process::ChildStdout, tx: mpsc::Sender<LspEvent>) 
         }
 
         // Response to a request.
-        if msg.id.is_some() {
+        if let Some(id) = msg.id {
             if let Some(error) = msg.error {
                 tracing::warn!("LSP error: {}", error.message);
+                if let Ok(mut p) = pending.lock() {
+                    p.remove(&id);
+                }
                 continue;
             }
 
-            // We don't track which id maps to which method, so we infer
-            // from the response shape. This is fine for our small protocol
-            // surface (definition returns Location[], hover returns Hover).
+            // Look up the method for this response ID.
+            let method = pending.lock().ok().and_then(|mut p| p.remove(&id));
+
             if let Some(result) = msg.result {
                 if result.is_null() {
-                    // Could be a shutdown response or empty result.
                     continue;
                 }
 
-                // Try as code actions (array of objects with a "title" field).
-                // Must be checked before Definition to avoid mis-classifying.
+                // Dispatch by tracked method name when available.
+                if let Some(ref method) = method {
+                    match method.as_str() {
+                        "textDocument/definition" => {
+                            if let Ok(locations) =
+                                serde_json::from_value::<Vec<LspLocation>>(result.clone())
+                            {
+                                let _ = tx.send(LspEvent::Definition(locations));
+                            } else if let Ok(loc) =
+                                serde_json::from_value::<LspLocation>(result.clone())
+                            {
+                                let _ = tx.send(LspEvent::Definition(vec![loc]));
+                            }
+                            continue;
+                        }
+                        "textDocument/references" => {
+                            if let Ok(locations) =
+                                serde_json::from_value::<Vec<LspLocation>>(result.clone())
+                            {
+                                let _ = tx.send(LspEvent::References(locations));
+                            }
+                            continue;
+                        }
+                        "textDocument/rename" => {
+                            if let Some(changes) = result.get("changes") {
+                                if let Ok(edits) = serde_json::from_value::<
+                                    HashMap<String, Vec<TextEdit>>,
+                                >(changes.clone())
+                                {
+                                    let _ = tx.send(LspEvent::RenameApplied(edits));
+                                }
+                            } else if let Some(doc_changes) = result.get("documentChanges") {
+                                // Handle documentChanges format (array of TextDocumentEdit).
+                                let mut edits: HashMap<String, Vec<TextEdit>> = HashMap::new();
+                                if let Some(arr) = doc_changes.as_array() {
+                                    for change in arr {
+                                        if let (Some(uri), Some(change_edits)) = (
+                                            change
+                                                .get("textDocument")
+                                                .and_then(|td| td.get("uri"))
+                                                .and_then(|u| u.as_str()),
+                                            change.get("edits"),
+                                        ) {
+                                            if let Ok(e) = serde_json::from_value::<Vec<TextEdit>>(
+                                                change_edits.clone(),
+                                            ) {
+                                                edits.entry(uri.to_string()).or_default().extend(e);
+                                            }
+                                        }
+                                    }
+                                }
+                                if !edits.is_empty() {
+                                    let _ = tx.send(LspEvent::RenameApplied(edits));
+                                }
+                            }
+                            continue;
+                        }
+                        "textDocument/hover" => {
+                            if let Ok(hover) = serde_json::from_value::<HoverResult>(result.clone())
+                            {
+                                let _ = tx.send(LspEvent::Hover(Some(hover)));
+                            }
+                            continue;
+                        }
+                        "textDocument/codeAction" => {
+                            if let Some(arr) = result.as_array() {
+                                let actions: Vec<CodeAction> = arr
+                                    .iter()
+                                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                                    .collect();
+                                let _ = tx.send(LspEvent::CodeActions(actions));
+                            }
+                            continue;
+                        }
+                        "initialize" => {
+                            let _ = tx.send(LspEvent::Initialized);
+                            continue;
+                        }
+                        _ => {} // Fall through to shape inference.
+                    }
+                }
+
+                // Fallback: shape-based inference for responses without tracked ID.
                 if let Some(arr) = result.as_array() {
                     if arr.iter().all(|v| v.get("title").is_some()) {
                         let actions: Vec<CodeAction> = arr
@@ -558,22 +700,18 @@ fn reader_thread(stdout: std::process::ChildStdout, tx: mpsc::Sender<LspEvent>) 
                         continue;
                     }
                 }
-                // Try as definition (array of Location).
                 if let Ok(locations) = serde_json::from_value::<Vec<LspLocation>>(result.clone()) {
                     let _ = tx.send(LspEvent::Definition(locations));
                     continue;
                 }
-                // Single location.
                 if let Ok(loc) = serde_json::from_value::<LspLocation>(result.clone()) {
                     let _ = tx.send(LspEvent::Definition(vec![loc]));
                     continue;
                 }
-                // Try as hover.
                 if let Ok(hover) = serde_json::from_value::<HoverResult>(result.clone()) {
                     let _ = tx.send(LspEvent::Hover(Some(hover)));
                     continue;
                 }
-                // Initialize response — emit Initialized event.
                 if result.get("capabilities").is_some() {
                     let _ = tx.send(LspEvent::Initialized);
                     continue;

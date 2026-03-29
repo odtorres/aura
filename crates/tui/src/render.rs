@@ -261,6 +261,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_hover_popup(frame, app, editor_inner_for_popups, &hover_text);
         }
 
+        // Render references panel if present.
+        if app.references_panel.is_some() {
+            draw_references_panel(frame, app, area);
+        }
+
+        // Render rename input if active.
+        if app.rename_active {
+            draw_rename_input(frame, app, command_area);
+        }
+
         // Render conversation panel if present.
         if let Some(panel) = &app.conversation_panel {
             draw_conversation_panel(frame, editor_inner_for_popups, panel);
@@ -4259,6 +4269,77 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw a hover information popup near the cursor.
+/// Draw the references panel (floating popup listing all symbol references).
+fn draw_references_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let panel = match &app.references_panel {
+        Some(p) => p,
+        None => return,
+    };
+
+    let count = panel.locations.len();
+    let title = format!(" References ({count}) ");
+    let width = area.width.clamp(30, 80);
+    let height = (count as u16 + 2).min(area.height.saturating_sub(4)).max(4);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(title);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    for (i, loc) in panel.locations.iter().enumerate() {
+        if i as u16 >= inner.height {
+            break;
+        }
+        let row_y = inner.y + i as u16;
+        let is_selected = i == panel.selected;
+        let style = if is_selected {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        // Format: filename:line
+        let path = loc.uri.strip_prefix("file://").unwrap_or(&loc.uri);
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or(path);
+        let line = loc.range.start.line + 1;
+        let col = loc.range.start.character + 1;
+        let text = format!("  {filename}:{line}:{col}");
+        let text = if text.len() > inner.width as usize {
+            text[..inner.width as usize].to_string()
+        } else {
+            text
+        };
+
+        frame.render_widget(
+            Paragraph::new(text).style(style),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+
+    if panel.locations.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  No references found").style(Style::default().fg(Color::DarkGray)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+    }
+}
+
+/// Draw the rename input overlay in the command bar area.
+fn draw_rename_input(frame: &mut Frame, app: &App, area: Rect) {
+    let text = format!("Rename: {}", app.rename_input);
+    let style = Style::default().fg(Color::Yellow).bg(Color::Black);
+    frame.render_widget(Paragraph::new(text).style(style), area);
+}
+
 fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str) {
     let lines: Vec<&str> = text.lines().take(10).collect();
     let height = (lines.len() as u16 + 2).min(editor_area.height / 2);
