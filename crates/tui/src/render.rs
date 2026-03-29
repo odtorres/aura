@@ -2160,6 +2160,58 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
         y += 1;
     }
 
+    // --- Merge changes (conflicts) ---
+    if !sc.merge_changes.is_empty() {
+        let merge_focused = sc.focused_section == GitPanelSection::MergeChanges;
+        if y < max_y {
+            let header_style = if merge_focused {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD)
+            };
+            let header = format!(" Merge Changes ({})", sc.merge_changes.len());
+            frame.render_widget(
+                Paragraph::new(Span::styled(header, header_style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+
+        for (i, entry) in sc.merge_changes.iter().enumerate() {
+            if y >= max_y {
+                break;
+            }
+            let is_selected = merge_focused && i == sc.selected;
+            let (filename, dir) = split_path_filename(&entry.rel_path);
+            let line =
+                format_git_entry(entry.status.label(), &filename, &dir, inner.width as usize);
+
+            if is_selected {
+                let style = Style::default().add_modifier(Modifier::REVERSED);
+                frame.render_widget(
+                    Paragraph::new(line).style(style),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+            } else {
+                let style = Style::default().fg(Color::Magenta);
+                frame.render_widget(
+                    Paragraph::new(line).style(style),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+            }
+            y += 1;
+        }
+
+        // Blank separator.
+        if y < max_y {
+            y += 1;
+        }
+    }
+
     // --- Staged changes ---
     let staged_focused = sc.focused_section == GitPanelSection::StagedFiles;
     if y < max_y {

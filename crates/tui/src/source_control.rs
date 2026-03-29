@@ -58,6 +58,8 @@ pub struct GitFileEntry {
 pub enum GitPanelSection {
     /// The commit message input area.
     CommitMessage,
+    /// Merge conflict files.
+    MergeChanges,
     /// The staged files list.
     StagedFiles,
     /// The unstaged/changed files list.
@@ -66,6 +68,8 @@ pub enum GitPanelSection {
 
 /// State for the source control sidebar panel.
 pub struct SourceControlPanel {
+    /// Files with merge conflicts.
+    pub merge_changes: Vec<GitFileEntry>,
     /// Unstaged changed files.
     pub changed: Vec<GitFileEntry>,
     /// Staged files.
@@ -95,6 +99,7 @@ impl SourceControlPanel {
     /// Create a new source control panel with the given width.
     pub fn new(width: u16) -> Self {
         Self {
+            merge_changes: Vec::new(),
             changed: Vec::new(),
             staged: Vec::new(),
             commit_message: String::new(),
@@ -116,6 +121,7 @@ impl SourceControlPanel {
         self.ahead = ahead;
         self.behind = behind;
 
+        self.merge_changes.clear();
         self.changed.clear();
         self.staged.clear();
 
@@ -135,9 +141,9 @@ impl SourceControlPanel {
                 .unwrap_or(&entry.rel_path)
                 .to_string();
 
-            // Check for merge conflicts first.
+            // Check for merge conflicts first — separate section.
             if crate::git::is_conflict_entry(&entry) {
-                self.changed.push(GitFileEntry {
+                self.merge_changes.push(GitFileEntry {
                     rel_path: entry.rel_path.clone(),
                     name,
                     status: GitFileStatus::Conflict,
@@ -190,7 +196,8 @@ impl SourceControlPanel {
     /// Cycle to the next section.
     pub fn next_section(&mut self) {
         self.focused_section = match self.focused_section {
-            GitPanelSection::CommitMessage => GitPanelSection::StagedFiles,
+            GitPanelSection::CommitMessage => GitPanelSection::MergeChanges,
+            GitPanelSection::MergeChanges => GitPanelSection::StagedFiles,
             GitPanelSection::StagedFiles => GitPanelSection::ChangedFiles,
             GitPanelSection::ChangedFiles => GitPanelSection::CommitMessage,
         };
@@ -201,7 +208,8 @@ impl SourceControlPanel {
     pub fn prev_section(&mut self) {
         self.focused_section = match self.focused_section {
             GitPanelSection::CommitMessage => GitPanelSection::ChangedFiles,
-            GitPanelSection::StagedFiles => GitPanelSection::CommitMessage,
+            GitPanelSection::MergeChanges => GitPanelSection::CommitMessage,
+            GitPanelSection::StagedFiles => GitPanelSection::MergeChanges,
             GitPanelSection::ChangedFiles => GitPanelSection::StagedFiles,
         };
         self.selected = 0;
@@ -285,6 +293,10 @@ impl SourceControlPanel {
     /// Get the path of the currently selected file entry, if any.
     pub fn selected_path(&self) -> Option<&str> {
         match self.focused_section {
+            GitPanelSection::MergeChanges => self
+                .merge_changes
+                .get(self.selected)
+                .map(|e| e.rel_path.as_str()),
             GitPanelSection::StagedFiles => {
                 self.staged.get(self.selected).map(|e| e.rel_path.as_str())
             }
@@ -298,6 +310,7 @@ impl SourceControlPanel {
     /// Get the currently selected file entry (if any).
     pub fn selected_entry(&self) -> Option<&GitFileEntry> {
         match self.focused_section {
+            GitPanelSection::MergeChanges => self.merge_changes.get(self.selected),
             GitPanelSection::StagedFiles => self.staged.get(self.selected),
             GitPanelSection::ChangedFiles => self.changed.get(self.selected),
             GitPanelSection::CommitMessage => None,
@@ -308,6 +321,7 @@ impl SourceControlPanel {
     fn current_list_len(&self) -> usize {
         match self.focused_section {
             GitPanelSection::CommitMessage => 0,
+            GitPanelSection::MergeChanges => self.merge_changes.len(),
             GitPanelSection::StagedFiles => self.staged.len(),
             GitPanelSection::ChangedFiles => self.changed.len(),
         }
