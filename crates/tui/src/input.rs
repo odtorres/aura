@@ -5,6 +5,16 @@ use crate::source_control::{GitPanelSection, SidebarView};
 use aura_core::AuthorId;
 use crossterm::event::{KeyCode, KeyModifiers};
 
+/// Unfocus all side panels and special focus states, returning to the editor.
+fn unfocus_all_panels(app: &mut App) {
+    app.terminal_focused = false;
+    app.file_tree_focused = false;
+    app.source_control_focused = false;
+    app.chat_panel_focused = false;
+    app.conversation_history_focused = false;
+    app.debug_panel_focused = false;
+}
+
 /// Handle keys in Normal mode.
 pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Global: if a tool call is pending approval, intercept Y/N regardless of focus.
@@ -108,6 +118,84 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // ── Global panel-switching shortcuts ──────────────────────────────
+    // These work from ANY focused panel (terminal, git, chat, file tree, etc.)
+    // so users never have to Esc back to the editor first.
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        let handled = match code {
+            // Ctrl+T / Ctrl+` — toggle terminal.
+            KeyCode::Char('t') | KeyCode::Char('`') => {
+                // Unfocus whatever panel is focused.
+                unfocus_all_panels(app);
+                if app.terminal.visible && app.terminal_focused {
+                    app.terminal.visible = false;
+                    app.terminal_focused = false;
+                } else {
+                    app.terminal.visible = true;
+                    app.terminal_focused = true;
+                }
+                true
+            }
+            // Ctrl+G — toggle git / source control panel.
+            KeyCode::Char('g') => {
+                unfocus_all_panels(app);
+                if app.source_control_focused && app.sidebar_view == SidebarView::Git {
+                    // Already focused on git — close sidebar.
+                    app.source_control_focused = false;
+                } else {
+                    if !app.file_tree.visible {
+                        app.file_tree.toggle();
+                    }
+                    if app.sidebar_view != SidebarView::Git {
+                        app.sidebar_view = SidebarView::Git;
+                        app.refresh_source_control();
+                    }
+                    app.source_control_focused = true;
+                }
+                true
+            }
+            // Ctrl+N — toggle file tree sidebar.
+            KeyCode::Char('n') => {
+                unfocus_all_panels(app);
+                if app.file_tree.visible && app.file_tree_focused {
+                    app.file_tree_focused = false;
+                    app.file_tree.toggle();
+                } else {
+                    if !app.file_tree.visible {
+                        app.file_tree.toggle();
+                    }
+                    if app.sidebar_view != SidebarView::Files {
+                        app.sidebar_view = SidebarView::Files;
+                    }
+                    app.file_tree_focused = true;
+                }
+                true
+            }
+            // Ctrl+J — toggle chat panel.
+            KeyCode::Char('j') => {
+                unfocus_all_panels(app);
+                app.toggle_chat_panel();
+                true
+            }
+            // Ctrl+H — toggle conversation history panel.
+            KeyCode::Char('h') => {
+                unfocus_all_panels(app);
+                app.toggle_conversation_history();
+                true
+            }
+            // Ctrl+, — open settings.
+            KeyCode::Char(',') => {
+                unfocus_all_panels(app);
+                app.open_settings();
+                true
+            }
+            _ => false,
+        };
+        if handled {
+            return;
+        }
+    }
+
     // When the debug panel is focused, route keys to debug navigation.
     if app.debug_panel_focused {
         match code {
@@ -163,12 +251,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         match code {
             // Esc — unfocus terminal (return focus to editor).
             KeyCode::Esc => {
-                app.terminal_focused = false;
-            }
-            // Ctrl+` or Ctrl+t — unfocus terminal.
-            KeyCode::Char('`') | KeyCode::Char('t')
-                if modifiers.contains(KeyModifiers::CONTROL) =>
-            {
                 app.terminal_focused = false;
             }
             // Ctrl+Shift+Up / Ctrl+Shift+Down — resize terminal pane.
@@ -261,13 +343,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Esc => {
                 app.file_tree_focused = false;
-            }
-            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.file_tree_focused = false;
-                app.file_tree.toggle();
-            }
-            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_sidebar_view();
             }
             _ => {}
         }
@@ -374,13 +449,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Esc => {
                 app.source_control_focused = false;
             }
-            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.source_control_focused = false;
-                app.file_tree.toggle();
-            }
-            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_sidebar_view();
-            }
             _ => {}
         }
         return;
@@ -452,15 +520,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Esc => {
                 app.chat_panel_focused = false;
             }
-            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_chat_panel();
-            }
-            KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
-                // Switch to conversation history.
-                app.chat_panel.visible = false;
-                app.chat_panel_focused = false;
-                app.toggle_conversation_history();
-            }
             _ => {}
         }
         return;
@@ -492,23 +551,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
 
         match code {
-            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.conversation_history_focused = false;
-                app.file_tree.toggle();
-            }
-            KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.conversation_history_focused = false;
-                app.toggle_sidebar_view();
-            }
-            KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_conversation_history();
-            }
-            KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => {
-                // Switch to chat panel.
-                app.conversation_history.visible = false;
-                app.conversation_history_focused = false;
-                app.toggle_chat_panel();
-            }
             KeyCode::Char('/') if !app.conversation_history.search_active => {
                 app.conversation_history.start_search();
             }
@@ -551,61 +593,9 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
-    // Ctrl+t — toggle terminal visibility and focus.
-    if code == KeyCode::Char('t') && modifiers.contains(KeyModifiers::CONTROL) {
-        if app.terminal.visible {
-            app.terminal_focused = !app.terminal_focused;
-        } else {
-            app.terminal.visible = true;
-            app.terminal_focused = true;
-        }
-        return;
-    }
-
-    // Ctrl+` — toggle terminal visibility and focus (alternate binding).
-    if code == KeyCode::Char('`') && modifiers.contains(KeyModifiers::CONTROL) {
-        if app.terminal.visible {
-            // Toggle focus: if already focused, unfocus; otherwise focus.
-            app.terminal_focused = !app.terminal_focused;
-        } else {
-            app.terminal.visible = true;
-            app.terminal_focused = true;
-        }
-        return;
-    }
-
-    // Ctrl+g — switch sidebar to Git / toggle source control panel.
-    if code == KeyCode::Char('g') && modifiers.contains(KeyModifiers::CONTROL) {
-        if !app.file_tree.visible {
-            app.file_tree.toggle();
-        }
-        if app.sidebar_view != SidebarView::Git {
-            app.sidebar_view = SidebarView::Git;
-            app.refresh_source_control();
-        }
-        app.file_tree_focused = false;
-        app.source_control_focused = true;
-        app.conversation_history_focused = false;
-        return;
-    }
-
-    // Ctrl+h — toggle AI conversation history panel.
-    if code == KeyCode::Char('h') && modifiers.contains(KeyModifiers::CONTROL) {
-        app.toggle_conversation_history();
-        return;
-    }
-
-    // Ctrl+j — toggle interactive chat panel.
-    if code == KeyCode::Char('j') && modifiers.contains(KeyModifiers::CONTROL) {
-        app.toggle_chat_panel();
-        return;
-    }
-
-    // Ctrl+, — open settings from any mode.
-    if code == KeyCode::Char(',') && modifiers.contains(KeyModifiers::CONTROL) {
-        app.open_settings();
-        return;
-    }
+    // NOTE: Global panel-switching shortcuts (Ctrl+T/G/N/J/H/,) are handled
+    // earlier in the function, before panel focus handlers, so they work from
+    // any focused panel.
 
     // Route keys to the settings modal when visible.
     if app.settings_modal.visible {
