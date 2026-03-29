@@ -10,6 +10,7 @@ use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
 use crate::semantic_index::SemanticIndexer;
 use aura_core::conversation::ConversationStore;
 use aura_core::{Buffer, Cursor};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -130,6 +131,8 @@ pub struct EditorTab {
     pub conversation_lines: Vec<(usize, usize)>,
     /// Detected indent style for this buffer.
     pub indent_style: IndentStyle,
+    /// Breakpoints set on this file (0-indexed line numbers).
+    pub breakpoints: BTreeSet<usize>,
 }
 
 impl EditorTab {
@@ -200,6 +203,7 @@ impl EditorTab {
             semantic_info: None,
             conversation_lines,
             indent_style,
+            breakpoints: BTreeSet::new(),
         };
         tab.refresh_semantic_index();
         tab

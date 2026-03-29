@@ -340,6 +340,16 @@ pub struct App {
     /// Timestamp of last awareness broadcast (for throttling).
     collab_last_awareness: std::time::Instant,
 
+    // --- Debugger ---
+    /// Active DAP debug adapter client (None when not debugging).
+    pub dap_client: Option<crate::dap::DapClient>,
+    /// Debug panel (bottom panel: call stack, variables, output).
+    pub debug_panel: crate::debug_panel::DebugPanel,
+    /// Whether the debug panel has keyboard focus.
+    pub debug_panel_focused: bool,
+    /// Cached debug panel rect from the last render frame.
+    pub debug_panel_rect: ratatui::layout::Rect,
+
     // --- Bracket matching ---
     /// Position (row, col) of the matching bracket for the char under cursor.
     pub matching_bracket: Option<(usize, usize)>,
@@ -640,6 +650,10 @@ impl App {
             collab_last_cursor: None,
             collab_last_selection: None,
             collab_last_awareness: std::time::Instant::now(),
+            dap_client: None,
+            debug_panel: crate::debug_panel::DebugPanel::new(),
+            debug_panel_focused: false,
+            debug_panel_rect: Rect::default(),
             matching_bracket: None,
             search_query: None,
             search_input: String::new(),
@@ -783,6 +797,9 @@ impl App {
             // Poll for AI commit message tokens and conversation summarization.
             self.poll_commit_msg();
             self.poll_summarize();
+
+            // Poll for DAP debugger events.
+            self.poll_dap_events();
 
             // Poll for Claude Code activity.
             if let Some(watcher) = &mut self.claude_watcher {
@@ -3321,6 +3338,285 @@ impl App {
         self.show_blame = !self.show_blame;
         let state = if self.show_blame { "on" } else { "off" };
         self.set_status(format!("Inline blame: {state}"));
+    }
+
+    // ── Debugger ──────────────────────────────────────────────────
+
+    /// Toggle a breakpoint on the current cursor line.
+    pub fn toggle_breakpoint(&mut self) {
+        let line = self.tab().cursor.row;
+        let tab = self.tab_mut();
+        if tab.breakpoints.contains(&line) {
+            tab.breakpoints.remove(&line);
+        } else {
+            tab.breakpoints.insert(line);
+        }
+        // If a debug session is active, resend breakpoints for this file.
+        self.sync_breakpoints_to_adapter();
+    }
+
+    /// Start a debug session for the current file.
+    pub fn start_debug_session(&mut self) {
+        if self.dap_client.is_some() {
+            self.set_status("Debug session already active");
+            return;
+        }
+
+        let ext = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .map(String::from);
+
+        let ext = match ext {
+            Some(e) => e,
+            None => {
+                self.set_status("Cannot detect file type for debugging");
+                return;
+            }
+        };
+
+        // Check user-configured debuggers first, then auto-detect.
+        let adapter_config = self
+            .config
+            .debuggers
+            .values()
+            .find(|d| d.extensions.iter().any(|e| e == &ext))
+            .map(|d| crate::dap::DapAdapterConfig {
+                command: d.command.clone(),
+                args: d.args.clone(),
+            })
+            .or_else(|| crate::dap::detect_debug_adapter(&ext));
+
+        let adapter_config = match adapter_config {
+            Some(c) => c,
+            None => {
+                self.set_status(format!("No debug adapter found for .{ext} files"));
+                return;
+            }
+        };
+
+        let workspace_root = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
+
+        match crate::dap::DapClient::start(&adapter_config, &workspace_root) {
+            Ok(client) => {
+                self.dap_client = Some(client);
+                self.debug_panel.open();
+                self.debug_panel.state.status = crate::debug_panel::SessionStatus::Running;
+                self.set_status(format!(
+                    "Debug session started ({})",
+                    adapter_config.command
+                ));
+            }
+            Err(e) => {
+                self.set_status(format!("Failed to start debugger: {e}"));
+            }
+        }
+    }
+
+    /// Launch the debuggee after initialization.
+    pub fn debug_launch(&mut self, program: &str) {
+        let args: Vec<String> = Vec::new();
+        let cwd = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
+
+        if let Some(client) = &mut self.dap_client {
+            client.launch(program, &args, &cwd);
+            // Send breakpoints for all open tabs.
+            self.sync_all_breakpoints_to_adapter();
+            if let Some(client) = &mut self.dap_client {
+                client.configuration_done();
+            }
+        }
+    }
+
+    /// Send breakpoints for the current file to the adapter.
+    fn sync_breakpoints_to_adapter(&mut self) {
+        let file_path = self.tab().buffer.file_path().map(|p| p.to_path_buf());
+        let breakpoints: Vec<usize> = self.tab().breakpoints.iter().copied().collect();
+
+        if let (Some(path), Some(client)) = (file_path, &mut self.dap_client) {
+            client.set_breakpoints(&path, &breakpoints);
+        }
+    }
+
+    /// Send breakpoints for all open tabs to the adapter.
+    fn sync_all_breakpoints_to_adapter(&mut self) {
+        let tab_info: Vec<(std::path::PathBuf, Vec<usize>)> = self
+            .tabs
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                let path = tab.buffer.file_path()?.to_path_buf();
+                if tab.breakpoints.is_empty() {
+                    return None;
+                }
+                let lines: Vec<usize> = tab.breakpoints.iter().copied().collect();
+                Some((path, lines))
+            })
+            .collect();
+
+        if let Some(client) = &mut self.dap_client {
+            for (path, lines) in &tab_info {
+                client.set_breakpoints(path, lines);
+            }
+        }
+    }
+
+    /// Continue execution in the debug session.
+    pub fn debug_continue(&mut self) {
+        let thread_id = self.debug_panel.state.stopped_thread_id.unwrap_or(1);
+        if let Some(client) = &mut self.dap_client {
+            client.continue_exec(thread_id);
+            self.debug_panel.state.status = crate::debug_panel::SessionStatus::Running;
+            self.debug_panel.state.clear_stopped();
+        }
+    }
+
+    /// Step over in the debug session.
+    pub fn debug_step_over(&mut self) {
+        let thread_id = self.debug_panel.state.stopped_thread_id.unwrap_or(1);
+        if let Some(client) = &mut self.dap_client {
+            client.next(thread_id);
+            self.debug_panel.state.status = crate::debug_panel::SessionStatus::Running;
+        }
+    }
+
+    /// Step in in the debug session.
+    pub fn debug_step_in(&mut self) {
+        let thread_id = self.debug_panel.state.stopped_thread_id.unwrap_or(1);
+        if let Some(client) = &mut self.dap_client {
+            client.step_in(thread_id);
+            self.debug_panel.state.status = crate::debug_panel::SessionStatus::Running;
+        }
+    }
+
+    /// Step out in the debug session.
+    pub fn debug_step_out(&mut self) {
+        let thread_id = self.debug_panel.state.stopped_thread_id.unwrap_or(1);
+        if let Some(client) = &mut self.dap_client {
+            client.step_out(thread_id);
+            self.debug_panel.state.status = crate::debug_panel::SessionStatus::Running;
+        }
+    }
+
+    /// Stop the debug session.
+    pub fn debug_stop(&mut self) {
+        if let Some(mut client) = self.dap_client.take() {
+            client.disconnect();
+        }
+        self.debug_panel.state.reset();
+        self.debug_panel_focused = false;
+        self.set_status("Debug session ended");
+    }
+
+    /// Poll DAP events and update debug state.
+    pub fn poll_dap_events(&mut self) {
+        let events = match &mut self.dap_client {
+            Some(client) => client.poll_events(),
+            None => return,
+        };
+
+        for event in events {
+            match event {
+                crate::dap::DapEvent::Initialized => {
+                    // Adapter is ready — send launch if we have a program.
+                    // For now, users must use :debug <program> to launch.
+                }
+                crate::dap::DapEvent::Stopped { thread_id, reason } => {
+                    self.debug_panel.state.status =
+                        crate::debug_panel::SessionStatus::Stopped(reason);
+                    self.debug_panel.state.stopped_thread_id = Some(thread_id);
+                    self.debug_panel.open();
+                    // Auto-request stack trace.
+                    if let Some(client) = &mut self.dap_client {
+                        client.request_stack_trace(thread_id);
+                    }
+                }
+                crate::dap::DapEvent::Continued { .. } => {
+                    self.debug_panel.state.status = crate::debug_panel::SessionStatus::Running;
+                    self.debug_panel.state.clear_stopped();
+                }
+                crate::dap::DapEvent::Terminated => {
+                    self.debug_panel.state.status = crate::debug_panel::SessionStatus::Terminated;
+                    self.dap_client = None;
+                    self.set_status("Debug session terminated");
+                }
+                crate::dap::DapEvent::Output { output, .. } => {
+                    // Split output into lines and append.
+                    for line in output.lines() {
+                        self.debug_panel.state.output_lines.push(line.to_string());
+                    }
+                }
+                crate::dap::DapEvent::StackTrace(frames) => {
+                    // Navigate to the top frame location.
+                    if let Some(frame) = frames.first() {
+                        if let Some(ref path) = frame.source_path {
+                            let line = frame.line.saturating_sub(1) as usize; // DAP is 1-indexed
+                            self.debug_panel.state.stopped_file = Some(path.clone());
+                            self.debug_panel.state.stopped_line = Some(line);
+                            // TODO: open file if not already open and scroll to line
+                        }
+                    }
+                    self.debug_panel.state.stack_frames = frames;
+                    self.debug_panel.state.selected_frame = 0;
+                    // Auto-request scopes for the top frame.
+                    if let Some(frame) = self.debug_panel.state.stack_frames.first() {
+                        let frame_id = frame.id;
+                        if let Some(client) = &mut self.dap_client {
+                            client.request_scopes(frame_id);
+                        }
+                    }
+                }
+                crate::dap::DapEvent::Scopes(scopes) => {
+                    self.debug_panel.state.scopes = scopes;
+                    // Auto-request variables for the first non-expensive scope.
+                    if let Some(scope) = self.debug_panel.state.scopes.iter().find(|s| !s.expensive)
+                    {
+                        let var_ref = scope.variables_reference;
+                        if let Some(client) = &mut self.dap_client {
+                            client.request_variables(var_ref);
+                        }
+                    }
+                }
+                crate::dap::DapEvent::Variables { vars, .. } => {
+                    // Convert to VariableNodes for display.
+                    let nodes: Vec<crate::debug_panel::VariableNode> = vars
+                        .iter()
+                        .map(|v| crate::debug_panel::VariableNode {
+                            name: v.name.clone(),
+                            value: v.value.clone(),
+                            type_name: v.type_name.clone(),
+                            indent: 0,
+                            expandable: v.variables_reference > 0,
+                            expanded: false,
+                            variables_reference: v.variables_reference,
+                        })
+                        .collect();
+                    self.debug_panel.state.variables = nodes;
+                    self.debug_panel.state.selected_var = 0;
+                }
+                crate::dap::DapEvent::BreakpointsSet(_results) => {
+                    // Could update verified status in the future.
+                }
+                crate::dap::DapEvent::Error(msg) => {
+                    self.set_status(format!("Debug error: {msg}"));
+                }
+            }
+        }
     }
 
     /// Toggle the sidebar between Files and Git views.

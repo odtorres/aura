@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.29] - 2026-03-29
+
+### Added
+
+- **Integrated debugger (DAP protocol)** — Full debug adapter protocol support for stepping through code, setting breakpoints, and inspecting variables directly in the editor.
+  - **Breakpoints**: Toggle with F9 or `:bp` — red dots in the gutter, persist across sessions.
+  - **Debug controls**: F5 (continue/start), F10 (step over), F11 (step in), Shift+F11 (step out), Shift+F5 (stop).
+  - **Debug panel**: Bottom panel with three tabs — Call Stack, Variables (expandable tree), and Output.
+  - **Auto-detection**: Automatically finds CodeLLDB (Rust/C/C++), debugpy (Python), dlv (Go), and Node.js debug adapters.
+  - **Custom adapters**: Configure any DAP adapter in `aura.toml` under `[debuggers]`.
+  - **Gutter indicators**: Red `●` for breakpoints, yellow `→` for current execution line, `⏸` for breakpoint+stopped.
+  - **Commands**: `:debug`, `:debug <program>`, `:breakpoint`, `:continue`, `:step`, `:stepin`, `:stepout`, `:debug stop`, `:debug panel`.
+
 ## [0.1.28] - 2026-03-28
 
 ### Fixed

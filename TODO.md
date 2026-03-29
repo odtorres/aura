@@ -453,4 +453,4 @@ When working on this project with Claude Code:
 - [ ] Undo tree visualization
 - [x] Multi-cursor editing
 - [x] Snippet system
-- [ ] Integrated debugger (DAP protocol)
+- [x] Integrated debugger (DAP protocol)

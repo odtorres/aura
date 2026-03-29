@@ -13,6 +13,8 @@ pub mod collab;
 pub mod command_palette;
 pub mod config;
 pub mod conversation_history;
+pub mod dap;
+pub mod debug_panel;
 pub mod diff_view;
 pub mod embedded_terminal;
 pub mod file_picker;

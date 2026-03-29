@@ -23,6 +23,7 @@ const DOC_AI_FEATURES: &str = include_str!("../../../docs/src/user-guide/ai-feat
 const DOC_GIT: &str = include_str!("../../../docs/src/user-guide/git.md");
 const DOC_LSP: &str = include_str!("../../../docs/src/user-guide/lsp.md");
 const DOC_PLUGINS: &str = include_str!("../../../docs/src/user-guide/plugins.md");
+const DOC_DEBUGGER: &str = include_str!("../../../docs/src/user-guide/debugger.md");
 const DOC_ARCH_OVERVIEW: &str = include_str!("../../../docs/src/architecture/overview.md");
 const DOC_ARCH_CORE: &str = include_str!("../../../docs/src/architecture/core.md");
 const DOC_ARCH_TUI: &str = include_str!("../../../docs/src/architecture/tui.md");
@@ -102,6 +103,7 @@ impl HelpOverlay {
             ("Git Integration", "User Guide", DOC_GIT),
             ("LSP", "User Guide", DOC_LSP),
             ("Plugins", "User Guide", DOC_PLUGINS),
+            ("Debugger (DAP)", "User Guide", DOC_DEBUGGER),
             ("Architecture Overview", "Architecture", DOC_ARCH_OVERVIEW),
             ("Core Crate", "Architecture", DOC_ARCH_CORE),
             ("TUI Crate", "Architecture", DOC_ARCH_TUI),

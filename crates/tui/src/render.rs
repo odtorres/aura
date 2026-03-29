@@ -16,34 +16,42 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Layout: optional tab bar + editor area + optional proposal + optional terminal + status bar + command bar.
+    // Layout: optional tab bar + editor area + optional proposal + optional debug panel + optional terminal + status bar + command bar.
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
     let has_terminal = app.terminal.visible;
+    let has_debug_panel = app.debug_panel.visible;
     let terminal_height = if has_terminal { app.terminal.height } else { 0 };
+    let debug_panel_height = if has_debug_panel {
+        app.debug_panel.height
+    } else {
+        0
+    };
     let tab_bar_height: u16 = 1;
 
     let chunks = if has_proposal {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(tab_bar_height),  // Tab bar (0 or 1 row)
-                Constraint::Percentage(50),          // Editor (original)
-                Constraint::Percentage(50),          // Proposal (diff)
-                Constraint::Length(terminal_height), // Terminal pane (0 when hidden)
-                Constraint::Length(1),               // Status bar
-                Constraint::Length(1),               // Command bar
+                Constraint::Length(tab_bar_height),     // Tab bar (0 or 1 row)
+                Constraint::Percentage(50),             // Editor (original)
+                Constraint::Percentage(50),             // Proposal (diff)
+                Constraint::Length(debug_panel_height), // Debug panel (0 when hidden)
+                Constraint::Length(terminal_height),    // Terminal pane (0 when hidden)
+                Constraint::Length(1),                  // Status bar
+                Constraint::Length(1),                  // Command bar
             ])
             .split(area)
     } else {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(tab_bar_height),  // Tab bar (0 or 1 row)
-                Constraint::Min(1),                  // Editor
-                Constraint::Length(0),               // No proposal pane
-                Constraint::Length(terminal_height), // Terminal pane (0 when hidden)
-                Constraint::Length(1),               // Status bar
-                Constraint::Length(1),               // Command bar
+                Constraint::Length(tab_bar_height),     // Tab bar (0 or 1 row)
+                Constraint::Min(1),                     // Editor
+                Constraint::Length(0),                  // No proposal pane
+                Constraint::Length(debug_panel_height), // Debug panel (0 when hidden)
+                Constraint::Length(terminal_height),    // Terminal pane (0 when hidden)
+                Constraint::Length(1),                  // Status bar
+                Constraint::Length(1),                  // Command bar
             ])
             .split(area)
     };
@@ -51,9 +59,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let tab_bar_area = chunks[0];
     let editor_area_raw = chunks[1];
     let proposal_area = chunks[2];
-    let terminal_area = chunks[3];
-    let status_area = chunks[4];
-    let command_area = chunks[5];
+    let debug_panel_area = chunks[3];
+    let terminal_area = chunks[4];
+    let status_area = chunks[5];
+    let command_area = chunks[6];
 
     // Always draw the tab bar.
     app.tab_bar_rect = tab_bar_area;
@@ -138,6 +147,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_terminal(frame, app, terminal_area);
         }
 
+        // Draw debug panel if visible.
+        if has_debug_panel {
+            app.debug_panel_rect = debug_panel_area;
+            draw_debug_panel(frame, app, debug_panel_area);
+        }
+
         draw_status_bar(frame, app, status_area);
         draw_command_bar(frame, app, command_area);
     } else {
@@ -194,6 +209,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 app.terminal.resize(inner_w, inner_h);
             }
             draw_terminal(frame, app, terminal_area);
+        }
+
+        // Draw debug panel if visible.
+        if has_debug_panel {
+            app.debug_panel_rect = debug_panel_area;
+            draw_debug_panel(frame, app, debug_panel_area);
         }
 
         draw_status_bar(frame, app, status_area);
@@ -813,6 +834,194 @@ fn term_color_to_ratatui(tc: crate::embedded_terminal::TermColor, fallback: Colo
             n => Color::Indexed(n),
         },
         TermColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+/// Draw the debug panel (call stack, variables, output).
+fn draw_debug_panel(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::debug_panel::{DebugTab, SessionStatus};
+
+    let focused = app.debug_panel_focused;
+    let border_color = if focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+
+    // Status indicator.
+    let status_str = match &app.debug_panel.state.status {
+        SessionStatus::Inactive => "Inactive",
+        SessionStatus::Running => "Running",
+        SessionStatus::Stopped(reason) => reason.as_str(),
+        SessionStatus::Terminated => "Terminated",
+    };
+
+    let title = format!(" Debug — {} ", status_str);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height < 2 || inner.width < 10 {
+        return;
+    }
+
+    // Tab bar row.
+    let tab_row_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    let content_area = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
+
+    // Draw tab selector.
+    let tabs = [
+        ("1:Stack", DebugTab::CallStack),
+        ("2:Vars", DebugTab::Variables),
+        ("3:Output", DebugTab::Output),
+    ];
+    let mut tab_spans = Vec::new();
+    for (label, tab) in &tabs {
+        let style = if *tab == app.debug_panel.active_tab {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        tab_spans.push(Span::styled(format!(" {} ", label), style));
+        tab_spans.push(Span::raw(" "));
+    }
+
+    // Add control hints.
+    tab_spans.push(Span::styled(
+        " F5:Continue  F10:Step  F11:In  Shift+F5:Stop ",
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)), tab_row_area);
+
+    // Draw content based on active tab.
+    match app.debug_panel.active_tab {
+        DebugTab::CallStack => {
+            let frames = &app.debug_panel.state.stack_frames;
+            for (i, sf) in frames.iter().enumerate() {
+                if i as u16 >= content_area.height {
+                    break;
+                }
+                let row_y = content_area.y + i as u16;
+                let is_selected = i == app.debug_panel.state.selected_frame;
+                let style = if is_selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                let source = sf
+                    .source_path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .and_then(|f| f.to_str())
+                    .unwrap_or("??");
+                let text = format!("#{:<2} {}  {}:{}", i, sf.name, source, sf.line);
+                let text = if text.len() > content_area.width as usize {
+                    text[..content_area.width as usize].to_string()
+                } else {
+                    text
+                };
+                frame.render_widget(
+                    Paragraph::new(text).style(style),
+                    Rect::new(content_area.x, row_y, content_area.width, 1),
+                );
+            }
+            if frames.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No stack frames").style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content_area.x, content_area.y, content_area.width, 1),
+                );
+            }
+        }
+        DebugTab::Variables => {
+            let vars = &app.debug_panel.state.variables;
+            for (i, var) in vars.iter().enumerate() {
+                if i as u16 >= content_area.height {
+                    break;
+                }
+                let row_y = content_area.y + i as u16;
+                let is_selected = i == app.debug_panel.state.selected_var;
+                let style = if is_selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                let indent = "  ".repeat(var.indent);
+                let prefix = if var.expandable {
+                    if var.expanded {
+                        "▼ "
+                    } else {
+                        "▶ "
+                    }
+                } else {
+                    "  "
+                };
+                let type_hint = if var.type_name.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {} ", var.type_name)
+                };
+                let text = format!(
+                    "{}{}{} {}= {}",
+                    indent, prefix, var.name, type_hint, var.value
+                );
+                let text = if text.len() > content_area.width as usize {
+                    text[..content_area.width as usize].to_string()
+                } else {
+                    text
+                };
+                frame.render_widget(
+                    Paragraph::new(text).style(style),
+                    Rect::new(content_area.x, row_y, content_area.width, 1),
+                );
+            }
+            if vars.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No variables").style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content_area.x, content_area.y, content_area.width, 1),
+                );
+            }
+        }
+        DebugTab::Output => {
+            let lines = &app.debug_panel.state.output_lines;
+            let scroll = app.debug_panel.state.output_scroll;
+            let visible = content_area.height as usize;
+            // Show the last `visible` lines if scroll is at the end.
+            let start = if lines.len() > visible + scroll {
+                lines.len() - visible - scroll
+            } else {
+                0
+            };
+            for (i, line) in lines.iter().skip(start).take(visible).enumerate() {
+                let row_y = content_area.y + i as u16;
+                let text = if line.len() > content_area.width as usize {
+                    &line[..content_area.width as usize]
+                } else {
+                    line.as_str()
+                };
+                frame.render_widget(
+                    Paragraph::new(text).style(Style::default().fg(Color::White)),
+                    Rect::new(content_area.x, row_y, content_area.width, 1),
+                );
+            }
+            if lines.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No output").style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content_area.x, content_area.y, content_area.width, 1),
+                );
+            }
+        }
     }
 }
 
@@ -3144,8 +3353,35 @@ fn draw_editor(
                 .filter(|c| *c != '\n' && *c != '\r')
                 .collect();
 
-            // Gutter marker: diagnostic > conversation > git > authorship.
-            let marker_span = if let Some(diag) = app.line_diagnostics(line_idx) {
+            // Check if this line is the stopped execution line in the debugger.
+            let is_debug_stopped = app
+                .debug_panel
+                .state
+                .stopped_file
+                .as_ref()
+                .is_some_and(|f| tab.buffer.file_path() == Some(f.as_path()))
+                && app.debug_panel.state.stopped_line == Some(line_idx);
+
+            // Gutter marker: breakpoint/debug > diagnostic > conversation > git > authorship.
+            let marker_span = if tab.breakpoints.contains(&line_idx) {
+                if is_debug_stopped {
+                    Span::styled(
+                        "⏸",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled("●", Style::default().fg(Color::Red))
+                }
+            } else if is_debug_stopped {
+                Span::styled(
+                    "→",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if let Some(diag) = app.line_diagnostics(line_idx) {
                 if diag.is_error() {
                     Span::styled(
                         "E",

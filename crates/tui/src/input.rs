@@ -108,6 +108,56 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // When the debug panel is focused, route keys to debug navigation.
+    if app.debug_panel_focused {
+        match code {
+            KeyCode::Esc => {
+                app.debug_panel_focused = false;
+            }
+            KeyCode::Char('1') => {
+                app.debug_panel.active_tab = crate::debug_panel::DebugTab::CallStack;
+            }
+            KeyCode::Char('2') => {
+                app.debug_panel.active_tab = crate::debug_panel::DebugTab::Variables;
+            }
+            KeyCode::Char('3') => {
+                app.debug_panel.active_tab = crate::debug_panel::DebugTab::Output;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.debug_panel.select_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.debug_panel.select_up();
+            }
+            KeyCode::Enter => {
+                // In call stack: navigate to selected frame.
+                if app.debug_panel.active_tab == crate::debug_panel::DebugTab::CallStack {
+                    let idx = app.debug_panel.state.selected_frame;
+                    if let Some(frame) = app.debug_panel.state.stack_frames.get(idx) {
+                        if let Some(ref path) = frame.source_path {
+                            let _line = frame.line.saturating_sub(1) as usize;
+                            // Update stopped location to the selected frame.
+                            app.debug_panel.state.stopped_file = Some(path.clone());
+                            app.debug_panel.state.stopped_line = Some(_line);
+                        }
+                    }
+                }
+                // In variables: toggle expand (future: request children).
+                if app.debug_panel.active_tab == crate::debug_panel::DebugTab::Variables {
+                    let idx = app.debug_panel.state.selected_var;
+                    if let Some(node) = app.debug_panel.state.variables.get_mut(idx) {
+                        if node.expandable {
+                            node.expanded = !node.expanded;
+                            // TODO: fetch children via request_variables
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // When the terminal pane is focused, route all keystrokes to the PTY.
     if app.terminal_focused {
         match code {
@@ -596,6 +646,41 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // F1 — open help from any mode.
     if code == KeyCode::F(1) {
         app.help.open();
+        return;
+    }
+
+    // F9 — toggle breakpoint (works with or without active debug session).
+    if code == KeyCode::F(9) {
+        app.toggle_breakpoint();
+        return;
+    }
+
+    // F5 — continue or start debug session.
+    if code == KeyCode::F(5) {
+        if modifiers.contains(KeyModifiers::SHIFT) {
+            // Shift+F5 — stop debug session.
+            app.debug_stop();
+        } else if app.dap_client.is_some() {
+            app.debug_continue();
+        } else {
+            app.start_debug_session();
+        }
+        return;
+    }
+
+    // F10 — step over.
+    if code == KeyCode::F(10) && app.dap_client.is_some() {
+        app.debug_step_over();
+        return;
+    }
+
+    // F11 — step in / Shift+F11 — step out.
+    if code == KeyCode::F(11) && app.dap_client.is_some() {
+        if modifiers.contains(KeyModifiers::SHIFT) {
+            app.debug_step_out();
+        } else {
+            app.debug_step_in();
+        }
         return;
     }
 
@@ -2698,6 +2783,32 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- Debugger commands ---
+        "debug" | "db" => {
+            app.start_debug_session();
+        }
+        "breakpoint" | "bp" => {
+            app.toggle_breakpoint();
+        }
+        "continue" | "dc" => {
+            app.debug_continue();
+        }
+        "step" | "ds" => {
+            app.debug_step_over();
+        }
+        "stepin" | "dsi" => {
+            app.debug_step_in();
+        }
+        "stepout" | "dso" => {
+            app.debug_step_out();
+        }
+        "debug stop" | "dstop" => {
+            app.debug_stop();
+        }
+        "debug panel" | "dp" => {
+            app.debug_panel.toggle();
+            app.debug_panel_focused = app.debug_panel.visible;
+        }
         other => {
             // Handle commands with arguments.
             if let Some(rest) = other.strip_prefix("join ") {
@@ -2706,6 +2817,17 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(program) = other.strip_prefix("debug ") {
+                let program = program.trim();
+                if program == "stop" {
+                    app.debug_stop();
+                } else if program == "panel" {
+                    app.debug_panel.toggle();
+                    app.debug_panel_focused = app.debug_panel.visible;
+                } else if !program.is_empty() {
+                    app.start_debug_session();
+                    app.debug_launch(program);
+                }
             } else {
                 app.set_status(format!("Unknown command: {}", other));
             }

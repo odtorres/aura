@@ -33,6 +33,9 @@ pub struct AuraConfig {
     /// Conversation storage settings.
     #[serde(default)]
     pub conversations: ConversationConfig,
+    /// Debug adapter configurations.
+    #[serde(default)]
+    pub debuggers: HashMap<String, DebuggerConfig>,
 }
 
 impl Default for AuraConfig {
@@ -46,6 +49,7 @@ impl Default for AuraConfig {
             update: UpdateConfig::default(),
             collab: CollabConfig::default(),
             conversations: ConversationConfig::default(),
+            debuggers: HashMap::new(),
         }
     }
 }
@@ -129,6 +133,19 @@ impl Default for ConversationConfig {
             max_context_messages: 40,
         }
     }
+}
+
+/// Configuration for a debug adapter executable.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DebuggerConfig {
+    /// Command to run the debug adapter.
+    pub command: String,
+    /// Arguments for the command.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// File extensions this debugger handles (e.g. ["rs", "c", "cpp"]).
+    #[serde(default)]
+    pub extensions: Vec<String>,
 }
 
 /// Editor-specific settings.

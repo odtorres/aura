@@ -151,7 +151,9 @@ aura-editor/
     │       ├── claude_watcher.rs       # Claude Code JSONL activity observer
     │       ├── git_graph.rs            # Visual git graph modal (:graph)
     │       ├── session.rs              # Session persistence (save/restore)
-    │       └── help.rs                 # In-editor help overlay
+    │       ├── help.rs                 # In-editor help overlay
+    │       ├── dap.rs                  # DAP debug adapter client (stdio, Content-Length framing)
+    │       └── debug_panel.rs          # Debug panel state (call stack, variables, output)
     ├── ai/
     │   └── src/
     │       ├── lib.rs      # Config, re-exports
