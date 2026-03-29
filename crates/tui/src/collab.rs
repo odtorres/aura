@@ -1,4 +1,4 @@
-//! Real-time collaborative editing over TCP.
+//! Real-time collaborative editing over TCP (with optional TLS).
 //!
 //! Provides host-client collaboration using automerge's sync protocol.
 //! The host starts a TCP listener; clients connect and exchange binary-framed
@@ -8,6 +8,11 @@
 //!
 //! Supports multi-file sessions: each message carries a `file_id` (u64 hash of
 //! the canonical file path) so sync and awareness are routed to the correct buffer.
+//!
+//! When TLS is enabled (`use_tls = true` in `aura.toml`), a self-signed certificate
+//! is generated and streams are encrypted via rustls.  Because `rustls::StreamOwned`
+//! cannot be split like `TcpStream::try_clone()`, a single-threaded relay bridges
+//! the TLS stream to message-level channels (`WireReader` / `WireWriter`).
 
 use aura_core::sync::SyncState;
 use std::collections::HashMap;
@@ -22,8 +27,8 @@ use std::time::Duration;
 // Wire protocol
 // ---------------------------------------------------------------------------
 
-/// Shared list of connected client streams for broadcasting.
-type ClientList = Arc<Mutex<Vec<(u64, Arc<Mutex<TcpStream>>)>>>;
+/// Shared list of connected client writers for broadcasting.
+type ClientList = Arc<Mutex<Vec<(u64, Arc<Mutex<WireWriter>>)>>>;
 
 /// Message type bytes for the wire protocol.
 const MSG_SYNC: u8 = 0x01;
@@ -77,10 +82,152 @@ pub fn generate_auth_token() -> String {
     format!("{h1:016x}{h2:016x}")
 }
 
-// TLS infrastructure — cert generation, server/client configs, and relay.
-// Stream wrapping will be integrated when the reader/writer architecture
-// is refactored to support non-cloneable streams (TLS can't be split).
-#[allow(dead_code)]
+// ---------------------------------------------------------------------------
+// Transport abstraction (WireReader / WireWriter)
+// ---------------------------------------------------------------------------
+
+/// Writer half of a collab connection (either plaintext TCP or TLS channel).
+enum WireWriter {
+    /// Plaintext: direct TcpStream (from `try_clone`).
+    Tcp(TcpStream),
+    /// TLS: sends message tuples to a relay thread.
+    Channel(mpsc::Sender<(u8, Vec<u8>)>),
+}
+
+impl WireWriter {
+    /// Write a framed wire message.
+    fn write_message(&mut self, msg_type: u8, payload: &[u8]) -> std::io::Result<()> {
+        match self {
+            WireWriter::Tcp(stream) => write_wire(stream, msg_type, payload),
+            WireWriter::Channel(tx) => tx
+                .send((msg_type, payload.to_vec()))
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "relay closed")),
+        }
+    }
+}
+
+/// Reader half of a collab connection (either plaintext TCP or TLS channel).
+enum WireReader {
+    /// Plaintext: direct TcpStream.
+    Tcp(TcpStream),
+    /// TLS: receives message tuples from a relay thread.
+    Channel(mpsc::Receiver<(u8, Vec<u8>)>),
+}
+
+impl WireReader {
+    /// Read one framed wire message.
+    fn read_message(&mut self) -> std::io::Result<(u8, Vec<u8>)> {
+        match self {
+            WireReader::Tcp(stream) => read_wire(stream),
+            WireReader::Channel(rx) => rx.recv().map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::ConnectionReset, "relay closed")
+            }),
+        }
+    }
+}
+
+/// Split a plaintext TCP stream into independent reader and writer halves.
+fn split_tcp(stream: TcpStream) -> std::io::Result<(WireReader, WireWriter)> {
+    let clone = stream.try_clone()?;
+    Ok((WireReader::Tcp(stream), WireWriter::Tcp(clone)))
+}
+
+/// Spawn relay threads for a TLS stream, returning channel-based reader/writer.
+///
+/// Uses two threads sharing the TLS stream via `Arc<Mutex<>>`: a reader thread
+/// that blocks on `read_wire`, and a writer thread that blocks on channel recv.
+/// This avoids the partial-read timeout issue with `read_exact`.
+fn spawn_tls_relay<S: IoRead + IoWrite + Send + 'static>(
+    stream: S,
+    shutdown: Arc<Mutex<bool>>,
+) -> std::io::Result<(WireReader, WireWriter)> {
+    let (read_tx, read_rx) = mpsc::channel::<(u8, Vec<u8>)>();
+    let (write_tx, write_rx) = mpsc::channel::<(u8, Vec<u8>)>();
+    let stream = Arc::new(Mutex::new(stream));
+
+    // Single relay thread: uses try-read with short timeout to alternate
+    // between reading and writing without blocking either operation.
+    thread::Builder::new()
+        .name("tls-relay".into())
+        .spawn(move || {
+            // We need to handle partial reads carefully. Use a small buffer
+            // to read whatever is available, then parse complete messages.
+            let mut pending_read: Vec<u8> = Vec::new();
+
+            loop {
+                if *shutdown.lock().expect("lock poisoned") {
+                    break;
+                }
+
+                // Try to read some bytes (non-blocking-ish via small buffer reads).
+                let mut buf = [0u8; 8192];
+                let mut guard = stream.lock().expect("lock poisoned");
+
+                // Try reading available data.
+                match guard.read(&mut buf) {
+                    Ok(0) => {
+                        drop(guard);
+                        break; // EOF
+                    }
+                    Ok(n) => {
+                        pending_read.extend_from_slice(&buf[..n]);
+                    }
+                    Err(ref e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        // No data available — that's fine.
+                    }
+                    Err(_) => {
+                        drop(guard);
+                        break; // Connection error.
+                    }
+                }
+
+                // Parse complete messages from the buffer.
+                while pending_read.len() >= 5 {
+                    // Need at least 4 (length) + 1 (type) bytes.
+                    let total_len =
+                        u32::from_be_bytes(pending_read[..4].try_into().unwrap()) as usize;
+                    if total_len == 0 || pending_read.len() < 4 + total_len {
+                        break; // Incomplete message.
+                    }
+                    let msg_type = pending_read[4];
+                    let payload = pending_read[5..4 + total_len].to_vec();
+                    pending_read.drain(..4 + total_len);
+                    drop(guard);
+                    if read_tx.send((msg_type, payload)).is_err() {
+                        return;
+                    }
+                    guard = stream.lock().expect("lock poisoned");
+                }
+
+                // Drain pending writes.
+                loop {
+                    match write_rx.try_recv() {
+                        Ok((msg_type, payload)) => {
+                            if write_wire(&mut *guard, msg_type, &payload).is_err() {
+                                return;
+                            }
+                        }
+                        Err(mpsc::TryRecvError::Empty) => break,
+                        Err(mpsc::TryRecvError::Disconnected) => return,
+                    }
+                }
+
+                drop(guard);
+                // Small sleep to avoid busy-looping when idle.
+                thread::sleep(Duration::from_millis(5));
+            }
+        })?;
+
+    Ok((WireReader::Channel(read_rx), WireWriter::Channel(write_tx)))
+}
+
+// ---------------------------------------------------------------------------
+// TLS infrastructure
+// ---------------------------------------------------------------------------
+
 /// Generate a self-signed TLS certificate and private key for collab hosting.
 ///
 /// Returns (cert_der, key_der) suitable for building a rustls ServerConfig.
@@ -100,9 +247,10 @@ fn generate_tls_cert() -> Result<
     Ok((vec![cert_der], key_der))
 }
 
-#[allow(dead_code)]
 /// Build a rustls ServerConfig from a self-signed cert.
 fn build_tls_server_config() -> Result<Arc<rustls::ServerConfig>, String> {
+    // Ensure a crypto provider is installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let (certs, key) = generate_tls_cert()?;
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -111,9 +259,10 @@ fn build_tls_server_config() -> Result<Arc<rustls::ServerConfig>, String> {
     Ok(Arc::new(config))
 }
 
-#[allow(dead_code)]
 /// Build a rustls ClientConfig that accepts any certificate (for self-signed).
 fn build_tls_client_config() -> Arc<rustls::ClientConfig> {
+    // Ensure a crypto provider is installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let config = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
@@ -121,7 +270,6 @@ fn build_tls_client_config() -> Arc<rustls::ClientConfig> {
     Arc::new(config)
 }
 
-#[allow(dead_code)]
 /// Certificate verifier that accepts any certificate (for self-signed collab).
 #[derive(Debug)]
 struct NoCertVerifier;
@@ -160,59 +308,6 @@ impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
         rustls::crypto::ring::default_provider()
             .signature_verification_algorithms
             .supported_schemes()
-    }
-}
-
-#[allow(dead_code)]
-/// Run a TLS relay: owns the TLS stream and bridges between wire reads/writes
-/// and channels. Used because rustls::StreamOwned can't be split like TcpStream.
-fn tls_relay_host(
-    tls_stream: rustls::StreamOwned<rustls::ServerConnection, TcpStream>,
-    wire_tx: mpsc::Sender<(u8, Vec<u8>)>,
-    wire_rx: mpsc::Receiver<(u8, Vec<u8>)>,
-    shutdown: Arc<Mutex<bool>>,
-) {
-    use std::io::Write;
-    let stream = std::sync::Mutex::new(tls_stream);
-
-    // Reader thread.
-    let stream_r = Arc::new(stream);
-    let stream_w = stream_r.clone();
-    let shutdown_r = shutdown.clone();
-
-    let reader = thread::Builder::new()
-        .name("tls-relay-read".into())
-        .spawn(move || loop {
-            if *shutdown_r.lock().expect("lock poisoned") {
-                break;
-            }
-            let mut guard = stream_r.lock().expect("lock poisoned");
-            match read_wire(&mut *guard) {
-                Ok((msg_type, payload)) => {
-                    drop(guard);
-                    if wire_tx.send((msg_type, payload)).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        });
-
-    // Writer: forward outgoing messages.
-    let _ = reader;
-    loop {
-        if *shutdown.lock().expect("lock poisoned") {
-            break;
-        }
-        match wire_rx.recv_timeout(Duration::from_millis(100)) {
-            Ok((msg_type, payload)) => {
-                let mut guard = stream_w.lock().expect("lock poisoned");
-                let _ = write_wire(&mut *guard, msg_type, &payload);
-                let _ = guard.flush();
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        }
     }
 }
 
@@ -545,13 +640,38 @@ impl CollabSession {
                     let snaps = file_snaps_for_accept.lock().expect("lock poisoned").clone();
                     let shutdown_peer = shutdown_accept.clone();
                     let auth_token = auth_token_for_accept.clone();
-                    let _tls_config = tls_config_for_accept.clone();
+                    let tls_config = tls_config_for_accept.clone();
 
                     thread::Builder::new()
                         .name("collab-peer".to_string())
                         .spawn(move || {
+                            // Build transport pair: TLS or plaintext.
+                            let transport = if let Some(ref config) = tls_config {
+                                match rustls::ServerConnection::new(config.clone()) {
+                                    Ok(tls_conn) => {
+                                        let _ = stream
+                                            .set_read_timeout(Some(Duration::from_millis(50)));
+                                        let tls_stream = rustls::StreamOwned::new(tls_conn, stream);
+                                        spawn_tls_relay(tls_stream, shutdown_peer.clone())
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("TLS handshake failed: {e}");
+                                        return;
+                                    }
+                                }
+                            } else {
+                                split_tcp(stream)
+                            };
+                            let (reader, writer) = match transport {
+                                Ok(pair) => pair,
+                                Err(e) => {
+                                    tracing::warn!("Transport setup failed: {e}");
+                                    return;
+                                }
+                            };
                             host_handle_peer(
-                                stream,
+                                reader,
+                                writer,
                                 event_tx,
                                 clients,
                                 snaps,
@@ -628,7 +748,12 @@ impl CollabSession {
     }
 
     /// Join an existing collaboration session.
-    pub fn join(display_name: &str, addr: &str, auth_token: Option<&str>) -> std::io::Result<Self> {
+    pub fn join(
+        display_name: &str,
+        addr: &str,
+        auth_token: Option<&str>,
+        use_tls: bool,
+    ) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
@@ -640,14 +765,25 @@ impl CollabSession {
         let name = display_name.to_string();
         let reconnect_addr = addr.to_string();
 
-        let mut writer = stream.try_clone()?;
+        // Build transport pair: TLS or plaintext.
+        let (mut reader, mut writer) = if use_tls {
+            let tls_config = build_tls_client_config();
+            let server_name = rustls::pki_types::ServerName::try_from("localhost")
+                .map_err(|e| std::io::Error::other(format!("{e}")))?;
+            let tls_conn = rustls::ClientConnection::new(tls_config, server_name)
+                .map_err(|e| std::io::Error::other(format!("{e}")))?;
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
+            let tls_stream = rustls::StreamOwned::new(tls_conn, stream);
+            spawn_tls_relay(tls_stream, shutdown.clone())?
+        } else {
+            split_tcp(stream)?
+        };
 
         // Send auth token if provided.
         if let Some(token) = auth_token {
-            write_wire(&mut writer, MSG_AUTHENTICATE, token.as_bytes())?;
+            writer.write_message(MSG_AUTHENTICATE, token.as_bytes())?;
             // Wait for acceptance.
-            let mut reader_tmp = stream.try_clone()?;
-            match read_wire(&mut reader_tmp) {
+            match reader.read_message() {
                 Ok((MSG_AUTHENTICATE, payload)) => {
                     let response = String::from_utf8_lossy(&payload).to_string();
                     if response != "accepted" {
@@ -672,7 +808,7 @@ impl CollabSession {
             "name": name,
         }))
         .unwrap();
-        write_wire(&mut writer, MSG_PEER_JOINED, &join_payload)?;
+        writer.write_message(MSG_PEER_JOINED, &join_payload)?;
 
         let writer = Arc::new(Mutex::new(writer));
         let writer_for_cmd = writer.clone();
@@ -683,18 +819,18 @@ impl CollabSession {
         let reconnect_name = name.clone();
         let reconnect_peer_id = local_peer_id;
         let reconnect_writer = writer.clone();
-        let reader_stream = stream;
         thread::Builder::new()
             .name("collab-reader".to_string())
             .spawn(move || {
                 client_reader_loop(
-                    reader_stream,
+                    reader,
                     event_tx_read,
                     shutdown_read,
                     reconnect_addr,
                     reconnect_name,
                     reconnect_peer_id,
                     reconnect_writer,
+                    use_tls,
                 );
             })?;
 
@@ -711,11 +847,11 @@ impl CollabSession {
                     match cmd {
                         CollabCommand::BroadcastSync { file_id, data } => {
                             let payload = prepend_file_id(file_id, &data);
-                            let _ = write_wire(&mut *w, MSG_SYNC, &payload);
+                            let _ = w.write_message(MSG_SYNC, &payload);
                         }
                         CollabCommand::BroadcastAwareness(update) => {
                             if let Ok(json) = serde_json::to_vec(&update) {
-                                let _ = write_wire(&mut *w, MSG_AWARENESS, &json);
+                                let _ = w.write_message(MSG_AWARENESS, &json);
                             }
                         }
                         CollabCommand::NotifyFileOpened { .. }
@@ -874,41 +1010,33 @@ impl CollabSession {
 
 /// Handle a single peer connection on the host side.
 fn host_handle_peer(
-    stream: TcpStream,
+    mut reader: WireReader,
+    writer: WireWriter,
     event_tx: mpsc::Sender<CollabEvent>,
     clients: ClientList,
     file_snapshots: Vec<(u64, String, Vec<u8>)>,
     shutdown: Arc<Mutex<bool>>,
     expected_token: Option<Arc<String>>,
 ) {
-    let mut reader = match stream.try_clone() {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = event_tx.send(CollabEvent::Error(format!("stream clone failed: {e}")));
-            return;
-        }
-    };
-    let writer = Arc::new(Mutex::new(stream));
+    let writer = Arc::new(Mutex::new(writer));
 
     // If authentication is required, validate the token first.
     if let Some(ref expected) = expected_token {
-        match read_wire(&mut reader) {
+        match reader.read_message() {
             Ok((MSG_AUTHENTICATE, payload)) => {
                 let token = String::from_utf8_lossy(&payload).to_string();
                 if token.trim() != expected.as_str() {
                     tracing::warn!("Peer failed authentication");
-                    let _ = write_wire(
-                        &mut *writer.lock().expect("lock poisoned"),
-                        MSG_AUTHENTICATE,
-                        b"rejected",
-                    );
+                    let _ = writer
+                        .lock()
+                        .expect("lock poisoned")
+                        .write_message(MSG_AUTHENTICATE, b"rejected");
                     return;
                 }
-                let _ = write_wire(
-                    &mut *writer.lock().expect("lock poisoned"),
-                    MSG_AUTHENTICATE,
-                    b"accepted",
-                );
+                let _ = writer
+                    .lock()
+                    .expect("lock poisoned")
+                    .write_message(MSG_AUTHENTICATE, b"accepted");
             }
             _ => {
                 tracing::warn!("Expected auth token, got something else");
@@ -918,7 +1046,7 @@ fn host_handle_peer(
     }
 
     // Wait for the PeerJoined message.
-    let peer_id = match read_wire(&mut reader) {
+    let peer_id = match reader.read_message() {
         Ok((MSG_PEER_JOINED, payload)) => {
             if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&payload) {
                 let peer_id = info["peer_id"].as_u64().unwrap_or(0);
@@ -937,7 +1065,7 @@ fn host_handle_peer(
         let mut w = writer.lock().expect("lock poisoned");
         for (file_id, path, snapshot) in &file_snapshots {
             let payload = encode_snapshot_payload(*file_id, path, snapshot);
-            if write_wire(&mut *w, MSG_DOC_SNAPSHOT, &payload).is_err() {
+            if w.write_message(MSG_DOC_SNAPSHOT, &payload).is_err() {
                 return;
             }
         }
@@ -954,7 +1082,7 @@ fn host_handle_peer(
         if *shutdown.lock().expect("lock poisoned") {
             break;
         }
-        match read_wire(&mut reader) {
+        match reader.read_message() {
             Ok((msg_type, payload)) => {
                 let event = match msg_type {
                     MSG_SYNC => {
@@ -1025,16 +1153,18 @@ fn decode_snapshot_payload(payload: &[u8]) -> Option<(u64, String, Vec<u8>)> {
 // ---------------------------------------------------------------------------
 
 /// Client reader loop with automatic reconnection on disconnect.
+#[allow(clippy::too_many_arguments)]
 fn client_reader_loop(
-    initial_stream: TcpStream,
+    initial_reader: WireReader,
     event_tx: mpsc::Sender<CollabEvent>,
     shutdown: Arc<Mutex<bool>>,
     addr: String,
     name: String,
     peer_id: u64,
-    writer: Arc<Mutex<TcpStream>>,
+    writer: Arc<Mutex<WireWriter>>,
+    use_tls: bool,
 ) {
-    let mut reader = initial_stream;
+    let mut reader = initial_reader;
 
     loop {
         // Read messages until disconnected.
@@ -1042,7 +1172,7 @@ fn client_reader_loop(
             if *shutdown.lock().expect("lock poisoned") {
                 return;
             }
-            match read_wire(&mut reader) {
+            match reader.read_message() {
                 Ok((msg_type, payload)) => {
                     let event = decode_event(msg_type, payload);
                     if event_tx.send(event).is_err() {
@@ -1081,6 +1211,31 @@ fn client_reader_loop(
                 Ok(stream) => {
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
+                    // Build transport pair: TLS or plaintext.
+                    let (new_reader, mut new_writer) = if use_tls {
+                        let tls_config = build_tls_client_config();
+                        let server_name = match rustls::pki_types::ServerName::try_from("localhost")
+                        {
+                            Ok(sn) => sn,
+                            Err(_) => continue,
+                        };
+                        let tls_conn = match rustls::ClientConnection::new(tls_config, server_name)
+                        {
+                            Ok(c) => c,
+                            Err(_) => continue,
+                        };
+                        let tls_stream = rustls::StreamOwned::new(tls_conn, stream);
+                        match spawn_tls_relay(tls_stream, shutdown.clone()) {
+                            Ok(pair) => pair,
+                            Err(_) => continue,
+                        }
+                    } else {
+                        match split_tcp(stream) {
+                            Ok(pair) => pair,
+                            Err(_) => continue,
+                        }
+                    };
+
                     // Re-send PeerJoined.
                     let join_payload = serde_json::to_vec(&serde_json::json!({
                         "peer_id": peer_id,
@@ -1088,18 +1243,16 @@ fn client_reader_loop(
                     }))
                     .unwrap();
 
-                    let mut new_writer = match stream.try_clone() {
-                        Ok(w) => w,
-                        Err(_) => continue,
-                    };
-
-                    if write_wire(&mut new_writer, MSG_PEER_JOINED, &join_payload).is_err() {
+                    if new_writer
+                        .write_message(MSG_PEER_JOINED, &join_payload)
+                        .is_err()
+                    {
                         continue;
                     }
 
                     // Swap the writer so command dispatch uses the new connection.
                     *writer.lock().expect("lock poisoned") = new_writer;
-                    reader = stream;
+                    reader = new_reader;
 
                     let _ = event_tx.send(CollabEvent::Reconnected);
                     break; // Resume reading.
@@ -1183,9 +1336,9 @@ fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
 /// Broadcast a wire message to all connected clients.
 fn broadcast(clients: &ClientList, msg_type: u8, payload: &[u8]) {
     let cl = clients.lock().expect("lock poisoned");
-    for (_, stream) in cl.iter() {
-        let mut s = stream.lock().expect("lock poisoned");
-        let _ = write_wire(&mut *s, msg_type, payload);
+    for (_, writer) in cl.iter() {
+        let mut w = writer.lock().expect("lock poisoned");
+        let _ = w.write_message(msg_type, payload);
     }
 }
 
@@ -1315,7 +1468,7 @@ mod tests {
 
         // Connect a client.
         let addr = format!("127.0.0.1:{port}");
-        let client = CollabSession::join("client", &addr, None).unwrap();
+        let client = CollabSession::join("client", &addr, None, false).unwrap();
 
         // Wait for the snapshot to arrive.
         std::thread::sleep(Duration::from_millis(200));
@@ -1343,6 +1496,47 @@ mod tests {
     }
 
     #[test]
+    fn test_host_client_tls_sync() {
+        // Start a host with TLS enabled.
+        let mut doc = aura_core::CrdtDoc::with_text("hello tls").unwrap();
+        let snapshot = doc.save_bytes();
+        let files = vec![(99u64, "/tmp/tls_test.rs".to_string(), snapshot)];
+        let tls_config = TlsAuthConfig {
+            use_tls: true,
+            ..TlsAuthConfig::default()
+        };
+        let session = CollabSession::host("host", 0, files, &tls_config).unwrap();
+        let port = session.port.unwrap();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        let addr = format!("127.0.0.1:{port}");
+        let client = CollabSession::join("client", &addr, None, true).unwrap();
+
+        // TLS handshake + snapshot exchange needs a bit more time.
+        std::thread::sleep(Duration::from_millis(500));
+
+        let events = client.poll_events();
+        let has_snapshot = events.iter().any(|e| {
+            matches!(e, CollabEvent::DocSnapshot { file_id, path, .. }
+                if *file_id == 99 && path == "/tmp/tls_test.rs")
+        });
+        assert!(
+            has_snapshot,
+            "TLS client should have received a snapshot with file_id and path"
+        );
+
+        let host_events = session.poll_events();
+        let has_join = host_events
+            .iter()
+            .any(|e| matches!(e, CollabEvent::PeerJoined { .. }));
+        assert!(has_join, "host should have received PeerJoined over TLS");
+
+        client.shutdown();
+        session.shutdown();
+    }
+
+    #[test]
     fn test_host_multi_file_snapshots() {
         // Host with two files.
         let mut doc1 = aura_core::CrdtDoc::with_text("file one").unwrap();
@@ -1357,7 +1551,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
 
         let addr = format!("127.0.0.1:{port}");
-        let client = CollabSession::join("client", &addr, None).unwrap();
+        let client = CollabSession::join("client", &addr, None, false).unwrap();
 
         std::thread::sleep(Duration::from_millis(200));
 

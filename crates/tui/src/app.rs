@@ -5198,7 +5198,8 @@ impl App {
     pub fn join_collab_with_token(&mut self, addr: &str, token: Option<&str>) {
         let name = self.config.collab.display_name.clone();
 
-        match crate::collab::CollabSession::join(&name, addr, token) {
+        let use_tls = self.config.collab.use_tls;
+        match crate::collab::CollabSession::join(&name, addr, token, use_tls) {
             Ok(session) => {
                 self.collab = Some(session);
                 self.set_status(format!("Joining collab session at {addr}"));
