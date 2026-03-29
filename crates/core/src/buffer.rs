@@ -892,6 +892,67 @@ impl Buffer {
         &self.history[..self.history_pos]
     }
 
+    /// Get the full edit history including redo entries beyond history_pos.
+    pub fn full_history(&self) -> &[Edit] {
+        &self.history
+    }
+
+    /// Get the current history position (index of the next edit to undo).
+    pub fn history_pos(&self) -> usize {
+        self.history_pos
+    }
+
+    /// Restore the buffer to a specific history position by undoing/redoing.
+    ///
+    /// If `target_pos < history_pos`, undoes edits to reach the target.
+    /// If `target_pos > history_pos`, redoes edits to reach the target.
+    pub fn restore_to(&mut self, target_pos: usize) {
+        let target_pos = target_pos.min(self.history.len());
+        // Undo to reach target.
+        while self.history_pos > target_pos {
+            self.history_pos -= 1;
+            let edit = self.history[self.history_pos].clone();
+            match &edit.kind {
+                EditKind::Insert { pos, text } => {
+                    let char_count = text.chars().count();
+                    let end = *pos + char_count;
+                    if end <= self.rope.len_chars() {
+                        self.rope.remove(*pos..end);
+                        let _ = self.crdt.splice(*pos, char_count, "", &edit.author);
+                    }
+                }
+                EditKind::Delete { start, deleted, .. } => {
+                    if *start <= self.rope.len_chars() {
+                        self.rope.insert(*start, deleted);
+                        let _ = self.crdt.splice(*start, 0, deleted, &edit.author);
+                    }
+                }
+            }
+        }
+        // Redo to reach target.
+        while self.history_pos < target_pos {
+            let edit = self.history[self.history_pos].clone();
+            match &edit.kind {
+                EditKind::Insert { pos, text } => {
+                    if *pos <= self.rope.len_chars() {
+                        self.rope.insert(*pos, text);
+                        let _ = self.crdt.splice(*pos, 0, text, &edit.author);
+                    }
+                }
+                EditKind::Delete { start, end, .. } => {
+                    let char_count = end.saturating_sub(*start);
+                    if *start + char_count <= self.rope.len_chars() {
+                        self.rope.remove(*start..*start + char_count);
+                        let _ = self.crdt.splice(*start, char_count, "", &edit.author);
+                    }
+                }
+            }
+            self.history_pos += 1;
+        }
+        self.modified = true;
+        self.rebuild_line_authors();
+    }
+
     // --- Bracket matching ---
 
     /// Bracket pairs used for matching.

@@ -296,6 +296,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_git_graph_modal(frame, &app.git_graph, area);
         }
 
+        // Render undo tree modal if visible.
+        if app.undo_tree.is_some() {
+            draw_undo_tree_modal(frame, app, area);
+        }
+
         // Render branch picker if visible.
         if app.branch_picker.visible {
             draw_branch_picker(frame, &app.branch_picker, area);
@@ -2770,6 +2775,147 @@ fn draw_conversation_detail(
 }
 
 /// Draw the git graph modal (near full-screen with commit list + detail panel).
+/// Draw the undo tree visualization modal (two-panel: list + detail).
+fn draw_undo_tree_modal(frame: &mut Frame, app: &App, area: Rect) {
+    let modal = match &app.undo_tree {
+        Some(m) => m,
+        None => return,
+    };
+
+    let width = area.width.saturating_sub(4).min(120);
+    let height = area.height.saturating_sub(4).min(40);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let title = format!(" Undo History — {} edits ", modal.entries.len());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(title);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    if inner.height < 2 || inner.width < 20 {
+        return;
+    }
+
+    // Split into list (65%) and detail (35%) if detail is shown.
+    let (list_area, detail_area) = if modal.show_detail && inner.width > 50 {
+        let hsplit = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+            .split(inner);
+        (hsplit[0], Some(hsplit[1]))
+    } else {
+        (inner, None)
+    };
+
+    // --- Left panel: entry list ---
+    for (i, entry) in modal.entries.iter().enumerate() {
+        if i as u16 >= list_area.height {
+            break;
+        }
+        let row_y = list_area.y + i as u16;
+        let is_selected = i == modal.selected;
+
+        // Build the line.
+        let marker = if entry.is_current { "→" } else { " " };
+        let redo_suffix = if entry.is_redo { " (redo)" } else { "" };
+        let text = format!(
+            "{} #{:<3} [{}]  {}  {}{}",
+            marker, entry.index, entry.author_label, entry.kind_label, entry.timestamp, redo_suffix
+        );
+        let text = if text.len() > list_area.width as usize {
+            text[..list_area.width as usize].to_string()
+        } else {
+            text
+        };
+
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(entry.author_color)
+                .add_modifier(Modifier::BOLD)
+        } else if entry.is_current {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else if entry.is_redo {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(entry.author_color)
+        };
+
+        frame.render_widget(
+            Paragraph::new(text).style(style),
+            Rect::new(list_area.x, row_y, list_area.width, 1),
+        );
+    }
+
+    // --- Right panel: detail ---
+    if let Some(detail) = detail_area {
+        let detail_block = Block::default()
+            .borders(Borders::LEFT)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .title(" Detail ");
+        let detail_inner = detail_block.inner(detail);
+        frame.render_widget(detail_block, detail);
+
+        if let Some(entry) = modal.entries.get(modal.selected) {
+            let mut lines = vec![
+                format!("Edit #{}", entry.index),
+                format!("Author: {}", entry.author_label),
+                format!("Action: {}", entry.kind_label),
+                format!("Position: char {}", entry.position),
+                format!("Time: {}", entry.timestamp),
+                String::new(),
+                "Preview:".to_string(),
+            ];
+            // Wrap preview text.
+            let preview = &entry.preview;
+            let w = detail_inner.width as usize;
+            for chunk in preview.as_bytes().chunks(w.max(1)) {
+                if let Ok(s) = std::str::from_utf8(chunk) {
+                    lines.push(s.to_string());
+                }
+            }
+            if entry.is_current {
+                lines.push(String::new());
+                lines.push("◆ Current position".to_string());
+            }
+            if entry.is_redo {
+                lines.push(String::new());
+                lines.push("↻ Available for redo".to_string());
+            }
+
+            for (i, line) in lines.iter().enumerate() {
+                if i as u16 >= detail_inner.height {
+                    break;
+                }
+                let style = if i == 0 {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                frame.render_widget(
+                    Paragraph::new(line.as_str()).style(style),
+                    Rect::new(
+                        detail_inner.x,
+                        detail_inner.y + i as u16,
+                        detail_inner.width,
+                        1,
+                    ),
+                );
+            }
+        }
+    }
+}
+
 fn draw_git_graph_modal(frame: &mut Frame, modal: &crate::git_graph::GitGraphModal, area: Rect) {
     let margin = 1u16;
     let width = area.width.saturating_sub(margin * 2);

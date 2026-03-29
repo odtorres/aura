@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.32] - 2026-03-29
+
+### Added
+
+- **Undo tree visualization** (`:undo-tree` or `:ut`) — Full-screen modal showing the complete edit history with author colors, timestamps, and edit previews.
+  - Two-panel layout: entry list (65%) + detail panel (35%).
+  - Author-colored entries: Human (green), AI (cyan), Peer (magenta).
+  - Current position marked with `→` in yellow, redo entries shown dimmed.
+  - `j`/`k` navigate, `d`/`u` page, `Enter` restores to any history point, `t` toggles detail.
+  - `Buffer::restore_to(pos)` — time-travel through undo history by undoing/redoing to reach target.
+
 ## [0.1.31] - 2026-03-29
 
 ### Added

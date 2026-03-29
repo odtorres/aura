@@ -37,4 +37,5 @@ pub mod snippets;
 pub mod source_control;
 pub mod speculative;
 pub mod tab;
+pub mod undo_tree;
 pub mod update;

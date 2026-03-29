@@ -242,6 +242,27 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // When the undo tree modal is visible, route keys to it.
+    if app.undo_tree.is_some() {
+        if let Some(modal) = &mut app.undo_tree {
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.undo_tree = None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => modal.select_down(),
+                KeyCode::Char('k') | KeyCode::Up => modal.select_up(),
+                KeyCode::Char('d') => modal.page_down(),
+                KeyCode::Char('u') => modal.page_up(),
+                KeyCode::Char('t') => modal.toggle_detail(),
+                KeyCode::Enter => {
+                    app.restore_to_undo_pos();
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
+
     // When the debug panel is focused, route keys to debug navigation.
     if app.debug_panel_focused {
         match code {

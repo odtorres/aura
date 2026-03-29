@@ -332,6 +332,8 @@ pub struct App {
     pub merge_view: Option<crate::merge_view::MergeConflictView>,
     /// References panel (floating list of symbol references).
     pub references_panel: Option<ReferencesPanel>,
+    /// Undo tree visualization modal.
+    pub undo_tree: Option<crate::undo_tree::UndoTreeModal>,
     /// Whether rename mode is active (typing new name in command bar).
     pub rename_active: bool,
     /// The rename input text.
@@ -676,6 +678,7 @@ impl App {
             diff_view: None,
             merge_view: None,
             references_panel: None,
+            undo_tree: None,
             rename_active: false,
             rename_input: String::new(),
             last_sc_refresh: std::time::Instant::now(),
@@ -1677,31 +1680,33 @@ impl App {
     /// mechanism so the user can scroll through it.  The panel is closed with
     /// `q` or `Esc` just like the conversation history panel.
     pub fn show_undo_tree(&mut self) {
-        use aura_core::conversation::{ConversationMessage, MessageRole};
-        let tree_text = self.tab().buffer.undo_tree_text();
-        let history_len = self.tab().buffer.history().len();
-        let total = tree_text.lines().count();
-        // Wrap the tree text as a single System message so the renderer can
-        // display it verbatim inside the ConversationPanel.
-        let message = ConversationMessage {
-            id: "undo-tree".to_string(),
-            conversation_id: "undo-tree".to_string(),
-            role: MessageRole::System,
-            content: tree_text,
-            created_at: String::new(),
-            model: None,
+        let history = self.tab().buffer.full_history();
+        let history_pos = self.tab().buffer.history_pos();
+        let now = std::time::Instant::now();
+        let entries = crate::undo_tree::build_entries(history, history_pos, now);
+        if entries.is_empty() {
+            self.set_status("No edits in history");
+            return;
+        }
+        let modal = crate::undo_tree::UndoTreeModal::new(entries, history_pos);
+        self.undo_tree = Some(modal);
+        self.set_status("Undo tree — j/k navigate, Enter restore, t toggle detail, Esc close");
+    }
+
+    /// Restore the buffer to the selected undo tree position.
+    pub fn restore_to_undo_pos(&mut self) {
+        let target_pos = match &self.undo_tree {
+            Some(modal) => modal.selected_history_pos(),
+            None => return,
         };
-        self.conversation_panel = Some(ConversationPanel {
-            messages: vec![message],
-            file_info: format!(
-                "Undo tree — {} active edit{}, {} total",
-                history_len,
-                if history_len == 1 { "" } else { "s" },
-                total,
-            ),
-            scroll: 0,
-        });
-        self.set_status("Undo tree — Esc/q to close, j/k to scroll");
+        let target_pos = match target_pos {
+            Some(p) => p,
+            None => return,
+        };
+        self.tab_mut().buffer.restore_to(target_pos);
+        self.tab_mut().mark_highlights_dirty();
+        self.undo_tree = None;
+        self.set_status(format!("Restored to history position {target_pos}"));
     }
 
     /// Show recent decisions summary.
