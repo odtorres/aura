@@ -41,7 +41,9 @@ const HIGHLIGHT_NAMES: &[&str] = &[
 /// available and falling back to built-in defaults otherwise.
 fn highlight_color(idx: usize, theme: Option<&Theme>) -> Color {
     match HIGHLIGHT_NAMES.get(idx) {
-        Some(&"comment") => theme.map(|t| t.comment).unwrap_or(Color::DarkGray),
+        Some(&"comment") => theme
+            .map(|t| t.comment)
+            .unwrap_or(Color::Rgb(100, 100, 100)),
         Some(&"keyword") => theme.map(|t| t.keyword).unwrap_or(Color::Magenta),
         Some(&"string") | Some(&"string.special") => {
             theme.map(|t| t.string).unwrap_or(Color::Green)

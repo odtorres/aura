@@ -292,7 +292,7 @@ pub fn theme_dark() -> Theme {
         info: Color::Cyan,
         keyword: Color::Magenta,
         string: Color::Green,
-        comment: Color::DarkGray,
+        comment: Color::Rgb(100, 100, 100),
         function: Color::Blue,
         type_name: Color::Yellow,
         number: Color::Cyan,
