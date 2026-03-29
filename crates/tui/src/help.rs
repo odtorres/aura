@@ -22,7 +22,12 @@ const DOC_TERMINAL: &str = include_str!("../../../docs/src/user-guide/terminal.m
 const DOC_AI_FEATURES: &str = include_str!("../../../docs/src/user-guide/ai-features.md");
 const DOC_GIT: &str = include_str!("../../../docs/src/user-guide/git.md");
 const DOC_LSP: &str = include_str!("../../../docs/src/user-guide/lsp.md");
+const DOC_CHAT_PANEL: &str = include_str!("../../../docs/src/user-guide/chat-panel.md");
+const DOC_SESSION: &str = include_str!("../../../docs/src/user-guide/session.md");
 const DOC_PLUGINS: &str = include_str!("../../../docs/src/user-guide/plugins.md");
+const DOC_SPLIT_PANES: &str = include_str!("../../../docs/src/user-guide/split-panes.md");
+const DOC_COLLAB: &str = include_str!("../../../docs/src/user-guide/collaborative-editing.md");
+const DOC_CLAUDE_CODE: &str = include_str!("../../../docs/src/user-guide/claude-code.md");
 const DOC_DEBUGGER: &str = include_str!("../../../docs/src/user-guide/debugger.md");
 const DOC_ARCH_OVERVIEW: &str = include_str!("../../../docs/src/architecture/overview.md");
 const DOC_ARCH_CORE: &str = include_str!("../../../docs/src/architecture/core.md");
@@ -102,7 +107,12 @@ impl HelpOverlay {
             ("AI Features", "User Guide", DOC_AI_FEATURES),
             ("Git Integration", "User Guide", DOC_GIT),
             ("LSP", "User Guide", DOC_LSP),
+            ("Chat Panel", "User Guide", DOC_CHAT_PANEL),
+            ("Session Persistence", "User Guide", DOC_SESSION),
             ("Plugins", "User Guide", DOC_PLUGINS),
+            ("Split Panes", "User Guide", DOC_SPLIT_PANES),
+            ("Collaborative Editing", "User Guide", DOC_COLLAB),
+            ("Claude Code Integration", "User Guide", DOC_CLAUDE_CODE),
             ("Debugger (DAP)", "User Guide", DOC_DEBUGGER),
             ("Architecture Overview", "Architecture", DOC_ARCH_OVERVIEW),
             ("Core Crate", "Architecture", DOC_ARCH_CORE),

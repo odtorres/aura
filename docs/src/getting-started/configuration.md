@@ -51,6 +51,14 @@ max_context_messages = 40
 [collab]
 display_name = "alice"
 default_port = 0
+use_tls = false
+bind_address = "127.0.0.1"
+require_auth = false
+
+[debuggers.codelldb]
+command = "codelldb"
+args = ["--port", "0"]
+extensions = ["rs", "c", "cpp"]
 
 [mcp_servers]
 # External MCP server connections
@@ -183,9 +191,30 @@ Use `:compact` to manually trigger database compaction. When AI is configured, l
 [collab]
 display_name = "alice"    # Name shown to peers (default: $USER)
 default_port = 0          # Port to host on (0 = random available)
+use_tls = false           # Encrypt traffic with TLS (self-signed cert)
+bind_address = "127.0.0.1"  # "0.0.0.0" for internet access
+require_auth = false      # Require authentication token to join
 ```
 
 See [Collaborative Editing](../user-guide/collaborative-editing.md) for usage details.
+
+## Debugger Adapters
+
+AURA auto-detects debug adapters (CodeLLDB, debugpy, dlv, Node.js). Override with custom config:
+
+```toml
+[debuggers.codelldb]
+command = "codelldb"
+args = ["--port", "0"]
+extensions = ["rs", "c", "cpp"]
+
+[debuggers.debugpy]
+command = "python3"
+args = ["-m", "debugpy.adapter"]
+extensions = ["py"]
+```
+
+See [Debugger (DAP)](../user-guide/debugger.md) for usage details.
 
 ## Session Persistence
 
