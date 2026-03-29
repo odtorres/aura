@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.28] - 2026-03-28
+
+### Fixed
+
+- **Subtler comment colors** — Comments now render in a softer gray (`Rgb(100,100,100)`) instead of bright `DarkGray`, making them clearly distinct from code text across all 17+ languages.
+
 ## [0.1.27] - 2026-03-28
 
 ### Summary — Session Highlights (v0.1.2 → v0.1.27)
