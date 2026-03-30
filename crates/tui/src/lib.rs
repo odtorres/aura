@@ -4,6 +4,7 @@
 //! Handles drawing the buffer, status bar, command bar, gutter,
 //! and will eventually render ghost-text overlays and diff views.
 
+pub mod acp_server;
 pub mod ai_visor;
 pub mod app;
 pub mod branch_picker;

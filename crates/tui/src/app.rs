@@ -323,6 +323,8 @@ pub struct App {
     pub show_conversations: bool,
     /// MCP server (None if not started).
     mcp_server: Option<McpServer>,
+    /// ACP (Agent Client Protocol) server for external agent integration.
+    acp_server: Option<crate::acp_server::AcpServer>,
     /// Connected external MCP servers.
     mcp_clients: Vec<McpClientConnection>,
     /// Registry of connected agents for multi-agent collaboration.
@@ -547,6 +549,18 @@ impl App {
             }
         };
 
+        // Start ACP server for external agent integration.
+        let acp_server = match crate::acp_server::AcpServer::start() {
+            Ok(server) => {
+                tracing::info!("ACP server listening on port {}", server.port);
+                Some(server)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start ACP server: {}", e);
+                None
+            }
+        };
+
         // Open git repository — try from file path first, then from current directory.
         let git_repo = buffer
             .file_path()
@@ -721,6 +735,7 @@ impl App {
             conversation_panel: None,
             show_conversations: false,
             mcp_server,
+            acp_server,
             mcp_clients,
             agent_registry: AgentRegistry::default(),
             speculative,
@@ -938,6 +953,9 @@ impl App {
             // Poll for MCP server requests and external MCP client events.
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
+
+            // Poll for ACP server requests.
+            self.poll_acp_requests();
 
             // Poll for AI commit message tokens and conversation summarization.
             self.poll_commit_msg();
@@ -3185,6 +3203,195 @@ impl App {
         self.status_message = Some(msg.into());
     }
 
+    /// Poll and handle ACP server requests.
+    fn poll_acp_requests(&mut self) {
+        let requests = match &self.acp_server {
+            Some(server) => server.poll_requests(),
+            None => return,
+        };
+
+        for req in requests {
+            let response = self.handle_acp_action(&req.action);
+            let _ = req.response_tx.send(response);
+        }
+    }
+
+    /// Handle a single ACP action.
+    fn handle_acp_action(
+        &mut self,
+        action: &crate::acp_server::AcpAction,
+    ) -> crate::acp_server::AcpAppResponse {
+        use crate::acp_server::{AcpAction, AcpAppResponse};
+
+        match action {
+            AcpAction::GetEditorInfo => AcpAppResponse {
+                success: true,
+                data: serde_json::json!({
+                    "name": "AURA Editor",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "protocol": "acp",
+                    "language": self.tab().language.map(|l| format!("{:?}", l)),
+                    "file": self.tab().buffer.file_path().map(|p| p.display().to_string()),
+                }),
+            },
+            AcpAction::ReadDocument => {
+                let content = self.tab().buffer.text();
+                let path = self
+                    .tab()
+                    .buffer
+                    .file_path()
+                    .map(|p| p.display().to_string());
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "content": content,
+                        "path": path,
+                        "lines": self.tab().buffer.line_count(),
+                    }),
+                }
+            }
+            AcpAction::ReadFile { path } => match std::fs::read_to_string(path) {
+                Ok(content) => AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "content": content, "path": path }),
+                },
+                Err(e) => AcpAppResponse {
+                    success: false,
+                    data: serde_json::json!({ "error": format!("{e}") }),
+                },
+            },
+            AcpAction::ApplyEdit {
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+                text,
+            } => {
+                let rope = self.tab().buffer.rope();
+                let start_char = rope.line_to_char(*start_line) + start_col;
+                let end_char = rope.line_to_char(*end_line) + end_col;
+                if end_char > start_char {
+                    self.tab_mut().buffer.delete(
+                        start_char,
+                        end_char,
+                        aura_core::AuthorId::ai("acp-agent"),
+                    );
+                }
+                if !text.is_empty() {
+                    self.tab_mut().buffer.insert(
+                        start_char,
+                        text,
+                        aura_core::AuthorId::ai("acp-agent"),
+                    );
+                }
+                self.tab_mut().mark_highlights_dirty();
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "applied": true }),
+                }
+            }
+            AcpAction::GetCursorContext => {
+                let row = self.tab().cursor.row;
+                let col = self.tab().cursor.col;
+                let line_text = self.tab().buffer.line_text(row).unwrap_or_default();
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({
+                        "line": row + 1,
+                        "column": col,
+                        "lineText": line_text.trim_end(),
+                    }),
+                }
+            }
+            AcpAction::GetDiagnostics => {
+                let diags: Vec<serde_json::Value> = self
+                    .tab()
+                    .diagnostics
+                    .iter()
+                    .map(|d| {
+                        serde_json::json!({
+                            "line": d.range.start.line + 1,
+                            "column": d.range.start.character,
+                            "severity": d.severity,
+                            "message": d.message,
+                            "source": d.source,
+                        })
+                    })
+                    .collect();
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "diagnostics": diags }),
+                }
+            }
+            AcpAction::GetSelection => {
+                let selection = self.visual_selection_range().map(|(start, end)| {
+                    let text = self.tab().buffer.rope().slice(start..end).to_string();
+                    let start_cur = self.tab().buffer.char_idx_to_cursor(start);
+                    let end_cur = self.tab().buffer.char_idx_to_cursor(end);
+                    serde_json::json!({
+                        "text": text,
+                        "startLine": start_cur.row + 1,
+                        "startColumn": start_cur.col,
+                        "endLine": end_cur.row + 1,
+                        "endColumn": end_cur.col,
+                    })
+                });
+                AcpAppResponse {
+                    success: true,
+                    data: selection.unwrap_or(serde_json::json!({ "text": null })),
+                }
+            }
+            AcpAction::ListOpenFiles => {
+                let files: Vec<String> = self
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .filter_map(|t| t.buffer.file_path().map(|p| p.display().to_string()))
+                    .collect();
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "files": files }),
+                }
+            }
+            AcpAction::OpenFile { path } => {
+                let p = std::path::PathBuf::from(path);
+                match self.open_file(p) {
+                    Ok(()) => AcpAppResponse {
+                        success: true,
+                        data: serde_json::json!({ "opened": path }),
+                    },
+                    Err(e) => AcpAppResponse {
+                        success: false,
+                        data: serde_json::json!({ "error": e }),
+                    },
+                }
+            }
+            AcpAction::RunCommand { command } => {
+                self.terminal.visible = true;
+                self.terminal.send_bytes(command.as_bytes());
+                self.terminal.send_enter();
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "command": command, "status": "sent_to_terminal" }),
+                }
+            }
+            AcpAction::GetProjectStructure => {
+                let files: Vec<String> = self
+                    .file_tree
+                    .entries
+                    .iter()
+                    .filter(|e| !e.is_dir)
+                    .take(500)
+                    .map(|e| e.path.display().to_string())
+                    .collect();
+                AcpAppResponse {
+                    success: true,
+                    data: serde_json::json!({ "files": files, "count": files.len() }),
+                }
+            }
+        }
+    }
+
     /// Poll and handle MCP server requests.
     fn poll_mcp_requests(&mut self) {
         let requests = match &self.mcp_server {
@@ -3764,6 +3971,11 @@ impl App {
     /// Get the MCP server port (if running).
     pub fn mcp_port(&self) -> Option<u16> {
         self.mcp_server.as_ref().map(|s| s.port)
+    }
+
+    /// Get the ACP server port (if running).
+    pub fn acp_port(&self) -> Option<u16> {
+        self.acp_server.as_ref().map(|s| s.port)
     }
 
     /// Get count of connected external MCP servers.

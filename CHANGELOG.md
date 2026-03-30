@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.46] - 2026-03-30
+
+### Added
+
+- **ACP (Agent Client Protocol) server** — Native ACP support over JSON-RPC 2.0 / TCP, making AURA one of the first terminal editors with ACP integration.
+  - **Protocol methods**: `initialize`, `document/read`, `document/edit`, `cursor/context`, `diagnostics/get`, `selection/get`, `file/read`, `file/list`, `file/open`, `editor/info`, `terminal/run`, `project/structure`
+  - **Capabilities**: document sync, diagnostics, editing, selection, file operations, terminal commands, project structure
+  - Starts automatically on a random port alongside the MCP server
+  - Content-Length framed JSON-RPC (same as LSP/DAP)
+  - Any ACP-compatible agent (Claude Code, Copilot CLI, Gemini CLI, Codex) can connect and drive the editor
+
 ## [0.1.45] - 2026-03-30
 
 ### Added
