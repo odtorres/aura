@@ -4996,6 +4996,20 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let lsp_indicator = if app.has_lsp() { " │ LSP" } else { "" };
 
+    let agent_indicator = if let Some(ref session) = app.agent_mode {
+        let elapsed = session.started_at.elapsed().as_secs();
+        format!(
+            " │ AGENT [{}/{}] {}f {}c {}s",
+            session.iteration,
+            session.max_iterations,
+            session.files_changed.len(),
+            session.commands_run,
+            elapsed
+        )
+    } else {
+        String::new()
+    };
+
     let git_indicator = app
         .git_branch()
         .map(|b| format!(" │ {b}"))
@@ -5050,7 +5064,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
 
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -5062,6 +5076,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         collab_indicator,
         claude_indicator,
         experiment_indicator,
+        agent_indicator,
         update_indicator
     );
     // Show selection info when in visual mode.

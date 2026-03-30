@@ -57,6 +57,22 @@ pub enum SplitDirection {
     Horizontal,
 }
 
+/// Autonomous agent session state.
+pub struct AgentSession {
+    /// What the agent is working on.
+    pub task: String,
+    /// Maximum tool iterations before stopping.
+    pub max_iterations: usize,
+    /// Current iteration count.
+    pub iteration: usize,
+    /// Files modified by the agent.
+    pub files_changed: Vec<String>,
+    /// Number of commands executed.
+    pub commands_run: usize,
+    /// When the session started.
+    pub started_at: std::time::Instant,
+}
+
 /// Surround editing state machine.
 #[derive(Debug, Clone)]
 pub enum SurroundState {
@@ -281,6 +297,8 @@ pub struct App {
     pub jump_mark_pending: bool,
     /// Surround action pending state.
     pub surround_pending: Option<SurroundState>,
+    /// Active autonomous agent session (None when not in agent mode).
+    pub agent_mode: Option<AgentSession>,
     /// Conversation storage (None if DB could not be opened).
     pub(crate) conversation_store: Option<ConversationStore>,
     /// Active conversation ID for current intent/review cycle.
@@ -678,6 +696,7 @@ impl App {
             mark_pending: false,
             jump_mark_pending: false,
             surround_pending: None,
+            agent_mode: None,
             conversation_store,
             active_conversation: None,
             active_intent_id: None,
@@ -1757,6 +1776,70 @@ impl App {
         self.tab_mut().mark_highlights_dirty();
         self.undo_tree = None;
         self.set_status(format!("Restored to history position {target_pos}"));
+    }
+
+    // ── Autonomous Agent Mode ────────────────────────────────────
+
+    /// Start an autonomous agent session with the given task.
+    pub fn start_agent(&mut self, task: &str, max_iterations: usize) {
+        if self.ai_client.is_none() {
+            self.set_status("No AI backend available for agent mode");
+            return;
+        }
+
+        // Ensure chat panel is open.
+        if !self.chat_panel.visible {
+            self.chat_panel.visible = true;
+            self.chat_panel_focused = true;
+        }
+
+        self.agent_mode = Some(AgentSession {
+            task: task.to_string(),
+            max_iterations,
+            iteration: 0,
+            files_changed: Vec::new(),
+            commands_run: 0,
+            started_at: std::time::Instant::now(),
+        });
+
+        // Send the agent task as a chat message with enhanced system prompt.
+        let agent_prompt = format!(
+            "You are in AUTONOMOUS AGENT MODE. You can freely read, edit files, \
+             and run commands without user approval.\n\n\
+             Your task: {task}\n\n\
+             Work autonomously to complete this task:\n\
+             1. Analyze the codebase to understand what needs to change\n\
+             2. Make the necessary edits\n\
+             3. Run tests/checks to verify your changes work\n\
+             4. Fix any errors that arise\n\
+             5. When done, respond with a summary of what you did\n\n\
+             Be thorough but efficient. You have up to {max_iterations} tool iterations."
+        );
+
+        // Inject as user message and send.
+        self.chat_panel.input = agent_prompt;
+        self.chat_panel.input_cursor = self.chat_panel.input.chars().count();
+        self.send_chat_message();
+
+        self.set_status(format!("Agent started: {task}"));
+    }
+
+    /// Stop the agent and show summary.
+    pub fn stop_agent(&mut self, reason: &str) {
+        if let Some(session) = self.agent_mode.take() {
+            let elapsed = session.started_at.elapsed();
+            let secs = elapsed.as_secs();
+            let files = session.files_changed.len();
+            let cmds = session.commands_run;
+            let iters = session.iteration;
+            self.set_status(format!(
+                "Agent stopped ({reason}): {iters} iterations, {files} file(s), {cmds} cmd(s), {secs}s"
+            ));
+            // Stop any ongoing streaming.
+            self.chat_panel.streaming = false;
+            self.chat_panel.in_tool_loop = false;
+            self.pending_tool_calls.clear();
+        }
     }
 
     // ── Code Folding ─────────────────────────────────────────────
@@ -5012,13 +5095,35 @@ impl App {
             return;
         }
 
+        let is_agent = self.agent_mode.is_some();
+
         // Process all auto-approve tools first.
         let mut needs_approval = Vec::new();
         let calls: Vec<PendingToolCall> = std::mem::take(&mut self.pending_tool_calls);
 
         for call in calls {
             let permission = tool_permission(&call.name);
-            if permission == ToolPermission::AutoApprove {
+            // In agent mode, auto-approve ALL tools.
+            if is_agent || permission == ToolPermission::AutoApprove {
+                // Track agent metrics.
+                if let Some(ref mut session) = self.agent_mode {
+                    session.iteration += 1;
+                    if call.name == "edit_file" {
+                        if let Some(path) = call.input.get("path").and_then(|v| v.as_str()) {
+                            if !session.files_changed.contains(&path.to_string()) {
+                                session.files_changed.push(path.to_string());
+                            }
+                        }
+                    }
+                    if call.name == "run_command" {
+                        session.commands_run += 1;
+                    }
+                    // Check iteration limit.
+                    if session.iteration > session.max_iterations {
+                        self.stop_agent("Iteration limit reached");
+                        return;
+                    }
+                }
                 self.execute_tool_call(&call);
             } else {
                 needs_approval.push(call);

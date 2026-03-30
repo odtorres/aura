@@ -3243,6 +3243,10 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- Agent mode ---
+        "agent stop" => {
+            app.stop_agent("user request");
+        }
         // --- Marks ---
         "marks" => {
             let marks: Vec<String> = app
@@ -3345,6 +3349,23 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(task) = other.strip_prefix("agent ") {
+                let task = task.trim();
+                if task == "stop" {
+                    app.stop_agent("user request");
+                } else if !task.is_empty() {
+                    let (max_iters, actual_task) = if let Some(rest) = task.strip_prefix("-n ") {
+                        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                        let n = parts[0].parse::<usize>().unwrap_or(50);
+                        let t = parts.get(1).unwrap_or(&"").trim().to_string();
+                        (n, t)
+                    } else {
+                        (50, task.to_string())
+                    };
+                    if !actual_task.is_empty() {
+                        app.start_agent(&actual_task, max_iters);
+                    }
+                }
             } else if let Some(query) = other
                 .strip_prefix("search ")
                 .or_else(|| other.strip_prefix("grep "))

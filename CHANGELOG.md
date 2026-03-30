@@ -5,6 +5,20 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.39] - 2026-03-30
+
+### Added
+
+- **Autonomous agent mode** — `:agent <task>` lets the AI work autonomously without user approval.
+  - AI loops: plan → edit files → run commands → check results → fix errors
+  - ALL tools auto-approved (reads, edits, commands) during agent session
+  - Configurable iteration limit: `:agent -n 100 <task>` (default: 50)
+  - Status bar shows `AGENT [3/50] 2f 1c 12s` (iterations, files, commands, elapsed)
+  - `Esc` or `:agent stop` to stop the agent at any time
+  - Summary shown on completion: iterations used, files changed, commands run
+  - Enhanced system prompt instructs AI to work autonomously and verify changes
+  - All edits tracked in undo history — fully reversible with `u`
+
 ## [0.1.38] - 2026-03-30
 
 ### Added
