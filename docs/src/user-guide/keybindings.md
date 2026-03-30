@@ -148,7 +148,10 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | Key | Action |
 |-----|--------|
 | `gd` | Go to definition |
+| `gr` | Find all references |
+| `gn` | Rename symbol |
 | `K` | Show hover information |
+| `F2` | Rename symbol (alternative) |
 | `]` | Jump to next diagnostic |
 | `[` | Jump to previous diagnostic |
 
@@ -172,6 +175,9 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `Ctrl+J` | Toggle chat panel (and focus) |
 | `Ctrl+H` | Toggle conversation history panel |
 | `Ctrl+D` | Add cursor at next word match (multi-cursor) |
+| `Ctrl+O` | Open document outline (symbol list) |
+| `Ctrl+F` | Open project-wide search/replace |
+| `Ctrl+I` | Toggle AI Visor panel |
 | `Ctrl+B` | Open branch picker |
 | `Ctrl+P` | Open command palette |
 | `Ctrl+W` | Toggle split pane focus |

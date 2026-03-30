@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.43] - 2026-03-30
+
+### Fixed
+
+- **Chat conversation persistence** — Chat messages and AI responses are now reliably saved to the conversation store. The store is explicitly initialized before sending messages and when AI responses complete. AI History panel (Ctrl+H) refreshes after each chat interaction.
+
+### Improved
+
+- **Documentation updated** for all recent features:
+  - Keybindings: Ctrl+O (outline), Ctrl+F (project search), Ctrl+I (AI Visor), LSP keys (gr, gn, F2)
+  - Configuration: `relative_line_numbers` and `word_wrap` settings documented
+  - All new commands documented in command-mode reference
+
 ## [0.1.42] - 2026-03-30
 
 ### Added

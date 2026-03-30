@@ -77,6 +77,8 @@ extensions = ["rs", "c", "cpp"]
 | `spaces_for_tabs` | bool | `true` | Insert spaces when pressing Tab |
 | `scroll_margin` | int | `5` | Lines from edge before viewport scrolls |
 | `auto_save_seconds` | int | `0` | Auto-save interval (0 = disabled) |
+| `relative_line_numbers` | bool | `false` | Show relative line numbers (toggle: `:set rnu`) |
+| `word_wrap` | bool | `false` | Soft wrap long lines (toggle: `:set wrap`) |
 
 ## AI Settings
 
