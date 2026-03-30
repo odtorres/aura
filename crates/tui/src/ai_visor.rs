@@ -86,6 +86,10 @@ pub struct VisorSections {
     pub model: Option<String>,
     /// Detected effort level.
     pub effort: Option<String>,
+    /// Number of project rules files found.
+    pub rules_count: usize,
+    /// Number of docs files in .aura/docs/.
+    pub docs_count: usize,
 }
 
 /// State for the AI Visor right-side panel.
@@ -277,6 +281,40 @@ pub fn load_visor_data(project_root: &Path) -> VisorSections {
                     }
                 }
             }
+        }
+    }
+
+    // Count AURA project rules.
+    let rules_file = project_root.join(".aura/rules.md");
+    let rules_dir = project_root.join(".aura/rules");
+    if rules_file.exists() {
+        sections.rules_count += 1;
+    }
+    if rules_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&rules_dir) {
+            sections.rules_count += entries
+                .flatten()
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext == "md" || ext == "txt")
+                })
+                .count();
+        }
+    }
+
+    // Count docs files.
+    let docs_dir = project_root.join(".aura/docs");
+    if docs_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&docs_dir) {
+            sections.docs_count = entries
+                .flatten()
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext == "md" || ext == "txt")
+                })
+                .count();
         }
     }
 

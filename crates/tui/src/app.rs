@@ -281,6 +281,8 @@ pub struct App {
     pub macro_play_pending: bool,
     /// Intent input buffer (what the user types in Intent mode).
     pub intent_input: String,
+    /// Cached project rules (from .aura/rules.md or .aura/rules/*.md).
+    pub project_rules: Option<String>,
     /// Active AI proposal for review.
     pub proposal: Option<AiProposal>,
     /// AI backend (None if neither API key nor Claude Code CLI is available).
@@ -688,6 +690,7 @@ impl App {
             show_authorship: true,
             leader_pending: false,
             intent_input: String::new(),
+            project_rules: None,
             proposal: None,
             ai_client,
             ai_receiver: None,
@@ -797,6 +800,9 @@ impl App {
 
         // Kick off background summarization for eligible conversations.
         app.maybe_summarize_next();
+
+        // Load project rules from .aura/rules.md or .aura/rules/*.md.
+        app.load_project_rules();
 
         // Discover and load Lua plugins from ~/.aura/plugins/.
         for plugin in crate::plugin::discover_lua_plugins() {
@@ -1776,6 +1782,57 @@ impl App {
         self.tab_mut().mark_highlights_dirty();
         self.undo_tree = None;
         self.set_status(format!("Restored to history position {target_pos}"));
+    }
+
+    // ── Project Rules ────────────────────────────────────────────
+
+    /// Load project rules from `.aura/rules.md` or `.aura/rules/*.md`.
+    pub fn load_project_rules(&mut self) {
+        let project_root = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        let mut rules = String::new();
+
+        // Check single-file rules first: .aura/rules.md
+        let single_file = project_root.join(".aura/rules.md");
+        if single_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&single_file) {
+                rules.push_str(&content);
+            }
+        }
+
+        // Check rules directory: .aura/rules/*.md
+        let rules_dir = project_root.join(".aura/rules");
+        if rules_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&rules_dir) {
+                let mut rule_files: Vec<_> = entries
+                    .flatten()
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .is_some_and(|ext| ext == "md" || ext == "txt")
+                    })
+                    .collect();
+                rule_files.sort_by_key(|e| e.file_name());
+
+                for entry in rule_files {
+                    if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                        if !rules.is_empty() {
+                            rules.push('\n');
+                        }
+                        rules.push_str(&content);
+                    }
+                }
+            }
+        }
+
+        self.project_rules = if rules.is_empty() { None } else { Some(rules) };
     }
 
     // ── Autonomous Agent Mode ────────────────────────────────────
@@ -5319,6 +5376,64 @@ impl App {
                         ));
                     }
                 }
+                mention if mention.starts_with("docs:") => {
+                    // @docs:name — read from .aura/docs/<name>.md
+                    let doc_name = &mention[5..];
+                    let doc_path = project_root.join(format!(".aura/docs/{doc_name}.md"));
+                    match std::fs::read_to_string(&doc_path) {
+                        Ok(content) => {
+                            let truncated: String = content.chars().take(30000).collect();
+                            context.push_str(&format!(
+                                "\n--- @docs:{doc_name} ---\n{truncated}\n--- end @docs:{doc_name} ---\n"
+                            ));
+                        }
+                        Err(_) => {
+                            // Try .txt extension.
+                            let txt_path = project_root.join(format!(".aura/docs/{doc_name}.txt"));
+                            match std::fs::read_to_string(&txt_path) {
+                                Ok(content) => {
+                                    let truncated: String = content.chars().take(30000).collect();
+                                    context.push_str(&format!(
+                                        "\n--- @docs:{doc_name} ---\n{truncated}\n--- end @docs:{doc_name} ---\n"
+                                    ));
+                                }
+                                Err(_) => {
+                                    context.push_str(&format!(
+                                        "\n--- @docs:{doc_name} ---\n(doc not found in .aura/docs/)\n--- end @docs:{doc_name} ---\n"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                "docs" => {
+                    // @docs — list available docs.
+                    let docs_dir = project_root.join(".aura/docs");
+                    if docs_dir.is_dir() {
+                        if let Ok(entries) = std::fs::read_dir(&docs_dir) {
+                            let names: Vec<String> = entries
+                                .flatten()
+                                .filter_map(|e| {
+                                    let p = e.path();
+                                    if p.extension().is_some_and(|ext| ext == "md" || ext == "txt")
+                                    {
+                                        p.file_stem().and_then(|s| s.to_str()).map(String::from)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            context.push_str(&format!(
+                                "\n--- @docs ---\nAvailable docs: {}\nUse @docs:<name> to include.\n--- end @docs ---\n",
+                                names.join(", ")
+                            ));
+                        }
+                    } else {
+                        context.push_str(
+                            "\n--- @docs ---\nNo .aura/docs/ directory found.\n--- end @docs ---\n",
+                        );
+                    }
+                }
                 file_path => {
                     // Try to read the file from the project.
                     let full_path = project_root.join(file_path);
@@ -5363,6 +5478,13 @@ impl App {
              file contents. When editing files, show the user what you plan \
              to change.\n\n",
         );
+        // Inject project rules if loaded.
+        if let Some(ref rules) = self.project_rules {
+            prompt.push_str("\n--- Project Rules ---\n");
+            prompt.push_str(rules);
+            prompt.push_str("\n--- End Project Rules ---\n\n");
+        }
+
         prompt.push_str(&format!("Current file: {file_path}\n"));
         prompt.push_str(&format!(
             "Lines: {line_count}, Cursor: {cursor_row}:{cursor_col}\n"

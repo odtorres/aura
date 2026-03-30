@@ -1751,6 +1751,8 @@ fn draw_ai_visor(frame: &mut Frame, app: &App, area: Rect) {
                 "Permissions",
                 format!("{} allowed", s.permissions_allow_count),
             ));
+            lines.push(("Rules", format!("{} files", s.rules_count)));
+            lines.push(("Docs", format!("{} indexed", s.docs_count)));
 
             for (i, (label, value)) in lines.iter().enumerate() {
                 if i as u16 >= content.height {

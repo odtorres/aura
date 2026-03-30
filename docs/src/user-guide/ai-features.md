@@ -182,6 +182,50 @@ AGENT [3/50] 2f 1c 12s
 - Recommend using `:experiment <branch>` first to work on a separate branch
 - Press `Esc` at any time to stop the agent immediately
 
+## Project Rules
+
+Create `.aura/rules.md` (or `.aura/rules/*.md`) to define AI behavior instructions for your project. These are automatically injected into every AI prompt.
+
+### Single-File Rules
+
+```markdown
+<!-- .aura/rules.md -->
+# Project Rules
+
+- Always use snake_case for Rust functions
+- Write unit tests for all public functions
+- Use `anyhow::Result` for error handling in application code
+- Keep functions under 50 lines
+```
+
+### Multi-File Rules
+
+```
+.aura/
+└── rules/
+    ├── style.md       # Coding style rules
+    ├── testing.md     # Testing requirements
+    └── architecture.md # Architecture decisions
+```
+
+Rules are loaded on startup. Teams can version-control shared rules in `.aura/rules/`.
+
+## @-Docs Indexing
+
+Store project documentation in `.aura/docs/` and reference it in chat with `@docs:<name>`:
+
+```
+.aura/
+└── docs/
+    ├── api.md         # Internal API documentation
+    ├── react.md       # React patterns used in this project
+    └── style-guide.md # Team style guide
+```
+
+In chat: `@docs:api explain the authentication flow` → the AI receives the full content of `.aura/docs/api.md` as context.
+
+Type `@docs` to list all available documentation files.
+
 ## Conversation History
 
 Every AI interaction is stored in a local SQLite database:

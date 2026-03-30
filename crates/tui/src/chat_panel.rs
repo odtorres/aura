@@ -97,6 +97,11 @@ pub enum MentionItem {
     Buffer,
     /// Current LSP diagnostics.
     Diagnostics,
+    /// A documentation file from .aura/docs/.
+    Docs {
+        /// Doc name (filename without extension).
+        name: String,
+    },
 }
 
 impl MentionItem {
@@ -107,6 +112,7 @@ impl MentionItem {
             MentionItem::Selection => "@selection".to_string(),
             MentionItem::Buffer => "@buffer".to_string(),
             MentionItem::Diagnostics => "@errors".to_string(),
+            MentionItem::Docs { name } => format!("@docs:{name}"),
         }
     }
 
@@ -117,6 +123,7 @@ impl MentionItem {
             MentionItem::Selection => "@selection ".to_string(),
             MentionItem::Buffer => "@buffer ".to_string(),
             MentionItem::Diagnostics => "@errors ".to_string(),
+            MentionItem::Docs { name } => format!("@docs:{name} "),
         }
     }
 }
@@ -654,6 +661,35 @@ impl ChatPanel {
             }
         }
 
+        // Docs matches (from .aura/docs/).
+        if let Some(root) = self.mention_project_root() {
+            let docs_dir = root.join(".aura/docs");
+            if docs_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&docs_dir) {
+                    for entry in entries.flatten() {
+                        if self.mention_matches.len() >= 10 {
+                            break;
+                        }
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "md" || e == "txt") {
+                            let name = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let search = format!("docs:{name}").to_lowercase();
+                            if query.is_empty()
+                                || search.contains(&query)
+                                || name.to_lowercase().contains(&query)
+                            {
+                                self.mention_matches.push(MentionItem::Docs { name });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // File matches.
         for path in &self.mention_file_cache {
             if self.mention_matches.len() >= 10 {
@@ -670,6 +706,11 @@ impl ChatPanel {
     /// Cache the project file list for @-mention autocomplete.
     pub fn cache_project_files(&mut self, root: &std::path::Path) {
         self.mention_file_cache = crate::project_search::search_collect_files(root);
+    }
+
+    /// Get the project root (derived from cached files or cwd).
+    fn mention_project_root(&self) -> Option<std::path::PathBuf> {
+        std::env::current_dir().ok()
     }
 
     /// Load an existing conversation from the store.

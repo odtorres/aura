@@ -468,7 +468,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 ### 11.1 AI Features — High Priority
 - [x] **@-mentions in chat** — Reference `@file.rs`, `@selection`, `@buffer`, `@errors` in the chat panel to give AI precise context.
 - [x] **Autonomous agent mode** — `:agent <task>` lets AI loop autonomously with all tools auto-approved. Configurable iteration limit.
-- [ ] **Project rules / AI instructions** — `.aura/rules/` files that shape AI behavior per-project (like `.cursorrules`). Configurable per-glob patterns. Teams can share rules.
+- [x] **Project rules / AI instructions** — `.aura/rules.md` or `.aura/rules/*.md` files automatically injected into AI system prompt.
 - [ ] **Next-edit prediction** — Predict WHERE the user will edit next, not just what. Cursor Tab and Copilot NES both do this. Show ghost cursors at predicted locations.
 
 ### 11.2 Editor UX — High Priority
@@ -486,7 +486,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 
 ### 11.4 Protocol & Integration — High Priority
 - [ ] **ACP (Agent Client Protocol) support** — The emerging standard created by Zed + JetBrains. Claude Code, Copilot CLI, Gemini CLI, and Codex all speak ACP. AURA could be the first terminal editor with native ACP support. Lets any ACP-compatible agent drive the editor.
-- [ ] **@-docs indexing** — Index external documentation (React docs, API docs, library docs) for AI context. Cursor and Continue.dev both have this.
+- [x] **@-docs indexing** — `@docs:<name>` mentions reference files from `.aura/docs/` directory.
 - [ ] **Task runner integration** — Define and run project tasks (build, test, lint) from within the editor. Like VS Code's `tasks.json`.
 
 ### 11.5 Terminal & Shell — Medium Priority
