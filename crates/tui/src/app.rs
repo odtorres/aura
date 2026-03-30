@@ -350,6 +350,8 @@ pub struct App {
     pub ai_visor: crate::ai_visor::AiVisorPanel,
     /// Whether the AI Visor panel has keyboard focus.
     pub ai_visor_focused: bool,
+    /// Project-wide search/replace panel.
+    pub project_search: crate::project_search::ProjectSearchPanel,
     /// Inline conflict markers detected in the current buffer.
     pub inline_conflicts: Vec<InlineConflict>,
     /// Whether rename mode is active (typing new name in command bar).
@@ -699,6 +701,7 @@ impl App {
             references_panel: None,
             undo_tree: None,
             ai_visor: crate::ai_visor::AiVisorPanel::new(40),
+            project_search: crate::project_search::ProjectSearchPanel::new(),
             inline_conflicts: Vec::new(),
             ai_visor_focused: false,
             rename_active: false,
@@ -1788,6 +1791,93 @@ impl App {
             }
         }
         false
+    }
+
+    // ── Project-wide search ───────────────────────────────────────
+
+    /// Open the project-wide search panel.
+    pub fn open_project_search(&mut self) {
+        let root = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        self.project_search.open(root);
+    }
+
+    /// Execute the project search with current query.
+    pub fn execute_project_search(&mut self) {
+        self.project_search.execute();
+        let count = self.project_search.total_matches;
+        let files = self.project_search.file_count;
+        if count == 0 {
+            self.set_status("No matches found");
+        } else {
+            self.set_status(format!("{count} match(es) in {files} file(s)"));
+        }
+        self.project_search.focus = crate::project_search::SearchFocus::Results;
+    }
+
+    /// Jump to the selected search result.
+    pub fn goto_search_result(&mut self) {
+        let result = match self.project_search.selected_result() {
+            Some(r) => r.clone(),
+            None => return,
+        };
+
+        let root = self.project_search.root.clone();
+        let full_path = root.join(&result.file_path);
+        if let Err(e) = self.open_file(full_path) {
+            self.set_status(e);
+            return;
+        }
+        self.tab_mut().cursor.row = result.line_number.saturating_sub(1);
+        self.tab_mut().cursor.col = result.column;
+        self.tab_mut().scroll_row = self.tab().cursor.row.saturating_sub(10);
+        self.project_search.close();
+    }
+
+    /// Replace all matches across the project.
+    pub fn replace_all_project(&mut self) {
+        let old = self.project_search.query.clone();
+        let new = self.project_search.replace_text.clone();
+        let root = self.project_search.root.clone();
+        let case_sensitive = self.project_search.case_sensitive;
+
+        if old.is_empty() || new.is_empty() {
+            self.set_status("Search and replace text required");
+            return;
+        }
+
+        let (files_changed, total) =
+            crate::project_search::replace_in_files(&root, &old, &new, case_sensitive);
+        self.set_status(format!(
+            "Replaced {total} occurrence(s) in {files_changed} file(s)"
+        ));
+
+        // Reload the current buffer if it was modified on disk.
+        if let Some(path) = self.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let current = self.tab().buffer.text();
+                if content != current {
+                    // Replace buffer content with disk version.
+                    let len = self.tab().buffer.len_chars();
+                    self.tab_mut()
+                        .buffer
+                        .delete(0, len, aura_core::AuthorId::Human);
+                    self.tab_mut()
+                        .buffer
+                        .insert(0, &content, aura_core::AuthorId::Human);
+                    self.tab_mut().mark_highlights_dirty();
+                }
+            }
+        }
+
+        // Re-run search to update results.
+        self.project_search.execute();
     }
 
     /// Detect inline conflict markers in the current buffer.

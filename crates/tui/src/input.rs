@@ -184,6 +184,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.toggle_conversation_history();
                 true
             }
+            // Ctrl+F — open project-wide search.
+            KeyCode::Char('f') => {
+                unfocus_all_panels(app);
+                app.open_project_search();
+                true
+            }
             // Ctrl+I — toggle AI Visor panel.
             KeyCode::Char('i') => {
                 unfocus_all_panels(app);
@@ -245,6 +251,47 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.goto_reference();
             }
             _ => {}
+        }
+        return;
+    }
+
+    // When the project search panel is active, route keys to it.
+    if app.project_search.visible {
+        use crate::project_search::SearchFocus;
+        match app.project_search.focus {
+            SearchFocus::Query | SearchFocus::Replace => match code {
+                KeyCode::Esc => app.project_search.close(),
+                KeyCode::Enter => {
+                    if app.project_search.focus == SearchFocus::Query {
+                        app.execute_project_search();
+                    } else {
+                        app.project_search.focus = SearchFocus::Results;
+                    }
+                }
+                KeyCode::Tab => app.project_search.cycle_focus(),
+                KeyCode::Backspace => app.project_search.backspace(),
+                KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.project_search.toggle_replace_mode();
+                }
+                KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.project_search.type_char(c);
+                }
+                _ => {}
+            },
+            SearchFocus::Results => match code {
+                KeyCode::Esc => app.project_search.close(),
+                KeyCode::Tab => app.project_search.cycle_focus(),
+                KeyCode::Char('j') | KeyCode::Down => app.project_search.select_down(),
+                KeyCode::Char('k') | KeyCode::Up => app.project_search.select_up(),
+                KeyCode::Char('d') => app.project_search.page_down(),
+                KeyCode::Char('u') => app.project_search.page_up(),
+                KeyCode::Enter => app.goto_search_result(),
+                KeyCode::Char('R') => app.replace_all_project(),
+                KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.project_search.toggle_replace_mode();
+                }
+                _ => {}
+            },
         }
         return;
     }
@@ -2971,6 +3018,10 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- Project search ---
+        "search" | "grep" => {
+            app.open_project_search();
+        }
         // --- Inline conflict resolution ---
         "accept-current" | "ac" => {
             app.resolve_inline_conflict(crate::merge_view::Resolution::AcceptCurrent);
@@ -3038,6 +3089,16 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(query) = other
+                .strip_prefix("search ")
+                .or_else(|| other.strip_prefix("grep "))
+            {
+                let query = query.trim();
+                if !query.is_empty() {
+                    app.open_project_search();
+                    app.project_search.query = query.to_string();
+                    app.execute_project_search();
+                }
             } else if let Some(new_name) = other.strip_prefix("rename ") {
                 let new_name = new_name.trim();
                 if !new_name.is_empty() {

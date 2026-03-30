@@ -476,7 +476,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **Sticky scroll** — Pin current scope headers (function/class names) at the top of the editor.
 - [x] **Indent guides** — Vertical lines showing scope depth at indent boundaries.
 - [x] **Bracket pair colorization** — Color bracket pairs by nesting depth (rainbow brackets, 6-color palette).
-- [ ] **Project-wide search/replace** — Interactive search across all files with preview, filter by glob, and batch replace. (`Ctrl+Shift+F` equivalent.)
+- [x] **Project-wide search/replace** — Interactive search across all files with preview and batch replace. (`Ctrl+F` or `:search`)
 
 ### 11.3 Code Navigation — Medium Priority
 - [ ] **Workspace symbol search** — Fuzzy finder for all symbols in the project (functions, types, structs). `Ctrl+T` equivalent. Uses LSP workspace/symbol.

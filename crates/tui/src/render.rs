@@ -292,6 +292,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_file_picker(frame, app, area);
         }
 
+        // Render project search overlay if visible.
+        if app.project_search.visible {
+            draw_project_search(frame, app, area);
+        }
+
         // Render command palette if visible.
         if app.command_palette.visible {
             draw_command_palette(frame, &app.command_palette, area);
@@ -2867,6 +2872,184 @@ fn file_icon_color(name: &str) -> Color {
 }
 
 /// Draw the fuzzy file picker overlay centered in the given area.
+/// Draw the project-wide search/replace panel (full-screen overlay).
+fn draw_project_search(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::project_search::SearchFocus;
+
+    let panel = &app.project_search;
+    let width = area.width.saturating_sub(6).min(100);
+    let height = area.height.saturating_sub(4).min(40);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let title = format!(
+        " Project Search — {} match(es) in {} file(s) ",
+        panel.total_matches, panel.file_count
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(title);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    if inner.height < 4 || inner.width < 20 {
+        return;
+    }
+
+    let mut row_y = inner.y;
+
+    // Search input line.
+    {
+        let focus_indicator = if panel.focus == SearchFocus::Query {
+            ">"
+        } else {
+            " "
+        };
+        let case_flag = if panel.case_sensitive {
+            Span::styled(" Aa ", Style::default().fg(Color::Black).bg(Color::Green))
+        } else {
+            Span::styled(" Aa ", Style::default().fg(Color::DarkGray))
+        };
+        let query_text = format!("{} Search: {}", focus_indicator, panel.query);
+        let mut spans = vec![Span::styled(
+            query_text,
+            Style::default().fg(if panel.focus == SearchFocus::Query {
+                Color::Yellow
+            } else {
+                Color::White
+            }),
+        )];
+        // Pad to push flags to the right.
+        let used = spans.iter().map(|s| s.content.len()).sum::<usize>();
+        let pad = (inner.width as usize).saturating_sub(used + 5);
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.push(case_flag);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+        row_y += 1;
+    }
+
+    // Replace input line (if replace mode active).
+    if panel.replace_mode {
+        let focus_indicator = if panel.focus == SearchFocus::Replace {
+            ">"
+        } else {
+            " "
+        };
+        let text = format!("{} Replace: {}", focus_indicator, panel.replace_text);
+        let style = if panel.focus == SearchFocus::Replace {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        frame.render_widget(
+            Paragraph::new(text).style(style),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+        row_y += 1;
+    }
+
+    // Separator.
+    let sep: String = "─".repeat(inner.width as usize);
+    frame.render_widget(
+        Paragraph::new(sep).style(Style::default().fg(Color::DarkGray)),
+        Rect::new(inner.x, row_y, inner.width, 1),
+    );
+    row_y += 1;
+
+    // Results list.
+    let list_height = (inner.y + inner.height).saturating_sub(row_y + 1) as usize; // -1 for footer
+    let mut current_file = String::new();
+    let selected = panel.selected;
+
+    // Compute scroll to keep selected visible.
+    let scroll = if selected >= list_height {
+        selected.saturating_sub(list_height / 2)
+    } else {
+        0
+    };
+
+    let mut rendered = 0usize;
+    for (i, result) in panel.results.iter().enumerate().skip(scroll) {
+        if rendered >= list_height {
+            break;
+        }
+
+        // File header when file changes.
+        if result.file_path != current_file {
+            current_file = result.file_path.clone();
+            if rendered > 0 && rendered < list_height {
+                // Blank line between files.
+                row_y += 1;
+                rendered += 1;
+                if rendered >= list_height {
+                    break;
+                }
+            }
+            let header_style = Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD);
+            let display: String = current_file.chars().take(inner.width as usize).collect();
+            frame.render_widget(
+                Paragraph::new(display).style(header_style),
+                Rect::new(inner.x, row_y, inner.width, 1),
+            );
+            row_y += 1;
+            rendered += 1;
+            if rendered >= list_height {
+                break;
+            }
+        }
+
+        let is_selected = i == selected;
+        let prefix = format!("  {}:{} ", result.line_number, result.column);
+
+        // Truncate line text.
+        let max_text = (inner.width as usize).saturating_sub(prefix.len());
+        let line_display: String = result.line_text.trim().chars().take(max_text).collect();
+
+        let base_style = if is_selected {
+            Style::default().fg(Color::Black).bg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let text = format!("{prefix}{line_display}");
+        frame.render_widget(
+            Paragraph::new(text).style(base_style),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+        row_y += 1;
+        rendered += 1;
+    }
+
+    if panel.results.is_empty() && !panel.query.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  No matches found").style(Style::default().fg(Color::DarkGray)),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+
+    // Footer hint line.
+    let footer_y = inner.y + inner.height.saturating_sub(1);
+    let hint = if panel.replace_mode {
+        " Enter:Go  Tab:Switch  Ctrl+R:Replace  R:Replace All  Esc:Close"
+    } else {
+        " Enter:Go  Tab:Switch  Ctrl+R:Replace Mode  Esc:Close"
+    };
+    frame.render_widget(
+        Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+        Rect::new(inner.x, footer_y, inner.width, 1),
+    );
+}
+
 fn draw_file_picker(frame: &mut Frame, app: &App, area: Rect) {
     let width = area.width.min(80);
     let height = area.height.min(20);

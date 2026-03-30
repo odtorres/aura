@@ -491,6 +491,11 @@ impl Buffer {
         &self.rope
     }
 
+    /// Get a mutable reference to the underlying rope (for bulk reload).
+    pub fn rope_mut(&mut self) -> &mut Rope {
+        &mut self.rope
+    }
+
     /// Get the full buffer contents as a String.
     pub fn text(&self) -> String {
         self.rope.to_string()

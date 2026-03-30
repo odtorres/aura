@@ -156,7 +156,8 @@ aura-editor/
     │       ├── debug_panel.rs          # Debug panel state (call stack, variables, output)
     │       ├── merge_view.rs           # 3-panel merge conflict editor (incoming|current|result)
     │       ├── undo_tree.rs           # Visual undo history modal with time-travel
-    │       └── ai_visor.rs            # Claude Code config browser (.claude/ folder viewer)
+    │       ├── ai_visor.rs            # Claude Code config browser (.claude/ folder viewer)
+    │       └── project_search.rs     # Project-wide search/replace panel
     ├── ai/
     │   └── src/
     │       ├── lib.rs      # Config, re-exports

@@ -5,6 +5,21 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.36] - 2026-03-30
+
+### Added
+
+- **Project-wide search/replace** (`Ctrl+F` or `:search`) — Interactive search across all project files with results grouped by file.
+  - Full-screen overlay with search input, optional replace input, and results list.
+  - Results show file path headers (cyan) with line:column + context for each match.
+  - Navigate with `j`/`k`, `Enter` to jump to match location, `Esc` to close.
+  - Replace mode (`Ctrl+R`): type replacement text, `R` to replace all across files.
+  - Case sensitivity toggle (`Ctrl+C`), `Tab` to cycle between search/replace/results.
+  - `:search <query>` and `:grep <query>` commands with argument support.
+  - Skips `.git`, `target`, `node_modules`, binary files (>5MB).
+  - Max 1000 results for responsiveness.
+  - 3 unit tests for search and replace.
+
 ## [0.1.35] - 2026-03-30
 
 ### Fixed
