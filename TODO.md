@@ -446,11 +446,72 @@ When working on this project with Claude Code:
 - [x] Should AURA support Vim emulation deeply, or define its own keybinding paradigm? → **Decided: Vim-inspired essentials**, not full emulation
 - [x] How to handle very long conversations — auto-compact with configurable retention, AI summarization, context window capping
 
-### 10.7 Potential future work
+### 10.7 Completed
 - [x] Visual block mode (Ctrl+V column editing)
-- [x] Wire TLS into actual streams (needs reader/writer refactor)
+- [x] Wire TLS into actual streams
 - [x] More LSP features (rename, references panel)
 - [x] Undo tree visualization
 - [x] Multi-cursor editing
 - [x] Snippet system
 - [x] Integrated debugger (DAP protocol)
+- [x] 3-panel merge conflict editor
+- [x] AI Visor (Claude Code config browser)
+- [x] Inline conflict resolution
+- [x] Global panel-switching shortcuts
+
+---
+
+## Phase 11: Next-Generation Features
+
+Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, and Neovim.
+
+### 11.1 AI Features — High Priority
+- [ ] **@-mentions in chat** — Reference `@file.rs`, `@functionName`, `@docs:react` in the chat panel to give AI precise context. Every major AI editor has this (Cursor, Copilot, Continue.dev). Table stakes.
+- [ ] **Autonomous agent mode** — Let AI loop autonomously: plan → edit → run → check → fix. Cursor Agent and Copilot Agent Mode both do this. Builds on existing intent+review pipeline.
+- [ ] **Project rules / AI instructions** — `.aura/rules/` files that shape AI behavior per-project (like `.cursorrules`). Configurable per-glob patterns. Teams can share rules.
+- [ ] **Next-edit prediction** — Predict WHERE the user will edit next, not just what. Cursor Tab and Copilot NES both do this. Show ghost cursors at predicted locations.
+
+### 11.2 Editor UX — High Priority
+- [ ] **Code folding** — Fold/unfold code blocks using tree-sitter scope data. `zc` fold, `zo` open, `za` toggle, `zM` fold all, `zR` unfold all. Expected by power users (Helix, Neovim, all GUI editors have it).
+- [ ] **Sticky scroll** — Pin current scope headers (function/class names) at the top of the editor. Trending hard since VS Code introduced it. Feasible in terminal with 1-2 lines.
+- [ ] **Indent guides** — Vertical lines showing scope depth. Simple to implement with tree-sitter scope data. Standard in all modern editors.
+- [ ] **Bracket pair colorization** — Color bracket pairs by nesting depth (rainbow brackets). Built into VS Code, very popular.
+- [ ] **Project-wide search/replace** — Interactive search across all files with preview, filter by glob, and batch replace. (`Ctrl+Shift+F` equivalent.)
+
+### 11.3 Code Navigation — Medium Priority
+- [ ] **Workspace symbol search** — Fuzzy finder for all symbols in the project (functions, types, structs). `Ctrl+T` equivalent. Uses LSP workspace/symbol.
+- [ ] **Document outline panel** — Symbol tree sidebar for the current file showing classes, functions, methods. Navigate with click/Enter.
+- [ ] **Breadcrumbs** — `file > module > function` path at top of buffer. Shows current scope context. One-line breadcrumb bar.
+- [ ] **Peek definition** — Inline popup showing definition without leaving current file. Like VS Code's Alt+F12.
+
+### 11.4 Protocol & Integration — High Priority
+- [ ] **ACP (Agent Client Protocol) support** — The emerging standard created by Zed + JetBrains. Claude Code, Copilot CLI, Gemini CLI, and Codex all speak ACP. AURA could be the first terminal editor with native ACP support. Lets any ACP-compatible agent drive the editor.
+- [ ] **@-docs indexing** — Index external documentation (React docs, API docs, library docs) for AI context. Cursor and Continue.dev both have this.
+- [ ] **Task runner integration** — Define and run project tasks (build, test, lint) from within the editor. Like VS Code's `tasks.json`.
+
+### 11.5 Terminal & Shell — Medium Priority
+- [ ] **Terminal shell integration** — Detect command boundaries, exit codes, and auto-suggest fixes for failed commands. VS Code has this natively.
+- [ ] **Multiple terminal tabs** — Split terminals or tabbed terminals. Currently only one terminal pane.
+- [ ] **Terminal inline AI suggestions** — AI suggests shell commands based on context. Copilot does this in VS Code terminal.
+
+### 11.6 Git & Collaboration — Medium Priority
+- [ ] **Stash management** — View, apply, and drop git stashes from the source control panel.
+- [ ] **PR creation from editor** — Create pull requests directly from within AURA using `gh` CLI integration.
+- [ ] **Follow mode in collab** — Follow a peer's viewport in real-time. Zed has this.
+- [ ] **Shared terminal in collab** — Share terminal output with collaborators.
+
+### 11.7 Editor Polish — Nice to Have
+- [ ] **Auto-close brackets/quotes** — Automatically insert matching pair when typing `(`, `[`, `{`, `"`, `'`.
+- [ ] **Surround editing** — `cs"'` change surrounding quotes, `ds(` delete surrounding parens, `ysiw"` surround word with quotes. Like vim-surround.
+- [ ] **Word wrap / soft wrap** — Toggle soft line wrapping for long lines.
+- [ ] **Relative line numbers** — Show distance from cursor instead of absolute line numbers. Toggle with `:set relativenumber`.
+- [ ] **Marks / bookmarks** — `m<letter>` to set a mark, `'<letter>` to jump. Standard vim feature.
+- [ ] **Registers display** — `:registers` to show yank/delete register contents.
+- [ ] **Macro editing** — Edit macro contents before replaying.
+
+### 11.8 Distribution
+- [ ] Create `aura-editor/homebrew-tap` repo on GitHub
+- [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
+- [ ] Cut a test release to verify the full pipeline
+- [ ] Publish to crates.io: `cargo publish -p aura`
+- [ ] Verify `cargo install aura` works after crates.io publish
