@@ -5,6 +5,23 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.38] - 2026-03-30
+
+### Added
+
+- **Surround editing** (vim-surround style):
+  - `cs<old><new>` — Change surrounding: `cs"'` changes `"hello"` to `'hello'`
+  - `ds<char>` — Delete surrounding: `ds(` removes parens from `(hello)` → `hello`
+  - `ys<motion><char>` — Add surrounding: `ysiw"` wraps word in quotes → `"hello"`
+  - Supports `()`, `{}`, `[]`, `<>`, `""`, `''`, `` ` `` pairs
+- **Relative line numbers** — `:set rnu` / `:set nornu`. Shows distance from cursor; current line shows absolute number.
+- **Marks / bookmarks** — Standard vim marks:
+  - `m{a-z}` sets a mark at current cursor position
+  - `'{a-z}` jumps to a mark
+  - `:marks` lists all set marks
+  - Per-file marks (stored in EditorTab)
+- **Word wrap / soft wrap** — `:set wrap` / `:set nowrap`. When enabled, long lines wrap visually instead of horizontal scrolling.
+
 ## [0.1.37] - 2026-03-30
 
 ### Added

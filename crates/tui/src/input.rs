@@ -5,6 +5,20 @@ use crate::source_control::{GitPanelSection, SidebarView};
 use aura_core::AuthorId;
 use crossterm::event::{KeyCode, KeyModifiers};
 
+/// Map a character to its opening/closing delimiter pair.
+fn delimiter_pair(c: char) -> (char, char) {
+    match c {
+        '(' | ')' | 'b' => ('(', ')'),
+        '{' | '}' | 'B' => ('{', '}'),
+        '[' | ']' => ('[', ']'),
+        '<' | '>' => ('<', '>'),
+        '"' => ('"', '"'),
+        '\'' => ('\'', '\''),
+        '`' => ('`', '`'),
+        _ => (c, c), // Same-char delimiters.
+    }
+}
+
 /// Unfocus all side panels and special focus states, returning to the editor.
 fn unfocus_all_panels(app: &mut App) {
     app.terminal_focused = false;
@@ -1065,6 +1079,151 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     }
 
     // g-prefix sequences: gg → top, gd → definition, gt/gT → tab nav.
+    // Handle mark setting: m{a-z}.
+    if app.mark_pending {
+        app.mark_pending = false;
+        if let KeyCode::Char(c) = code {
+            if c.is_ascii_lowercase() {
+                let cursor = app.tab().cursor;
+                app.tab_mut().marks.insert(c, cursor);
+                app.set_status(format!("Mark '{c}' set"));
+            }
+        }
+        return;
+    }
+
+    // Handle mark jumping: '{a-z} or `{a-z}.
+    if app.jump_mark_pending {
+        app.jump_mark_pending = false;
+        if let KeyCode::Char(c) = code {
+            if c.is_ascii_lowercase() {
+                if let Some(&mark) = app.tab().marks.get(&c) {
+                    app.tab_mut().cursor = mark;
+                    app.set_status(format!("Jumped to mark '{c}'"));
+                } else {
+                    app.set_status(format!("Mark '{c}' not set"));
+                }
+            }
+        }
+        return;
+    }
+
+    // Handle surround editing (cs/ds/ys).
+    if let Some(ref state) = app.surround_pending.clone() {
+        if let KeyCode::Char(c) = code {
+            match state {
+                crate::app::SurroundState::ChangeWaitOld => {
+                    app.surround_pending = Some(crate::app::SurroundState::ChangeWaitNew(c));
+                    return;
+                }
+                crate::app::SurroundState::ChangeWaitNew(old) => {
+                    // Change surrounding: replace old delimiters with new.
+                    let old = *old;
+                    let (open_old, close_old) = delimiter_pair(old);
+                    let (open_new, close_new) = delimiter_pair(c);
+                    let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                    if let Some((start, end)) = app
+                        .tab()
+                        .buffer
+                        .find_around_delimited(char_idx, open_old, close_old)
+                    {
+                        // Replace closing first (higher index), then opening.
+                        let close_idx = end.saturating_sub(1);
+                        app.tab_mut().buffer.delete(
+                            close_idx,
+                            close_idx + 1,
+                            aura_core::AuthorId::Human,
+                        );
+                        app.tab_mut().buffer.insert(
+                            close_idx,
+                            &close_new.to_string(),
+                            aura_core::AuthorId::Human,
+                        );
+                        app.tab_mut()
+                            .buffer
+                            .delete(start, start + 1, aura_core::AuthorId::Human);
+                        app.tab_mut().buffer.insert(
+                            start,
+                            &open_new.to_string(),
+                            aura_core::AuthorId::Human,
+                        );
+                        app.tab_mut().mark_highlights_dirty();
+                    }
+                    app.surround_pending = None;
+                    return;
+                }
+                crate::app::SurroundState::DeleteWait => {
+                    // Delete surrounding delimiters.
+                    let (open, close) = delimiter_pair(c);
+                    let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                    if let Some((start, end)) = app
+                        .tab()
+                        .buffer
+                        .find_around_delimited(char_idx, open, close)
+                    {
+                        let close_idx = end.saturating_sub(1);
+                        app.tab_mut().buffer.delete(
+                            close_idx,
+                            close_idx + 1,
+                            aura_core::AuthorId::Human,
+                        );
+                        app.tab_mut()
+                            .buffer
+                            .delete(start, start + 1, aura_core::AuthorId::Human);
+                        app.tab_mut().mark_highlights_dirty();
+                    }
+                    app.surround_pending = None;
+                    return;
+                }
+                crate::app::SurroundState::AddWaitDelimiter(start, end) => {
+                    // Wrap range with delimiters.
+                    let start = *start;
+                    let end = *end;
+                    let (open, close) = delimiter_pair(c);
+                    app.tab_mut().buffer.insert(
+                        end,
+                        &close.to_string(),
+                        aura_core::AuthorId::Human,
+                    );
+                    app.tab_mut().buffer.insert(
+                        start,
+                        &open.to_string(),
+                        aura_core::AuthorId::Human,
+                    );
+                    app.tab_mut().mark_highlights_dirty();
+                    app.surround_pending = None;
+                    return;
+                }
+                crate::app::SurroundState::AddWaitMotion => {
+                    // ys + motion: resolve the motion range, then wait for delimiter.
+                    // Handle 'iw' (inner word) as the most common case.
+                    if c == 'i' || c == 'a' {
+                        // Will need the next char for text object... simplified: use inner word.
+                        let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                        let (start, end) = if c == 'i' {
+                            app.tab().buffer.find_inner_word(char_idx)
+                        } else {
+                            app.tab().buffer.find_around_word(char_idx)
+                        };
+                        app.surround_pending =
+                            Some(crate::app::SurroundState::AddWaitDelimiter(start, end));
+                    } else if c == 'w' {
+                        let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                        let (start, end) = app.tab().buffer.find_inner_word(char_idx);
+                        app.surround_pending =
+                            Some(crate::app::SurroundState::AddWaitDelimiter(start, end));
+                    } else {
+                        app.surround_pending = None;
+                    }
+                    return;
+                }
+            }
+        } else {
+            app.surround_pending = None;
+        }
+        return;
+    }
+
     // Handle z-prefix (fold commands).
     if app.z_pending {
         app.z_pending = false;
@@ -1261,6 +1420,25 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     if app.pending_operator.is_some() {
         let op = app.pending_operator.take().unwrap();
         let count = app.count_prefix.take().unwrap_or(1);
+
+        // Surround intercept: cs → change surrounding, ds → delete surrounding, ys → add surrounding.
+        if code == KeyCode::Char('s') {
+            match op {
+                Operator::Change => {
+                    app.surround_pending = Some(crate::app::SurroundState::ChangeWaitOld);
+                    return;
+                }
+                Operator::Delete => {
+                    app.surround_pending = Some(crate::app::SurroundState::DeleteWait);
+                    return;
+                }
+                Operator::Yank => {
+                    app.surround_pending = Some(crate::app::SurroundState::AddWaitMotion);
+                    return;
+                }
+                _ => {} // Fall through for indent/dedent.
+            }
+        }
 
         // Double-press = line operation (dd, cc, yy, >>, <<).
         let is_line_op = matches!(
@@ -1488,6 +1666,14 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Char('z') => {
             // za → toggle fold, zc → close, zo → open, zM → close all, zR → open all.
             app.z_pending = true;
+        }
+        KeyCode::Char('m') => {
+            // m{a-z} — set mark.
+            app.mark_pending = true;
+        }
+        KeyCode::Char('\'') => {
+            // '{a-z} — jump to mark (line).
+            app.jump_mark_pending = true;
         }
         KeyCode::Char('G') => {
             let tab = app.tab_mut();
@@ -3056,6 +3242,37 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "collab-stop" | "collab stop" => {
             app.stop_collab();
+        }
+        // --- Marks ---
+        "marks" => {
+            let marks: Vec<String> = app
+                .tab()
+                .marks
+                .iter()
+                .map(|(k, v)| format!("'{k} → {}:{}", v.row + 1, v.col))
+                .collect();
+            if marks.is_empty() {
+                app.set_status("No marks set");
+            } else {
+                app.set_status(marks.join("  "));
+            }
+        }
+        // --- Set commands ---
+        "set relativenumber" | "set rnu" => {
+            app.config.editor.relative_line_numbers = true;
+            app.set_status("Relative line numbers ON");
+        }
+        "set norelativenumber" | "set nornu" => {
+            app.config.editor.relative_line_numbers = false;
+            app.set_status("Relative line numbers OFF");
+        }
+        "set wrap" => {
+            app.config.editor.word_wrap = true;
+            app.set_status("Word wrap ON");
+        }
+        "set nowrap" => {
+            app.config.editor.word_wrap = false;
+            app.set_status("Word wrap OFF");
         }
         // --- Project search ---
         "search" | "grep" => {

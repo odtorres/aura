@@ -4361,13 +4361,31 @@ fn draw_editor(
 
     for &line_idx in &visible_buffer_lines {
         if let Some(rope_line) = tab.buffer.line(line_idx) {
-            let line_num = format!("{:>4} ", line_idx + 1);
-            let content: String = rope_line
-                .chars()
-                .skip(tab.scroll_col)
-                .take(text_width as usize)
-                .filter(|c| *c != '\n' && *c != '\r')
-                .collect();
+            let line_num = if app.config.editor.relative_line_numbers {
+                let offset = (line_idx as i64 - tab.cursor.row as i64).unsigned_abs();
+                if offset == 0 {
+                    format!("{:>4} ", line_idx + 1) // Current line: absolute
+                } else {
+                    format!("{:>4} ", offset)
+                }
+            } else {
+                format!("{:>4} ", line_idx + 1)
+            };
+            let content: String = if app.config.editor.word_wrap {
+                // Word wrap: show full line, no horizontal scroll.
+                rope_line
+                    .chars()
+                    .take(text_width as usize) // First visual line of wrapped content.
+                    .filter(|c| *c != '\n' && *c != '\r')
+                    .collect()
+            } else {
+                rope_line
+                    .chars()
+                    .skip(tab.scroll_col)
+                    .take(text_width as usize)
+                    .filter(|c| *c != '\n' && *c != '\r')
+                    .collect()
+            };
 
             // If this line is folded, append a fold indicator.
             let (content, fold_suffix) = if let Some(&fold_end) = tab.folded_ranges.get(&line_idx) {

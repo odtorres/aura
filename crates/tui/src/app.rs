@@ -57,6 +57,21 @@ pub enum SplitDirection {
     Horizontal,
 }
 
+/// Surround editing state machine.
+#[derive(Debug, Clone)]
+pub enum SurroundState {
+    /// `cs` pressed — waiting for the old delimiter char.
+    ChangeWaitOld,
+    /// `cs<old>` pressed — waiting for the new delimiter char.
+    ChangeWaitNew(char),
+    /// `ds` pressed — waiting for the delimiter char to delete.
+    DeleteWait,
+    /// `ys` pressed — waiting for motion to define range.
+    AddWaitMotion,
+    /// `ys` + motion resolved — waiting for the delimiter char to wrap.
+    AddWaitDelimiter(usize, usize), // (start, end) char indices
+}
+
 /// Vim operator waiting for a motion (operator-pending mode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
@@ -260,6 +275,12 @@ pub struct App {
     pub g_pending: bool,
     /// Whether the z-prefix key has been pressed (fold commands).
     pub z_pending: bool,
+    /// Whether `m` was pressed (setting a mark).
+    pub mark_pending: bool,
+    /// Whether `'` was pressed (jumping to a mark).
+    pub jump_mark_pending: bool,
+    /// Surround action pending state.
+    pub surround_pending: Option<SurroundState>,
     /// Conversation storage (None if DB could not be opened).
     pub(crate) conversation_store: Option<ConversationStore>,
     /// Active conversation ID for current intent/review cycle.
@@ -654,6 +675,9 @@ impl App {
             ai_receiver: None,
             g_pending: false,
             z_pending: false,
+            mark_pending: false,
+            jump_mark_pending: false,
+            surround_pending: None,
             conversation_store,
             active_conversation: None,
             active_intent_id: None,

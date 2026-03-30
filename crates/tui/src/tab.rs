@@ -133,6 +133,8 @@ pub struct EditorTab {
     pub indent_style: IndentStyle,
     /// Breakpoints set on this file (0-indexed line numbers).
     pub breakpoints: BTreeSet<usize>,
+    /// Vim marks: maps register char (a-z) → cursor position.
+    pub marks: std::collections::HashMap<char, Cursor>,
     /// Folded line ranges: maps fold start line → fold end line (exclusive).
     pub folded_ranges: std::collections::HashMap<usize, usize>,
     /// Cached foldable ranges from tree-sitter (start_line → end_line).
@@ -208,6 +210,7 @@ impl EditorTab {
             conversation_lines,
             indent_style,
             breakpoints: BTreeSet::new(),
+            marks: std::collections::HashMap::new(),
             folded_ranges: std::collections::HashMap::new(),
             foldable_ranges: std::collections::HashMap::new(),
         };

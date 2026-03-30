@@ -166,6 +166,10 @@ pub struct EditorConfig {
     pub scroll_margin: usize,
     /// Auto-save interval in seconds (0 = disabled).
     pub auto_save_seconds: u64,
+    /// Show relative line numbers (distance from cursor).
+    pub relative_line_numbers: bool,
+    /// Enable soft word wrap (no horizontal scrolling).
+    pub word_wrap: bool,
 }
 
 impl Default for EditorConfig {
@@ -178,6 +182,8 @@ impl Default for EditorConfig {
             spaces_for_tabs: true,
             scroll_margin: 5,
             auto_save_seconds: 0,
+            relative_line_numbers: false,
+            word_wrap: false,
         }
     }
 }

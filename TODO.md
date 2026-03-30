@@ -502,10 +502,10 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 
 ### 11.7 Editor Polish — Nice to Have
 - [x] **Auto-close brackets/quotes** — Automatically insert matching pair when typing `(`, `[`, `{`, `"`, `'`.
-- [ ] **Surround editing** — `cs"'` change surrounding quotes, `ds(` delete surrounding parens, `ysiw"` surround word with quotes. Like vim-surround.
-- [ ] **Word wrap / soft wrap** — Toggle soft line wrapping for long lines.
-- [ ] **Relative line numbers** — Show distance from cursor instead of absolute line numbers. Toggle with `:set relativenumber`.
-- [ ] **Marks / bookmarks** — `m<letter>` to set a mark, `'<letter>` to jump. Standard vim feature.
+- [x] **Surround editing** — `cs"'` change surrounding quotes, `ds(` delete surrounding parens, `ysiw"` surround word with quotes.
+- [x] **Word wrap / soft wrap** — Toggle with `:set wrap` / `:set nowrap`.
+- [x] **Relative line numbers** — `:set rnu` / `:set nornu`. Current line shows absolute.
+- [x] **Marks / bookmarks** — `m{a-z}` to set, `'{a-z}` to jump. `:marks` to list.
 - [ ] **Registers display** — `:registers` to show yank/delete register contents.
 - [ ] **Macro editing** — Edit macro contents before replaying.
 
