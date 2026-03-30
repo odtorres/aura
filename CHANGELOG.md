@@ -5,6 +5,13 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.35] - 2026-03-30
+
+### Fixed
+
+- **Crash on multi-byte characters** — Fixed panic in Claude Code watcher when activity log contained multi-byte UTF-8 characters (e.g., em-dash `–`). The `truncate()` function now uses char-boundary-safe iteration.
+- **Clippy `is_multiple_of` lint** — Fixed CI failure on Rust 1.94+ where `actual_col % indent_width == 0` triggers `clippy::manual_is_multiple_of`.
+
 ## [0.1.34] - 2026-03-30
 
 ### Added
