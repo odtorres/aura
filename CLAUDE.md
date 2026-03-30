@@ -155,7 +155,8 @@ aura-editor/
     │       ├── dap.rs                  # DAP debug adapter client (stdio, Content-Length framing)
     │       ├── debug_panel.rs          # Debug panel state (call stack, variables, output)
     │       ├── merge_view.rs           # 3-panel merge conflict editor (incoming|current|result)
-    │       └── undo_tree.rs           # Visual undo history modal with time-travel
+    │       ├── undo_tree.rs           # Visual undo history modal with time-travel
+    │       └── ai_visor.rs            # Claude Code config browser (.claude/ folder viewer)
     ├── ai/
     │   └── src/
     │       ├── lib.rs      # Config, re-exports

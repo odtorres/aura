@@ -5,6 +5,18 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.33] - 2026-03-29
+
+### Added
+
+- **AI Visor panel** (`Ctrl+I` or `:visor`) — Claude Code configuration browser showing the `.claude/` folder contents in a tabbed right-side panel. No other editor provides this feature.
+  - **Overview tab**: Model, effort level, CLAUDE.md status, stats dashboard.
+  - **Settings tab**: Merged settings cascade with scope indicators `[G]`lobal/`[P]`roject/`[L]`ocal, color-coded.
+  - **Skills tab**: Lists skills from `.claude/skills/` and legacy `.claude/commands/` with descriptions.
+  - **Hooks tab**: Shows configured hooks by event type (PreToolUse, PostToolUse, Stop, etc.).
+  - **Plugins tab**: Installed Claude Code plugins from `~/.claude/plugins/`.
+  - Navigate with `1`-`5` (tabs), `j`/`k` (items), `e`/`Enter` (open source file), `Tab` (cycle tabs).
+
 ## [0.1.32] - 2026-03-29
 
 ### Added

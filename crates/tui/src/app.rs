@@ -334,6 +334,10 @@ pub struct App {
     pub references_panel: Option<ReferencesPanel>,
     /// Undo tree visualization modal.
     pub undo_tree: Option<crate::undo_tree::UndoTreeModal>,
+    /// AI Visor panel (Claude Code config browser).
+    pub ai_visor: crate::ai_visor::AiVisorPanel,
+    /// Whether the AI Visor panel has keyboard focus.
+    pub ai_visor_focused: bool,
     /// Whether rename mode is active (typing new name in command bar).
     pub rename_active: bool,
     /// The rename input text.
@@ -679,6 +683,8 @@ impl App {
             merge_view: None,
             references_panel: None,
             undo_tree: None,
+            ai_visor: crate::ai_visor::AiVisorPanel::new(40),
+            ai_visor_focused: false,
             rename_active: false,
             rename_input: String::new(),
             last_sc_refresh: std::time::Instant::now(),
@@ -1707,6 +1713,32 @@ impl App {
         self.tab_mut().mark_highlights_dirty();
         self.undo_tree = None;
         self.set_status(format!("Restored to history position {target_pos}"));
+    }
+
+    /// Toggle the AI Visor panel.
+    pub fn toggle_ai_visor(&mut self) {
+        if self.ai_visor.visible && self.ai_visor_focused {
+            self.ai_visor.visible = false;
+            self.ai_visor_focused = false;
+        } else {
+            // Load data from project root.
+            let project_root = self
+                .tab()
+                .buffer
+                .file_path()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_path_buf())
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            self.ai_visor.sections = crate::ai_visor::load_visor_data(&project_root);
+            self.ai_visor.visible = true;
+            self.ai_visor_focused = true;
+            // Close other right-side panels.
+            self.chat_panel.visible = false;
+            self.chat_panel_focused = false;
+            self.conversation_history.visible = false;
+            self.conversation_history_focused = false;
+        }
     }
 
     /// Show recent decisions summary.

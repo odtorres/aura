@@ -96,6 +96,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Some(app.chat_panel.width)
     } else if app.conversation_history.visible {
         Some(app.conversation_history.width)
+    } else if app.ai_visor.visible {
+        Some(app.ai_visor.width)
     } else {
         None
     };
@@ -116,6 +118,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             app.chat_panel_rect = area;
             app.conv_history_rect = Rect::default();
             draw_chat_panel(frame, app, area);
+        } else if app.ai_visor.visible {
+            app.conv_history_rect = Rect::default();
+            app.chat_panel_rect = Rect::default();
+            draw_ai_visor(frame, app, area);
         } else {
             app.conv_history_rect = area;
             app.chat_panel_rect = Rect::default();
@@ -1652,6 +1658,278 @@ fn draw_conversation_history(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw the interactive chat panel.
+/// Draw the AI Visor panel (Claude Code config browser).
+fn draw_ai_visor(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::ai_visor::VisorTab;
+
+    let visor = &app.ai_visor;
+    let focused = app.ai_visor_focused;
+    let border_color = if focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(" AI Visor ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height < 3 || inner.width < 10 {
+        return;
+    }
+
+    // Tab bar.
+    let tab_row = Rect::new(inner.x, inner.y, inner.width, 1);
+    let content = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
+
+    let tabs = [
+        ("1:Overview", VisorTab::Overview),
+        ("2:Settings", VisorTab::Settings),
+        ("3:Skills", VisorTab::Skills),
+        ("4:Hooks", VisorTab::Hooks),
+        ("5:Plugins", VisorTab::Plugins),
+    ];
+    let mut tab_spans = Vec::new();
+    for (label, tab) in &tabs {
+        let style = if *tab == visor.active_tab {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        tab_spans.push(Span::styled(format!(" {} ", label), style));
+    }
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)), tab_row);
+
+    let w = content.width as usize;
+
+    match visor.active_tab {
+        VisorTab::Overview => {
+            let s = &visor.sections;
+            let mut lines = Vec::new();
+            lines.push((
+                "Model",
+                s.model.as_deref().unwrap_or("(default)").to_string(),
+            ));
+            lines.push((
+                "Effort",
+                s.effort.as_deref().unwrap_or("(default)").to_string(),
+            ));
+            lines.push(("", String::new()));
+            let md_status = if s.claude_md.is_some() {
+                format!("✓ ({:.1} KB)", s.claude_md_size as f64 / 1024.0)
+            } else {
+                "✗ not found".to_string()
+            };
+            lines.push(("CLAUDE.md", md_status));
+            lines.push(("Settings", format!("{} entries", s.settings.len())));
+            lines.push(("Skills", format!("{} available", s.skills.len())));
+            lines.push(("Hooks", format!("{} configured", s.hooks.len())));
+            lines.push(("Plugins", format!("{} installed", s.plugins.len())));
+            lines.push(("", String::new()));
+            lines.push((
+                "Permissions",
+                format!("{} allowed", s.permissions_allow_count),
+            ));
+
+            for (i, (label, value)) in lines.iter().enumerate() {
+                if i as u16 >= content.height {
+                    break;
+                }
+                let row_y = content.y + i as u16;
+                if label.is_empty() {
+                    continue;
+                }
+                let text = format!(" {:<14} {}", label, value);
+                let style = if i == 0 || i == 1 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                frame.render_widget(
+                    Paragraph::new(text).style(style),
+                    Rect::new(content.x, row_y, content.width, 1),
+                );
+            }
+        }
+        VisorTab::Settings => {
+            for (i, entry) in visor.sections.settings.iter().enumerate() {
+                if i as u16 >= content.height {
+                    break;
+                }
+                let row_y = content.y + i as u16;
+                let is_selected = focused && i == visor.selected;
+                let scope_color = match entry.scope.as_str() {
+                    "G" => Color::Blue,
+                    "P" => Color::Green,
+                    "L" => Color::Yellow,
+                    _ => Color::White,
+                };
+                let text = format!(" [{}] {}: {}", entry.scope, entry.key, entry.value);
+                let text: String = text.chars().take(w).collect();
+                let style = if is_selected {
+                    Style::default().fg(Color::Black).bg(scope_color)
+                } else {
+                    Style::default().fg(scope_color)
+                };
+                frame.render_widget(
+                    Paragraph::new(text).style(style),
+                    Rect::new(content.x, row_y, content.width, 1),
+                );
+            }
+            if visor.sections.settings.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No settings found")
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content.x, content.y, content.width, 1),
+                );
+            }
+        }
+        VisorTab::Skills => {
+            let mut y = content.y;
+            for (i, skill) in visor.sections.skills.iter().enumerate() {
+                if y >= content.y + content.height {
+                    break;
+                }
+                let is_selected = focused && i == visor.selected;
+                let prefix = if skill.invocable { "▶" } else { "○" };
+                let name_line = format!(" {} {}", prefix, skill.name);
+                let desc_line = format!("   {}", skill.description);
+
+                let name_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                };
+                let desc_style = if is_selected {
+                    Style::default().fg(Color::Black).bg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                frame.render_widget(
+                    Paragraph::new(name_line.chars().take(w).collect::<String>()).style(name_style),
+                    Rect::new(content.x, y, content.width, 1),
+                );
+                y += 1;
+                if y < content.y + content.height {
+                    frame.render_widget(
+                        Paragraph::new(desc_line.chars().take(w).collect::<String>())
+                            .style(desc_style),
+                        Rect::new(content.x, y, content.width, 1),
+                    );
+                    y += 1;
+                }
+            }
+            if visor.sections.skills.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No skills found").style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content.x, content.y, content.width, 1),
+                );
+            }
+        }
+        VisorTab::Hooks => {
+            for (i, hook) in visor.sections.hooks.iter().enumerate() {
+                if (i * 2) as u16 >= content.height {
+                    break;
+                }
+                let is_selected = focused && i == visor.selected;
+                let event_line = format!(" {} ({})", hook.event, hook.hook_type);
+                let cmd_line = format!("   {}", hook.command);
+
+                let event_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Magenta)
+                };
+                let cmd_style = Style::default().fg(Color::DarkGray);
+
+                let y = content.y + (i * 2) as u16;
+                frame.render_widget(
+                    Paragraph::new(event_line.chars().take(w).collect::<String>())
+                        .style(event_style),
+                    Rect::new(content.x, y, content.width, 1),
+                );
+                if y + 1 < content.y + content.height {
+                    frame.render_widget(
+                        Paragraph::new(cmd_line.chars().take(w).collect::<String>())
+                            .style(cmd_style),
+                        Rect::new(content.x, y + 1, content.width, 1),
+                    );
+                }
+            }
+            if visor.sections.hooks.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No hooks configured")
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content.x, content.y, content.width, 1),
+                );
+            }
+        }
+        VisorTab::Plugins => {
+            for (i, plugin) in visor.sections.plugins.iter().enumerate() {
+                if (i * 2) as u16 >= content.height {
+                    break;
+                }
+                let is_selected = focused && i == visor.selected;
+                let name_line = format!(" ✓ {}", plugin.name);
+                let source_line = if plugin.source.is_empty() {
+                    String::new()
+                } else {
+                    format!("   {}", plugin.source)
+                };
+
+                let name_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
+
+                let y = content.y + (i * 2) as u16;
+                frame.render_widget(
+                    Paragraph::new(name_line.chars().take(w).collect::<String>()).style(name_style),
+                    Rect::new(content.x, y, content.width, 1),
+                );
+                if !source_line.is_empty() && y + 1 < content.y + content.height {
+                    frame.render_widget(
+                        Paragraph::new(source_line.chars().take(w).collect::<String>())
+                            .style(Style::default().fg(Color::DarkGray)),
+                        Rect::new(content.x, y + 1, content.width, 1),
+                    );
+                }
+            }
+            if visor.sections.plugins.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No plugins installed")
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content.x, content.y, content.width, 1),
+                );
+            }
+        }
+    }
+}
+
 fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.chat_panel_focused;
     let panel = &app.chat_panel;

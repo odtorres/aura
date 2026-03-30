@@ -13,6 +13,7 @@ fn unfocus_all_panels(app: &mut App) {
     app.chat_panel_focused = false;
     app.conversation_history_focused = false;
     app.debug_panel_focused = false;
+    app.ai_visor_focused = false;
 }
 
 /// Handle keys in Normal mode.
@@ -183,6 +184,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.toggle_conversation_history();
                 true
             }
+            // Ctrl+I — toggle AI Visor panel.
+            KeyCode::Char('i') => {
+                unfocus_all_panels(app);
+                app.toggle_ai_visor();
+                true
+            }
             // Ctrl+, — open settings.
             KeyCode::Char(',') => {
                 unfocus_all_panels(app);
@@ -236,6 +243,49 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Enter => {
                 app.goto_reference();
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // When the AI Visor panel is focused, route keys to it.
+    if app.ai_visor_focused {
+        match code {
+            KeyCode::Esc => {
+                app.ai_visor_focused = false;
+            }
+            KeyCode::Char('1') => {
+                app.ai_visor.active_tab = crate::ai_visor::VisorTab::Overview;
+                app.ai_visor.selected = 0;
+            }
+            KeyCode::Char('2') => {
+                app.ai_visor.active_tab = crate::ai_visor::VisorTab::Settings;
+                app.ai_visor.selected = 0;
+            }
+            KeyCode::Char('3') => {
+                app.ai_visor.active_tab = crate::ai_visor::VisorTab::Skills;
+                app.ai_visor.selected = 0;
+            }
+            KeyCode::Char('4') => {
+                app.ai_visor.active_tab = crate::ai_visor::VisorTab::Hooks;
+                app.ai_visor.selected = 0;
+            }
+            KeyCode::Char('5') => {
+                app.ai_visor.active_tab = crate::ai_visor::VisorTab::Plugins;
+                app.ai_visor.selected = 0;
+            }
+            KeyCode::Tab => app.ai_visor.next_tab(),
+            KeyCode::Char('j') | KeyCode::Down => app.ai_visor.select_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.ai_visor.select_up(),
+            KeyCode::Char('e') | KeyCode::Enter => {
+                // Open the selected skill's source file in the editor.
+                if let Some(path) = app.ai_visor.selected_skill_path().map(|p| p.to_path_buf()) {
+                    if let Err(e) = app.open_file(path) {
+                        app.set_status(e);
+                    }
+                    app.ai_visor_focused = false;
+                }
             }
             _ => {}
         }
@@ -2862,6 +2912,10 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "collab-stop" | "collab stop" => {
             app.stop_collab();
+        }
+        // --- AI Visor ---
+        "visor" | "ai-visor" => {
+            app.toggle_ai_visor();
         }
         // --- LSP features ---
         "references" | "ref" => {
