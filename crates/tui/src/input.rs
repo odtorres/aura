@@ -979,6 +979,34 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     }
 
     // g-prefix sequences: gg → top, gd → definition, gt/gT → tab nav.
+    // Handle z-prefix (fold commands).
+    if app.z_pending {
+        app.z_pending = false;
+        match code {
+            KeyCode::Char('a') => {
+                app.toggle_fold();
+                return;
+            }
+            KeyCode::Char('c') => {
+                app.close_fold();
+                return;
+            }
+            KeyCode::Char('o') => {
+                app.open_fold();
+                return;
+            }
+            KeyCode::Char('M') => {
+                app.close_all_folds();
+                return;
+            }
+            KeyCode::Char('R') => {
+                app.open_all_folds();
+                return;
+            }
+            _ => {}
+        }
+    }
+
     if app.g_pending {
         app.g_pending = false;
         match code {
@@ -1370,6 +1398,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Char('g') => {
             // gg → go to top, gd → go to definition.
             app.g_pending = true;
+        }
+        KeyCode::Char('z') => {
+            // za → toggle fold, zc → close, zo → open, zM → close all, zR → open all.
+            app.z_pending = true;
         }
         KeyCode::Char('G') => {
             let tab = app.tab_mut();
@@ -1975,6 +2007,32 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
             }
             app.mark_highlights_dirty();
+
+            // Auto-close brackets: insert matching closing character.
+            if matches!(c, '(' | '{' | '[') {
+                let closing = match c {
+                    '(' => ')',
+                    '{' => '}',
+                    '[' => ']',
+                    _ => unreachable!(),
+                };
+                let tab = app.tab_mut();
+                let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                tab.buffer
+                    .insert(pos, &closing.to_string(), AuthorId::human());
+                // Cursor stays between the brackets (already at correct position).
+            }
+
+            // Auto-close quotes (only if not escaping or inside a string).
+            if matches!(c, '"' | '\'') {
+                let tab = app.tab_mut();
+                let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                // Check if the next char is already the same quote (skip instead).
+                let next_char = tab.buffer.get_char(pos);
+                if next_char != Some(c) {
+                    tab.buffer.insert(pos, &c.to_string(), AuthorId::human());
+                }
+            }
 
             // Auto-dedent: if we just typed a closing bracket on an
             // otherwise-blank line, match the opener's indentation.

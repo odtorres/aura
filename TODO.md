@@ -472,10 +472,10 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [ ] **Next-edit prediction** — Predict WHERE the user will edit next, not just what. Cursor Tab and Copilot NES both do this. Show ghost cursors at predicted locations.
 
 ### 11.2 Editor UX — High Priority
-- [ ] **Code folding** — Fold/unfold code blocks using tree-sitter scope data. `zc` fold, `zo` open, `za` toggle, `zM` fold all, `zR` unfold all. Expected by power users (Helix, Neovim, all GUI editors have it).
-- [ ] **Sticky scroll** — Pin current scope headers (function/class names) at the top of the editor. Trending hard since VS Code introduced it. Feasible in terminal with 1-2 lines.
-- [ ] **Indent guides** — Vertical lines showing scope depth. Simple to implement with tree-sitter scope data. Standard in all modern editors.
-- [ ] **Bracket pair colorization** — Color bracket pairs by nesting depth (rainbow brackets). Built into VS Code, very popular.
+- [x] **Code folding** — Fold/unfold code blocks using tree-sitter scope data. `zc` fold, `zo` open, `za` toggle, `zM` fold all, `zR` unfold all.
+- [x] **Sticky scroll** — Pin current scope headers (function/class names) at the top of the editor.
+- [x] **Indent guides** — Vertical lines showing scope depth at indent boundaries.
+- [x] **Bracket pair colorization** — Color bracket pairs by nesting depth (rainbow brackets, 6-color palette).
 - [ ] **Project-wide search/replace** — Interactive search across all files with preview, filter by glob, and batch replace. (`Ctrl+Shift+F` equivalent.)
 
 ### 11.3 Code Navigation — Medium Priority
@@ -501,7 +501,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [ ] **Shared terminal in collab** — Share terminal output with collaborators.
 
 ### 11.7 Editor Polish — Nice to Have
-- [ ] **Auto-close brackets/quotes** — Automatically insert matching pair when typing `(`, `[`, `{`, `"`, `'`.
+- [x] **Auto-close brackets/quotes** — Automatically insert matching pair when typing `(`, `[`, `{`, `"`, `'`.
 - [ ] **Surround editing** — `cs"'` change surrounding quotes, `ds(` delete surrounding parens, `ysiw"` surround word with quotes. Like vim-surround.
 - [ ] **Word wrap / soft wrap** — Toggle soft line wrapping for long lines.
 - [ ] **Relative line numbers** — Show distance from cursor instead of absolute line numbers. Toggle with `:set relativenumber`.

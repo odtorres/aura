@@ -5,6 +5,28 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.34] - 2026-03-30
+
+### Added
+
+- **Code folding** — Fold/unfold code blocks using tree-sitter AST data.
+  - `za` toggle fold, `zc` close fold, `zo` open fold, `zM` close all, `zR` open all.
+  - Foldable ranges auto-detected for functions, structs, classes, impl blocks, if/for/while, modules.
+  - Gutter shows `▶` for folded lines, `▼` for foldable lines.
+  - Folded lines show `··· (N lines)` indicator.
+- **Sticky scroll** — Pinned scope headers at the top of the editor (up to 3 lines).
+  - Shows enclosing function/class/impl/module names when they scroll out of view.
+  - Dark gray background with thin separator line.
+  - Uses tree-sitter to determine enclosing scopes.
+- **Indent guides** — Vertical `│` lines at indent level boundaries.
+  - Rendered in subtle gray (`Rgb(60,60,60)`) at each indent width boundary.
+  - Respects the file's detected indent style (spaces or tabs).
+- **Rainbow bracket colorization** — Brackets colored by nesting depth using a 6-color palette (Yellow, Magenta, Cyan, Green, Blue, Red).
+  - Applies to `()`, `{}`, `[]` across all languages.
+  - Depth calculated from file start for accuracy.
+- **Auto-close brackets and quotes** — Typing `(`, `{`, `[`, `"`, `'` auto-inserts the matching closing character with cursor positioned between them.
+  - Smart skip: if next character is already the closing pair, doesn't insert duplicate.
+
 ## [0.1.33] - 2026-03-29
 
 ### Added

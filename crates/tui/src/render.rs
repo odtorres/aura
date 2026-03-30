@@ -4026,8 +4026,49 @@ fn draw_editor(
     let gutter_width = 6u16;
     let text_width = area.width.saturating_sub(gutter_width);
 
-    let visible_lines = area.height as usize;
+    let mut visible_lines = area.height as usize;
     let mut lines: Vec<Line> = Vec::with_capacity(visible_lines);
+    let tab = app.tab();
+
+    // --- Sticky scroll: show enclosing scope headers at top ---
+    let mut sticky_height = 0u16;
+    if tab.scroll_row > 0 {
+        if let Some(ref highlighter) = tab.highlighter {
+            let source = tab.buffer.rope().to_string();
+            let scopes = highlighter.enclosing_scopes(tab.scroll_row, &source);
+            let max_sticky = 3.min(visible_lines / 4); // At most 3 lines or 25% of viewport
+            for (_, scope_line) in scopes.iter().take(max_sticky) {
+                let display: String = scope_line
+                    .chars()
+                    .take(area.width.saturating_sub(gutter_width) as usize)
+                    .collect();
+                let sticky_spans = vec![
+                    Span::styled(
+                        "      ", // gutter placeholder
+                        Style::default().bg(Color::Rgb(30, 30, 30)),
+                    ),
+                    Span::styled(
+                        display,
+                        Style::default()
+                            .fg(Color::Rgb(140, 140, 140))
+                            .bg(Color::Rgb(30, 30, 30)),
+                    ),
+                ];
+                lines.push(Line::from(sticky_spans));
+                sticky_height += 1;
+            }
+            if sticky_height > 0 {
+                // Add a thin separator line.
+                let sep: String = "─".repeat(area.width as usize);
+                lines.push(Line::from(Span::styled(
+                    sep,
+                    Style::default().fg(Color::Rgb(50, 50, 50)),
+                )));
+                sticky_height += 1;
+                visible_lines = visible_lines.saturating_sub(sticky_height as usize);
+            }
+        }
+    }
 
     let selection = app.visual_selection_range();
     let theme = &app.theme;
@@ -4037,8 +4078,56 @@ fn draw_editor(
     let show_authorship = app.show_authorship;
     let tab = app.tab();
 
-    for i in 0..visible_lines {
-        let line_idx = tab.scroll_row + i;
+    // Build the list of visible buffer lines, skipping folded ranges.
+    let mut visible_buffer_lines: Vec<usize> = Vec::with_capacity(visible_lines);
+    {
+        let mut buf_line = tab.scroll_row;
+        let total_lines = tab.buffer.line_count();
+        while visible_buffer_lines.len() < visible_lines && buf_line < total_lines {
+            visible_buffer_lines.push(buf_line);
+            // If this line starts a fold, skip the folded body.
+            if let Some(&fold_end) = tab.folded_ranges.get(&buf_line) {
+                buf_line = fold_end + 1;
+            } else {
+                buf_line += 1;
+            }
+        }
+    }
+
+    // Compute bracket depth for rainbow coloring on visible lines.
+    let bracket_depths: std::collections::HashMap<usize, Vec<(usize, u8)>> = {
+        let mut depths = std::collections::HashMap::new();
+        let mut depth: i32 = 0;
+        // Scan from start of file to build accurate depth.
+        let total_lines = tab.buffer.line_count();
+        for line_idx in 0..total_lines {
+            if let Some(rope_line) = tab.buffer.line(line_idx) {
+                let mut line_brackets = Vec::new();
+                for (col, ch) in rope_line.chars().enumerate() {
+                    if ch == '\n' || ch == '\r' {
+                        continue;
+                    }
+                    match ch {
+                        '(' | '{' | '[' => {
+                            line_brackets.push((col, (depth.max(0) as u8) % 6));
+                            depth += 1;
+                        }
+                        ')' | '}' | ']' => {
+                            depth -= 1;
+                            line_brackets.push((col, (depth.max(0) as u8) % 6));
+                        }
+                        _ => {}
+                    }
+                }
+                if !line_brackets.is_empty() && visible_buffer_lines.contains(&line_idx) {
+                    depths.insert(line_idx, line_brackets);
+                }
+            }
+        }
+        depths
+    };
+
+    for &line_idx in &visible_buffer_lines {
         if let Some(rope_line) = tab.buffer.line(line_idx) {
             let line_num = format!("{:>4} ", line_idx + 1);
             let content: String = rope_line
@@ -4047,6 +4136,17 @@ fn draw_editor(
                 .take(text_width as usize)
                 .filter(|c| *c != '\n' && *c != '\r')
                 .collect();
+
+            // If this line is folded, append a fold indicator.
+            let (content, fold_suffix) = if let Some(&fold_end) = tab.folded_ranges.get(&line_idx) {
+                let folded_count = fold_end.saturating_sub(line_idx);
+                let suffix = format!(" ··· ({} lines)", folded_count);
+                let max_content = text_width.saturating_sub(suffix.len() as u16 + 1) as usize;
+                let truncated: String = content.chars().take(max_content).collect();
+                (truncated, Some(suffix))
+            } else {
+                (content, None)
+            };
 
             // Check if this line is the stopped execution line in the debugger.
             let is_debug_stopped = app
@@ -4057,8 +4157,16 @@ fn draw_editor(
                 .is_some_and(|f| tab.buffer.file_path() == Some(f.as_path()))
                 && app.debug_panel.state.stopped_line == Some(line_idx);
 
-            // Gutter marker: breakpoint/debug > diagnostic > conversation > git > authorship.
-            let marker_span = if tab.breakpoints.contains(&line_idx) {
+            // Fold indicator: show ▶ for folded, ▼ for foldable.
+            let is_folded = tab.folded_ranges.contains_key(&line_idx);
+            let is_foldable = tab.foldable_ranges.contains_key(&line_idx);
+
+            // Gutter marker: fold > breakpoint/debug > diagnostic > conversation > git > authorship.
+            let marker_span = if is_folded {
+                Span::styled("▶", Style::default().fg(Color::Yellow))
+            } else if is_foldable {
+                Span::styled("▼", Style::default().fg(Color::DarkGray))
+            } else if tab.breakpoints.contains(&line_idx) {
                 if is_debug_stopped {
                     Span::styled(
                         "⏸",
@@ -4220,9 +4328,64 @@ fn draw_editor(
                     Style::default()
                 };
 
+                // Rainbow bracket colorization.
+                let style = if matches!(*ch, '(' | ')' | '{' | '}' | '[' | ']') {
+                    if let Some(line_brackets) = bracket_depths.get(&line_idx) {
+                        let original_col = visible_start + col;
+                        if let Some(&(_, depth)) =
+                            line_brackets.iter().find(|(c, _)| *c == original_col)
+                        {
+                            let rainbow = [
+                                Color::Yellow,
+                                Color::Magenta,
+                                Color::Cyan,
+                                Color::Green,
+                                Color::Blue,
+                                Color::LightRed,
+                            ];
+                            style.fg(rainbow[depth as usize % 6])
+                        } else {
+                            style
+                        }
+                    } else {
+                        style
+                    }
+                } else {
+                    style
+                };
+
                 // Apply conflict background tint if this line is in a conflict block.
                 let style = if let Some(bg) = conflict_bg {
                     style.bg(bg)
+                } else {
+                    style
+                };
+
+                // Indent guide: replace leading spaces at indent boundaries with │.
+                let display_ch = if *ch == ' ' && col < content.len() {
+                    let indent_width = match tab.indent_style {
+                        crate::tab::IndentStyle::Spaces(w) => w as usize,
+                        crate::tab::IndentStyle::Tabs => 4,
+                    };
+                    let actual_col = visible_start + col;
+                    // Check if all chars before this are spaces (we're in leading whitespace).
+                    let in_leading_ws = content.chars().take(col + 1).all(|c| c == ' ');
+                    if in_leading_ws
+                        && indent_width > 0
+                        && actual_col % indent_width == 0
+                        && actual_col > 0
+                    {
+                        '│'
+                    } else {
+                        *ch
+                    }
+                } else {
+                    *ch
+                };
+
+                // Use indent guide color for guide characters.
+                let style = if display_ch == '│' && *ch == ' ' {
+                    Style::default().fg(Color::Rgb(60, 60, 60))
                 } else {
                     style
                 };
@@ -4236,12 +4399,22 @@ fn draw_editor(
                     }
                     current_style = Some(style);
                 }
-                current_span.push(*ch);
+                current_span.push(display_ch);
             }
             if !current_span.is_empty() {
                 spans.push(Span::styled(
                     current_span,
                     current_style.unwrap_or_default(),
+                ));
+            }
+
+            // Append fold suffix if this line is folded.
+            if let Some(ref suffix) = fold_suffix {
+                spans.push(Span::styled(
+                    suffix.clone(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
                 ));
             }
 

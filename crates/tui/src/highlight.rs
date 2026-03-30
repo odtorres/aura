@@ -328,6 +328,139 @@ impl SyntaxHighlighter {
             .collect()
     }
 
+    /// Compute foldable ranges from the tree-sitter AST.
+    ///
+    /// Returns a map of start_line → end_line for nodes that span 2+ lines
+    /// and are typically foldable (functions, blocks, structs, classes, etc.).
+    pub fn foldable_ranges(&self) -> std::collections::HashMap<usize, usize> {
+        let mut ranges = std::collections::HashMap::new();
+        if let Some(tree) = &self.last_tree {
+            Self::collect_foldable(tree.root_node(), &mut ranges);
+        }
+        ranges
+    }
+
+    /// Recursively collect foldable nodes.
+    fn collect_foldable(
+        node: tree_sitter::Node<'_>,
+        ranges: &mut std::collections::HashMap<usize, usize>,
+    ) {
+        let start = node.start_position().row;
+        let end = node.end_position().row;
+
+        // Only fold nodes that span at least 2 lines.
+        if end > start + 1 && node.is_named() {
+            let kind = node.kind();
+            // Fold common block-like constructs across languages.
+            let foldable = matches!(
+                kind,
+                "function_item"
+                    | "function_definition"
+                    | "function_declaration"
+                    | "method_definition"
+                    | "method_declaration"
+                    | "impl_item"
+                    | "struct_item"
+                    | "struct_declaration"
+                    | "enum_item"
+                    | "enum_declaration"
+                    | "class_declaration"
+                    | "class_definition"
+                    | "class_body"
+                    | "interface_declaration"
+                    | "module"
+                    | "block"
+                    | "statement_block"
+                    | "if_expression"
+                    | "if_statement"
+                    | "for_expression"
+                    | "for_statement"
+                    | "while_expression"
+                    | "while_statement"
+                    | "match_expression"
+                    | "switch_statement"
+                    | "try_statement"
+                    | "array"
+                    | "object"
+                    | "hash"
+                    | "dictionary"
+                    | "trait_item"
+                    | "mod_item"
+            );
+            if foldable {
+                ranges.entry(start).or_insert(end);
+            }
+        }
+
+        // Recurse into children.
+        let child_count = node.child_count();
+        for i in 0..child_count {
+            if let Some(child) = node.child(i) {
+                Self::collect_foldable(child, ranges);
+            }
+        }
+    }
+
+    /// Find the enclosing scope node for a given line (for sticky scroll).
+    ///
+    /// Returns a vec of (start_line, first_line_text) for ancestor nodes
+    /// that are scope-like (functions, classes, impls) and start above the given line.
+    pub fn enclosing_scopes(&self, line: usize, source: &str) -> Vec<(usize, String)> {
+        let tree = match &self.last_tree {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+
+        let mut scopes = Vec::new();
+        let node = tree.root_node();
+
+        // Walk down the tree to find the deepest named descendant at this line.
+        let byte_offset = source
+            .lines()
+            .take(line)
+            .map(|l| l.len() + 1) // +1 for newline
+            .sum::<usize>();
+
+        if let Some(leaf) = node.named_descendant_for_byte_range(byte_offset, byte_offset) {
+            let mut current = Some(leaf);
+            while let Some(n) = current {
+                let kind = n.kind();
+                let start_line = n.start_position().row;
+                let end_line = n.end_position().row;
+
+                if start_line < line
+                    && end_line >= line
+                    && end_line > start_line + 1
+                    && n.is_named()
+                {
+                    let is_scope = matches!(
+                        kind,
+                        "function_item"
+                            | "function_definition"
+                            | "function_declaration"
+                            | "method_definition"
+                            | "impl_item"
+                            | "struct_item"
+                            | "class_declaration"
+                            | "class_definition"
+                            | "trait_item"
+                            | "mod_item"
+                            | "module"
+                    );
+                    if is_scope {
+                        if let Some(first_line) = source.lines().nth(start_line) {
+                            scopes.push((start_line, first_line.to_string()));
+                        }
+                    }
+                }
+                current = n.parent();
+            }
+        }
+
+        scopes.reverse(); // Outermost first.
+        scopes
+    }
+
     /// Get the detected language.
     pub fn language(&self) -> Language {
         self.language

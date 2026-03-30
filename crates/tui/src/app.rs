@@ -258,6 +258,8 @@ pub struct App {
     ai_receiver: Option<mpsc::Receiver<AiEvent>>,
     /// Whether `g` was pressed (waiting for second key: `g`→top, `d`→definition).
     pub g_pending: bool,
+    /// Whether the z-prefix key has been pressed (fold commands).
+    pub z_pending: bool,
     /// Conversation storage (None if DB could not be opened).
     pub(crate) conversation_store: Option<ConversationStore>,
     /// Active conversation ID for current intent/review cycle.
@@ -649,6 +651,7 @@ impl App {
             ai_client,
             ai_receiver: None,
             g_pending: false,
+            z_pending: false,
             conversation_store,
             active_conversation: None,
             active_intent_id: None,
@@ -1533,6 +1536,7 @@ impl App {
     pub fn refresh_highlights(&mut self) {
         let theme = self.theme.clone();
         self.tab_mut().refresh_highlights(&theme);
+        self.refresh_foldable_ranges();
     }
 
     /// Rebuild the semantic index from the current buffer.
@@ -1726,6 +1730,64 @@ impl App {
         self.tab_mut().mark_highlights_dirty();
         self.undo_tree = None;
         self.set_status(format!("Restored to history position {target_pos}"));
+    }
+
+    // ── Code Folding ─────────────────────────────────────────────
+
+    /// Refresh foldable ranges from tree-sitter.
+    pub fn refresh_foldable_ranges(&mut self) {
+        let ranges = self
+            .tab()
+            .highlighter
+            .as_ref()
+            .map(|h| h.foldable_ranges())
+            .unwrap_or_default();
+        self.tab_mut().foldable_ranges = ranges;
+    }
+
+    /// Toggle fold at the cursor line.
+    pub fn toggle_fold(&mut self) {
+        let line = self.tab().cursor.row;
+        if self.tab().folded_ranges.contains_key(&line) {
+            self.tab_mut().folded_ranges.remove(&line);
+        } else if let Some(&end) = self.tab().foldable_ranges.get(&line) {
+            self.tab_mut().folded_ranges.insert(line, end);
+        }
+    }
+
+    /// Close fold at cursor line.
+    pub fn close_fold(&mut self) {
+        let line = self.tab().cursor.row;
+        if let Some(&end) = self.tab().foldable_ranges.get(&line) {
+            self.tab_mut().folded_ranges.insert(line, end);
+        }
+    }
+
+    /// Open fold at cursor line.
+    pub fn open_fold(&mut self) {
+        let line = self.tab().cursor.row;
+        self.tab_mut().folded_ranges.remove(&line);
+    }
+
+    /// Close all folds.
+    pub fn close_all_folds(&mut self) {
+        let ranges = self.tab().foldable_ranges.clone();
+        self.tab_mut().folded_ranges = ranges;
+    }
+
+    /// Open all folds.
+    pub fn open_all_folds(&mut self) {
+        self.tab_mut().folded_ranges.clear();
+    }
+
+    /// Check if a line is inside a folded range (not the fold start itself).
+    pub fn is_line_folded(&self, line: usize) -> bool {
+        for (&start, &end) in &self.tab().folded_ranges {
+            if line > start && line <= end {
+                return true;
+            }
+        }
+        false
     }
 
     /// Detect inline conflict markers in the current buffer.
