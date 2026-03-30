@@ -355,12 +355,14 @@ fn summarize_tool_input(name: &str, input: &serde_json::Value) -> String {
     }
 }
 
-/// Truncate a string to max chars.
+/// Truncate a string to max characters (char-boundary safe).
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    let char_count = s.chars().count();
+    if char_count <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max.min(s.len())])
+        let truncated: String = s.chars().take(max).collect();
+        format!("{truncated}...")
     }
 }
 
