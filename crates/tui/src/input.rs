@@ -2913,6 +2913,19 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- Inline conflict resolution ---
+        "accept-current" | "ac" => {
+            app.resolve_inline_conflict(crate::merge_view::Resolution::AcceptCurrent);
+        }
+        "accept-incoming" | "ai" => {
+            app.resolve_inline_conflict(crate::merge_view::Resolution::AcceptIncoming);
+        }
+        "accept-both" | "ab" => {
+            app.resolve_inline_conflict(crate::merge_view::Resolution::AcceptBothCurrentFirst);
+        }
+        "accept-both-incoming" | "abi" => {
+            app.resolve_inline_conflict(crate::merge_view::Resolution::AcceptBothIncomingFirst);
+        }
         // --- AI Visor ---
         "visor" | "ai-visor" => {
             app.toggle_ai_visor();

@@ -257,6 +257,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             editor_area.height.saturating_sub(2),
         );
 
+        // Render inline conflict action hints.
+        if !app.inline_conflicts.is_empty() {
+            draw_conflict_actions(frame, app, editor_inner_for_popups);
+        }
+
         // Render ghost suggestion if present.
         if let Some(suggestion) = app.current_ghost_suggestion() {
             draw_ghost_text(frame, app, editor_inner_for_popups, suggestion);
@@ -4127,6 +4132,28 @@ fn draw_editor(
             let mut current_span = String::new();
             let mut current_style: Option<Style> = None;
 
+            // Check if this line is in an inline conflict block.
+            let conflict_bg = app.inline_conflicts.iter().find_map(|c| {
+                if line_idx == c.marker_start {
+                    // <<<<<<< line — show action hints
+                    Some(Color::Rgb(80, 60, 0)) // bright yellow-ish for marker
+                } else if line_idx > c.marker_start && line_idx < c.separator {
+                    // "ours" (current) section — green tint
+                    Some(Color::Rgb(20, 50, 20))
+                } else if line_idx == c.separator {
+                    // ======= line
+                    Some(Color::Rgb(60, 60, 60))
+                } else if line_idx > c.separator && line_idx < c.marker_end {
+                    // "theirs" (incoming) section — blue tint
+                    Some(Color::Rgb(20, 20, 60))
+                } else if line_idx == c.marker_end {
+                    // >>>>>>> line
+                    Some(Color::Rgb(80, 60, 0))
+                } else {
+                    None
+                }
+            });
+
             // Get block selection rectangle if in VisualBlock mode.
             let block_rect = app.visual_block_rect();
 
@@ -4191,6 +4218,13 @@ fn draw_editor(
                     }
                 } else {
                     Style::default()
+                };
+
+                // Apply conflict background tint if this line is in a conflict block.
+                let style = if let Some(bg) = conflict_bg {
+                    style.bg(bg)
+                } else {
+                    style
                 };
 
                 if current_style != Some(style) {
@@ -4926,6 +4960,62 @@ fn draw_conversation_panel(frame: &mut Frame, editor_area: Rect, panel: &Convers
 }
 
 /// Draw ghost text overlay for a speculative suggestion.
+/// Draw inline conflict action hints on <<<<<<< marker lines.
+fn draw_conflict_actions(frame: &mut Frame, app: &App, editor_area: Rect) {
+    let gutter_w = 6u16;
+    let scroll_row = app.tab().scroll_row;
+    let cursor_row = app.tab().cursor.row;
+
+    for conflict in &app.inline_conflicts {
+        // Check if the <<<<<<< line is visible.
+        let marker_line = conflict.marker_start;
+        if marker_line < scroll_row {
+            continue;
+        }
+        let screen_row = (marker_line - scroll_row) as u16;
+        if screen_row >= editor_area.height {
+            continue;
+        }
+
+        // Check if cursor is in this conflict block.
+        let cursor_in_block =
+            cursor_row >= conflict.marker_start && cursor_row <= conflict.marker_end;
+
+        // Render action hint on the marker line.
+        let hint = if cursor_in_block {
+            "Accept: [1]Current [2]Incoming [3]Both(C+I) [4]Both(I+C)"
+        } else {
+            "Accept Current | Accept Incoming | Accept Both"
+        };
+
+        let hint_style = Style::default()
+            .fg(Color::Rgb(150, 150, 100))
+            .add_modifier(Modifier::ITALIC);
+
+        let x = editor_area.x + gutter_w;
+        let y = editor_area.y + screen_row;
+        let max_w = editor_area.width.saturating_sub(gutter_w);
+
+        // Find end of the <<<<<<< text to position hint after it.
+        let marker_text_len = app
+            .tab()
+            .buffer
+            .line_text(marker_line)
+            .map(|t| t.trim_end().len())
+            .unwrap_or(0) as u16;
+        let hint_x = x + marker_text_len.min(max_w) + 1;
+
+        if hint_x < editor_area.x + editor_area.width {
+            let available = (editor_area.x + editor_area.width).saturating_sub(hint_x);
+            let display: String = hint.chars().take(available as usize).collect();
+            frame.render_widget(
+                Paragraph::new(display).style(hint_style),
+                Rect::new(hint_x, y, available, 1),
+            );
+        }
+    }
+}
+
 fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: &GhostSuggestion) {
     let ghost_style = Style::default()
         .fg(app.theme.ghost)

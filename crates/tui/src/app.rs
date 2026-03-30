@@ -154,6 +154,16 @@ pub struct ConversationPanel {
     pub scroll: usize,
 }
 
+/// An inline conflict detected in the buffer (for in-editor resolution).
+pub struct InlineConflict {
+    /// Line number of the `<<<<<<<` marker (0-indexed).
+    pub marker_start: usize,
+    /// Line number of the `=======` separator.
+    pub separator: usize,
+    /// Line number of the `>>>>>>>` marker.
+    pub marker_end: usize,
+}
+
 /// Floating panel showing all references to a symbol.
 pub struct ReferencesPanel {
     /// All reference locations.
@@ -338,6 +348,8 @@ pub struct App {
     pub ai_visor: crate::ai_visor::AiVisorPanel,
     /// Whether the AI Visor panel has keyboard focus.
     pub ai_visor_focused: bool,
+    /// Inline conflict markers detected in the current buffer.
+    pub inline_conflicts: Vec<InlineConflict>,
     /// Whether rename mode is active (typing new name in command bar).
     pub rename_active: bool,
     /// The rename input text.
@@ -684,6 +696,7 @@ impl App {
             references_panel: None,
             undo_tree: None,
             ai_visor: crate::ai_visor::AiVisorPanel::new(40),
+            inline_conflicts: Vec::new(),
             ai_visor_focused: false,
             rename_active: false,
             rename_input: String::new(),
@@ -1713,6 +1726,146 @@ impl App {
         self.tab_mut().mark_highlights_dirty();
         self.undo_tree = None;
         self.set_status(format!("Restored to history position {target_pos}"));
+    }
+
+    /// Detect inline conflict markers in the current buffer.
+    pub fn detect_inline_conflicts(&mut self) {
+        self.inline_conflicts.clear();
+        let line_count = self.tab().buffer.line_count();
+        let mut i = 0;
+        while i < line_count {
+            if let Some(line) = self.tab().buffer.line_text(i) {
+                if line.starts_with("<<<<<<<") {
+                    // Find ======= and >>>>>>>
+                    let mut separator = None;
+                    let mut end = None;
+                    let mut j = i + 1;
+                    while j < line_count {
+                        if let Some(l) = self.tab().buffer.line_text(j) {
+                            if l.starts_with("=======") && separator.is_none() {
+                                separator = Some(j);
+                            } else if l.starts_with(">>>>>>>") {
+                                end = Some(j);
+                                break;
+                            }
+                        }
+                        j += 1;
+                    }
+                    if let (Some(sep), Some(marker_end)) = (separator, end) {
+                        self.inline_conflicts.push(InlineConflict {
+                            marker_start: i,
+                            separator: sep,
+                            marker_end,
+                        });
+                        i = marker_end + 1;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    /// Resolve an inline conflict at the cursor position.
+    pub fn resolve_inline_conflict(&mut self, resolution: crate::merge_view::Resolution) {
+        use aura_core::AuthorId;
+
+        // Find which conflict the cursor is in.
+        let cursor_line = self.tab().cursor.row;
+        let conflict_idx = self
+            .inline_conflicts
+            .iter()
+            .position(|c| cursor_line >= c.marker_start && cursor_line <= c.marker_end);
+        let conflict_idx = match conflict_idx {
+            Some(idx) => idx,
+            None => {
+                self.set_status("Cursor is not on a conflict block");
+                return;
+            }
+        };
+
+        let conflict = &self.inline_conflicts[conflict_idx];
+        let marker_start = conflict.marker_start;
+        let separator = conflict.separator;
+        let marker_end = conflict.marker_end;
+
+        // Extract ours and theirs lines.
+        let mut ours = Vec::new();
+        for line_idx in (marker_start + 1)..separator {
+            if let Some(text) = self.tab().buffer.line_text(line_idx) {
+                ours.push(text.trim_end_matches('\n').to_string());
+            }
+        }
+        let mut theirs = Vec::new();
+        for line_idx in (separator + 1)..marker_end {
+            if let Some(text) = self.tab().buffer.line_text(line_idx) {
+                theirs.push(text.trim_end_matches('\n').to_string());
+            }
+        }
+
+        // Build replacement text based on resolution.
+        let replacement = match resolution {
+            crate::merge_view::Resolution::AcceptCurrent => ours.join("\n"),
+            crate::merge_view::Resolution::AcceptIncoming => theirs.join("\n"),
+            crate::merge_view::Resolution::AcceptBothCurrentFirst => {
+                let mut lines = ours;
+                lines.extend(theirs);
+                lines.join("\n")
+            }
+            crate::merge_view::Resolution::AcceptBothIncomingFirst => {
+                let mut lines = theirs;
+                lines.extend(ours);
+                lines.join("\n")
+            }
+            _ => return,
+        };
+
+        // Calculate the char range to delete (from start of marker_start line to end of marker_end line).
+        let rope = self.tab().buffer.rope();
+        let start_char = rope.line_to_char(marker_start);
+        let end_char = if marker_end + 1 < rope.len_lines() {
+            rope.line_to_char(marker_end + 1)
+        } else {
+            rope.len_chars()
+        };
+
+        // Delete the conflict block and insert the replacement.
+        let replacement_with_newline = if replacement.is_empty() {
+            String::new()
+        } else if marker_end + 1 < self.tab().buffer.line_count() {
+            format!("{}\n", replacement)
+        } else {
+            replacement
+        };
+
+        self.tab_mut()
+            .buffer
+            .delete(start_char, end_char, AuthorId::Human);
+        if !replacement_with_newline.is_empty() {
+            self.tab_mut()
+                .buffer
+                .insert(start_char, &replacement_with_newline, AuthorId::Human);
+        }
+
+        // Move cursor to the start of where the conflict was.
+        self.tab_mut().cursor.row = marker_start;
+        self.tab_mut().cursor.col = 0;
+        self.tab_mut().mark_highlights_dirty();
+
+        // Re-detect remaining conflicts.
+        self.detect_inline_conflicts();
+
+        let remaining = self.inline_conflicts.len();
+        let label = match resolution {
+            crate::merge_view::Resolution::AcceptCurrent => "current",
+            crate::merge_view::Resolution::AcceptIncoming => "incoming",
+            crate::merge_view::Resolution::AcceptBothCurrentFirst => "both (current first)",
+            crate::merge_view::Resolution::AcceptBothIncomingFirst => "both (incoming first)",
+            _ => "resolved",
+        };
+        self.set_status(format!(
+            "Accepted {label} — {remaining} conflict(s) remaining"
+        ));
     }
 
     /// Toggle the AI Visor panel.
@@ -5256,6 +5409,8 @@ impl App {
         } else {
             self.set_status(format!("Switched to {}", path.display()));
         }
+        // Detect inline conflict markers.
+        self.detect_inline_conflicts();
         Ok(())
     }
 
