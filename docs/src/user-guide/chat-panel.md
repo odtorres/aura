@@ -53,6 +53,27 @@ The chat panel has access to the same tools as the MCP server:
 | `get_diagnostics` | Get LSP diagnostics |
 | `get_selection` | Get the current visual selection |
 
+## @-Mentions
+
+Type `@` in the chat input to reference files and context with an autocomplete dropdown:
+
+| Mention | Description |
+|---------|-------------|
+| `@file.rs` | Includes the file's full content in AI context |
+| `@selection` | Includes the current editor selection |
+| `@buffer` | Includes the current buffer content |
+| `@errors` | Includes LSP diagnostics (errors/warnings) |
+
+### Usage
+
+1. Type `@` — autocomplete dropdown appears
+2. Continue typing to fuzzy-filter: `@main` shows `main.rs`, `main.py`, etc.
+3. Navigate with `Up`/`Down`
+4. Press `Enter` or `Tab` to insert the mention
+5. Multiple @-mentions per message are supported
+
+When the message is sent, each @-mention is expanded and injected as a labeled section in the AI context, so the AI can see the exact file content you're referencing.
+
 ## Keybindings (Chat Panel Focused)
 
 | Key | Action |

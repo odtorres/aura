@@ -93,6 +93,41 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `q` | Stop recording macro |
 | `@{a-z}` | Play back macro from register |
 
+### Surround Editing
+
+| Key | Action |
+|-----|--------|
+| `cs{old}{new}` | Change surrounding: `cs"'` changes `"hi"` to `'hi'` |
+| `ds{char}` | Delete surrounding: `ds(` removes parens |
+| `ys{motion}{char}` | Add surrounding: `ysiw"` wraps word in quotes |
+
+### Marks / Bookmarks
+
+| Key | Action |
+|-----|--------|
+| `m{a-z}` | Set mark at cursor position |
+| `'{a-z}` | Jump to mark |
+
+### Code Folding
+
+| Key | Action |
+|-----|--------|
+| `za` | Toggle fold at cursor |
+| `zc` | Close fold at cursor |
+| `zo` | Open fold at cursor |
+| `zM` | Close all folds |
+| `zR` | Open all folds |
+
+### LSP Navigation
+
+| Key | Action |
+|-----|--------|
+| `gd` | Go to definition |
+| `gr` | Find all references |
+| `gn` | Rename symbol |
+| `K` | Show hover info |
+| `F2` | Rename symbol (alternative) |
+
 ### Snippets (Insert mode)
 
 | Key | Action |
@@ -227,6 +262,24 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `:host` | | Start hosting a collab session |
 | `:join <addr:port>` | | Join a collab session |
 | `:collab-stop` | | End the collab session |
+| `:agent <task>` | | Start autonomous AI agent |
+| `:agent -n <N> <task>` | | Agent with custom iteration limit |
+| `:agent stop` | | Stop the running agent |
+| `:search <query>` | `:grep` | Project-wide search |
+| `:visor` | | Open AI Visor panel |
+| `:merge` | | Open merge conflict editor |
+| `:references` | `:ref` | Find all references |
+| `:rename <name>` | | Rename symbol |
+| `:accept-current` | `:ac` | Resolve conflict: keep current |
+| `:accept-incoming` | `:ai` | Resolve conflict: keep incoming |
+| `:accept-both` | `:ab` | Resolve conflict: keep both |
+| `:debug` | `:db` | Start debug session |
+| `:breakpoint` | `:bp` | Toggle breakpoint |
+| `:marks` | | List all marks |
+| `:set rnu` | | Enable relative line numbers |
+| `:set nornu` | | Disable relative line numbers |
+| `:set wrap` | | Enable word wrap |
+| `:set nowrap` | | Disable word wrap |
 
 ## Review Mode
 

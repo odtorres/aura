@@ -118,7 +118,69 @@ For free-form conversation with the AI (rather than targeted code edits), use th
 - Select code in Visual mode to include it as context automatically
 - The AI can execute tools (read/edit buffer, get diagnostics) with your approval
 
+### @-Mentions
+
+Type `@` in the chat panel to reference files and context:
+
+- `@file.rs` — includes the file's full content in AI context
+- `@selection` — includes the current editor selection
+- `@buffer` — includes the current buffer content
+- `@errors` — includes LSP diagnostics (errors/warnings)
+
+An autocomplete dropdown appears as you type, fuzzy-filtered by filename. Navigate with Up/Down, Enter/Tab to select. Multiple @-mentions per message are supported.
+
 See [Chat Panel](chat-panel.md) for the full reference.
+
+## Autonomous Agent Mode
+
+Agent mode lets the AI work autonomously — planning, editing files, running commands, checking results, and fixing errors — without requiring your approval at each step.
+
+### Starting an Agent
+
+```
+:agent fix the compile error in main.rs
+```
+
+Or with a custom iteration limit:
+
+```
+:agent -n 100 add comprehensive tests for the parser module
+```
+
+### How It Works
+
+1. The AI receives an enhanced system prompt instructing autonomous work
+2. ALL tools are auto-approved (reads, edits, commands) — no Y/N prompts
+3. The AI loops: analyze → edit → run → check → fix
+4. Stops when: task is complete, iteration limit reached, or you press `Esc`
+
+### Controls
+
+| Action | Command |
+|--------|---------|
+| Start agent | `:agent <task>` |
+| Custom limit | `:agent -n 100 <task>` |
+| Stop agent | `Esc` or `:agent stop` |
+
+### Status Bar
+
+While the agent is running, the status bar shows:
+
+```
+AGENT [3/50] 2f 1c 12s
+```
+
+- `[3/50]` — iteration 3 of 50 max
+- `2f` — 2 files changed
+- `1c` — 1 command run
+- `12s` — elapsed time
+
+### Safety
+
+- Default limit: 50 iterations (configurable with `-n`)
+- All edits tracked in undo history — fully reversible with `u`
+- Recommend using `:experiment <branch>` first to work on a separate branch
+- Press `Esc` at any time to stop the agent immediately
 
 ## Conversation History
 

@@ -5,6 +5,16 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.40] - 2026-03-30
+
+### Improved
+
+- **Documentation overhaul** — Comprehensive docs for all features added since v0.1.29:
+  - AI Features page: @-mentions, autonomous agent mode with full usage guide
+  - Chat Panel page: @-mention autocomplete reference
+  - Keybindings page: surround editing, marks, code folding, LSP navigation, 20+ new commands
+  - All command-mode entries updated (`:agent`, `:search`, `:visor`, `:merge`, `:ref`, `:rename`, `:marks`, `:set rnu`, `:set wrap`, etc.)
+
 ## [0.1.39] - 2026-03-30
 
 ### Added
