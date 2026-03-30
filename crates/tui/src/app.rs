@@ -5033,6 +5033,7 @@ impl App {
         }
 
         // Ensure we have a chat conversation in the database.
+        self.ensure_conversation_store();
         self.ensure_chat_conversation();
 
         // Add user message to panel.
@@ -5110,6 +5111,10 @@ impl App {
                 }
                 Ok(AiEvent::Done(full_text)) => {
                     // Persist AI response.
+                    self.ensure_conversation_store();
+                    if self.chat_panel.conversation_id.is_none() {
+                        self.ensure_chat_conversation();
+                    }
                     if let (Some(store), Some(conv_id)) =
                         (&self.conversation_store, &self.chat_panel.conversation_id)
                     {
@@ -5125,6 +5130,8 @@ impl App {
                     self.chat_panel.finish_streaming();
                     self.chat_panel.in_tool_loop = false;
                     self.chat_receiver = None;
+                    // Refresh history so new interactions appear in the AI History panel.
+                    self.refresh_conversation_history();
                     return;
                 }
                 Ok(AiEvent::ToolUse { id, name, input }) => {
