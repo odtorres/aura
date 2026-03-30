@@ -10,28 +10,70 @@ use tree_sitter::Parser;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
 /// Recognised highlight group names, mapped to terminal colours.
+///
+/// This list covers the standard tree-sitter highlight groups used across
+/// all supported language grammars. The order must match the index used
+/// in `highlight_color()`.
 const HIGHLIGHT_NAMES: &[&str] = &[
     "attribute",
+    "boolean",
     "comment",
+    "conditional",
     "constant",
     "constant.builtin",
+    "constant.macro",
     "constructor",
+    "define",
+    "escape",
+    "exception",
+    "field",
+    "float",
     "function",
     "function.builtin",
+    "function.call",
     "function.macro",
+    "function.method",
+    "function.method.call",
+    "include",
     "keyword",
+    "keyword.function",
+    "keyword.operator",
+    "keyword.return",
     "label",
+    "method",
+    "method.call",
+    "namespace",
     "number",
     "operator",
+    "parameter",
+    "preproc",
     "property",
     "punctuation",
     "punctuation.bracket",
     "punctuation.delimiter",
+    "punctuation.special",
+    "repeat",
+    "storageclass",
     "string",
+    "string.escape",
+    "string.regex",
     "string.special",
+    "symbol",
     "tag",
+    "tag.attribute",
+    "tag.delimiter",
+    "text",
+    "text.emphasis",
+    "text.literal",
+    "text.reference",
+    "text.strong",
+    "text.title",
+    "text.underline",
+    "text.uri",
     "type",
     "type.builtin",
+    "type.definition",
+    "type.qualifier",
     "variable",
     "variable.builtin",
     "variable.parameter",
@@ -41,26 +83,98 @@ const HIGHLIGHT_NAMES: &[&str] = &[
 /// available and falling back to built-in defaults otherwise.
 fn highlight_color(idx: usize, theme: Option<&Theme>) -> Color {
     match HIGHLIGHT_NAMES.get(idx) {
+        // Comments — subtle gray.
         Some(&"comment") => theme
             .map(|t| t.comment)
             .unwrap_or(Color::Rgb(100, 100, 100)),
-        Some(&"keyword") => theme.map(|t| t.keyword).unwrap_or(Color::Magenta),
-        Some(&"string") | Some(&"string.special") => {
+
+        // Keywords — magenta/purple family.
+        Some(
+            &"keyword" | &"keyword.function" | &"keyword.operator" | &"keyword.return"
+            | &"conditional" | &"repeat" | &"exception" | &"include" | &"define" | &"preproc"
+            | &"storageclass",
+        ) => theme.map(|t| t.keyword).unwrap_or(Color::Magenta),
+
+        // Strings — green family.
+        Some(&"string" | &"string.special" | &"string.regex" | &"text.literal") => {
             theme.map(|t| t.string).unwrap_or(Color::Green)
         }
-        Some(&"number") | Some(&"constant" | &"constant.builtin") => {
-            theme.map(|t| t.number).unwrap_or(Color::Yellow)
+
+        // Escape sequences inside strings — orange/yellow.
+        Some(&"string.escape" | &"escape") => Color::Rgb(220, 150, 50),
+
+        // Numbers and constants — yellow/orange.
+        Some(
+            &"number" | &"float" | &"boolean" | &"constant" | &"constant.builtin"
+            | &"constant.macro",
+        ) => theme.map(|t| t.number).unwrap_or(Color::Yellow),
+
+        // Functions — blue family.
+        Some(
+            &"function"
+            | &"function.builtin"
+            | &"function.call"
+            | &"function.macro"
+            | &"function.method"
+            | &"function.method.call"
+            | &"method"
+            | &"method.call",
+        ) => theme.map(|t| t.function).unwrap_or(Color::Blue),
+
+        // Types — cyan family.
+        Some(&"type" | &"type.builtin" | &"type.definition" | &"type.qualifier") => {
+            theme.map(|t| t.type_name).unwrap_or(Color::Cyan)
         }
-        Some(&"function" | &"function.builtin" | &"function.macro") => {
-            theme.map(|t| t.function).unwrap_or(Color::Blue)
-        }
-        Some(&"type" | &"type.builtin") => theme.map(|t| t.type_name).unwrap_or(Color::Cyan),
+
+        // Operators — light red.
         Some(&"operator") => Color::LightRed,
-        Some(&"variable.builtin" | &"variable.parameter") => Color::LightYellow,
-        Some(&"attribute") => Color::LightCyan,
+
+        // Variables — warm white / light foreground.
+        Some(&"variable") => Color::Rgb(200, 200, 220),
+
+        // Built-in variables (self, this, etc.) — light yellow.
+        Some(&"variable.builtin") => Color::LightYellow,
+
+        // Parameters — soft orange.
+        Some(&"variable.parameter" | &"parameter") => Color::Rgb(220, 180, 120),
+
+        // Properties / fields — light green.
+        Some(&"property" | &"field") => Color::LightGreen,
+
+        // Constructors — light blue.
         Some(&"constructor") => Color::LightBlue,
-        Some(&"property") => Color::LightGreen,
-        Some(&"punctuation" | &"punctuation.bracket" | &"punctuation.delimiter") => Color::Reset,
+
+        // Attributes / decorators — light cyan.
+        Some(&"attribute" | &"tag.attribute") => Color::LightCyan,
+
+        // Tags (HTML/XML) — red/orange.
+        Some(&"tag") => Color::Rgb(230, 100, 100),
+
+        // Tag delimiters (<, >, </>) — dimmer red.
+        Some(&"tag.delimiter") => Color::Rgb(150, 80, 80),
+
+        // Namespace / module — light magenta.
+        Some(&"namespace") => Color::Rgb(180, 140, 220),
+
+        // Labels — yellow.
+        Some(&"label" | &"symbol") => Color::Yellow,
+
+        // Punctuation — subtle gray (not invisible white).
+        Some(
+            &"punctuation"
+            | &"punctuation.bracket"
+            | &"punctuation.delimiter"
+            | &"punctuation.special",
+        ) => Color::Rgb(150, 150, 150),
+
+        // Text / documentation.
+        Some(&"text") => Color::Reset,
+        Some(&"text.emphasis") => Color::Rgb(200, 200, 150),
+        Some(&"text.strong") => Color::Rgb(230, 230, 200),
+        Some(&"text.title") => Color::Rgb(100, 180, 255),
+        Some(&"text.uri" | &"text.underline") => Color::Rgb(100, 150, 255),
+        Some(&"text.reference") => Color::Cyan,
+
         _ => Color::Reset,
     }
 }
