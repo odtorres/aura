@@ -317,6 +317,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_undo_tree_modal(frame, app, area);
         }
 
+        // Render document outline if visible.
+        if app.outline_visible {
+            draw_outline_modal(frame, app, area);
+        }
+
         // Render branch picker if visible.
         if app.branch_picker.visible {
             draw_branch_picker(frame, &app.branch_picker, area);
@@ -3293,6 +3298,87 @@ fn draw_conversation_detail(
 
 /// Draw the git graph modal (near full-screen with commit list + detail panel).
 /// Draw the undo tree visualization modal (two-panel: list + detail).
+/// Draw the document outline modal (symbol list for current file).
+fn draw_outline_modal(frame: &mut Frame, app: &App, area: Rect) {
+    let width = area.width.saturating_sub(6).min(80);
+    let height = area.height.saturating_sub(4).min(30);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    let count = app.outline_filtered.len();
+    let title = format!(" Document Outline ({count} symbols) ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(title);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    if inner.height < 3 {
+        return;
+    }
+
+    // Query input.
+    let query_text = format!("> {}", app.outline_query);
+    frame.render_widget(
+        Paragraph::new(query_text).style(Style::default().fg(Color::Yellow)),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    // Results list.
+    let list_y = inner.y + 1;
+    let list_h = inner.height.saturating_sub(1) as usize;
+    let selected = app.outline_selected;
+    let scroll = if selected >= list_h {
+        selected.saturating_sub(list_h / 2)
+    } else {
+        0
+    };
+
+    for (vis_idx, &item_idx) in app
+        .outline_filtered
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_h)
+    {
+        let row_y = list_y + (vis_idx - scroll) as u16;
+        if row_y >= inner.y + inner.height {
+            break;
+        }
+        let is_selected = vis_idx == selected;
+        if let Some((line, label)) = app.outline_items.get(item_idx) {
+            let prefix = format!("{:>4}: ", line + 1);
+            let display: String = label
+                .chars()
+                .take((inner.width as usize).saturating_sub(7))
+                .collect();
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            frame.render_widget(
+                Paragraph::new(format!("{prefix}{display}")).style(style),
+                Rect::new(inner.x, row_y, inner.width, 1),
+            );
+        }
+    }
+
+    if app.outline_filtered.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  No symbols found").style(Style::default().fg(Color::DarkGray)),
+            Rect::new(inner.x, list_y, inner.width, 1),
+        );
+    }
+}
+
 fn draw_undo_tree_modal(frame: &mut Frame, app: &App, area: Rect) {
     let modal = match &app.undo_tree {
         Some(m) => m,
@@ -4301,6 +4387,40 @@ fn draw_editor(
                 sticky_height += 1;
                 visible_lines = visible_lines.saturating_sub(sticky_height as usize);
             }
+        }
+    }
+
+    // --- Breadcrumbs: show scope path at cursor ---
+    if let Some(ref highlighter) = tab.highlighter {
+        let source = tab.buffer.rope().to_string();
+        let scopes = highlighter.enclosing_scopes(tab.cursor.row, &source);
+        if !scopes.is_empty() {
+            let file_name = tab.file_name();
+            let mut crumb_spans = vec![
+                Span::styled("      ", Style::default().fg(Color::DarkGray)), // gutter placeholder
+                Span::styled(file_name.to_string(), Style::default().fg(Color::Cyan)),
+            ];
+            for (_, scope_text) in &scopes {
+                // Extract just the signature (first meaningful part).
+                let label: String = scope_text
+                    .trim()
+                    .chars()
+                    .take(40)
+                    .collect::<String>()
+                    .replace('{', "")
+                    .trim()
+                    .to_string();
+                crumb_spans.push(Span::styled(
+                    " > ",
+                    Style::default().fg(Color::Rgb(80, 80, 80)),
+                ));
+                crumb_spans.push(Span::styled(
+                    label,
+                    Style::default().fg(Color::Rgb(180, 180, 180)),
+                ));
+            }
+            lines.push(Line::from(crumb_spans));
+            visible_lines = visible_lines.saturating_sub(1);
         }
     }
 

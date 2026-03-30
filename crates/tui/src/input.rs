@@ -198,6 +198,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.toggle_conversation_history();
                 true
             }
+            // Ctrl+O — open document outline.
+            KeyCode::Char('o') => {
+                unfocus_all_panels(app);
+                app.open_outline();
+                true
+            }
             // Ctrl+F — open project-wide search.
             KeyCode::Char('f') => {
                 unfocus_all_panels(app);
@@ -263,6 +269,39 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Enter => {
                 app.goto_reference();
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // When the document outline is visible, route keys to it.
+    if app.outline_visible {
+        match code {
+            KeyCode::Esc => {
+                app.outline_visible = false;
+            }
+            KeyCode::Enter => {
+                app.goto_outline_selection();
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = app.outline_filtered.len().saturating_sub(1);
+                if app.outline_selected < max {
+                    app.outline_selected += 1;
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if app.outline_selected > 0 {
+                    app.outline_selected -= 1;
+                }
+            }
+            KeyCode::Backspace => {
+                app.outline_query.pop();
+                app.filter_outline();
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.outline_query.push(c);
+                app.filter_outline();
             }
             _ => {}
         }
@@ -3242,6 +3281,10 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "collab-stop" | "collab stop" => {
             app.stop_collab();
+        }
+        // --- Navigation ---
+        "outline" | "symbols" => {
+            app.open_outline();
         }
         // --- Agent mode ---
         "agent stop" => {

@@ -283,6 +283,16 @@ pub struct App {
     pub intent_input: String,
     /// Cached project rules (from .aura/rules.md or .aura/rules/*.md).
     pub project_rules: Option<String>,
+    /// Document outline modal visible.
+    pub outline_visible: bool,
+    /// Document outline items: (line_number, label_text).
+    pub outline_items: Vec<(usize, String)>,
+    /// Filtered indices into outline_items.
+    pub outline_filtered: Vec<usize>,
+    /// Outline search query.
+    pub outline_query: String,
+    /// Outline selected index in filtered list.
+    pub outline_selected: usize,
     /// Active AI proposal for review.
     pub proposal: Option<AiProposal>,
     /// AI backend (None if neither API key nor Claude Code CLI is available).
@@ -691,6 +701,11 @@ impl App {
             leader_pending: false,
             intent_input: String::new(),
             project_rules: None,
+            outline_visible: false,
+            outline_items: Vec::new(),
+            outline_filtered: Vec::new(),
+            outline_query: String::new(),
+            outline_selected: 0,
             proposal: None,
             ai_client,
             ai_receiver: None,
@@ -1782,6 +1797,56 @@ impl App {
         self.tab_mut().mark_highlights_dirty();
         self.undo_tree = None;
         self.set_status(format!("Restored to history position {target_pos}"));
+    }
+
+    // ── Document Outline ─────────────────────────────────────────
+
+    /// Open the document outline modal.
+    pub fn open_outline(&mut self) {
+        let mut items = Vec::new();
+        for &start_line in self.tab().foldable_ranges.keys() {
+            if let Some(text) = self.tab().buffer.line_text(start_line) {
+                let label = text.trim().to_string();
+                if !label.is_empty() {
+                    items.push((start_line, label));
+                }
+            }
+        }
+        items.sort_by_key(|(line, _)| *line);
+        self.outline_items = items;
+        self.outline_filtered = (0..self.outline_items.len()).collect();
+        self.outline_query.clear();
+        self.outline_selected = 0;
+        self.outline_visible = true;
+    }
+
+    /// Filter outline items by query.
+    pub fn filter_outline(&mut self) {
+        let query = self.outline_query.to_lowercase();
+        self.outline_selected = 0;
+        if query.is_empty() {
+            self.outline_filtered = (0..self.outline_items.len()).collect();
+            return;
+        }
+        self.outline_filtered = self
+            .outline_items
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, label))| label.to_lowercase().contains(&query))
+            .map(|(i, _)| i)
+            .collect();
+    }
+
+    /// Jump to the selected outline item.
+    pub fn goto_outline_selection(&mut self) {
+        if let Some(&idx) = self.outline_filtered.get(self.outline_selected) {
+            if let Some(&(line, _)) = self.outline_items.get(idx) {
+                self.tab_mut().cursor.row = line;
+                self.tab_mut().cursor.col = 0;
+                self.tab_mut().scroll_row = line.saturating_sub(10);
+            }
+        }
+        self.outline_visible = false;
     }
 
     // ── Project Rules ────────────────────────────────────────────

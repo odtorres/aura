@@ -479,9 +479,8 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **Project-wide search/replace** — Interactive search across all files with preview and batch replace. (`Ctrl+F` or `:search`)
 
 ### 11.3 Code Navigation — Medium Priority
-- [ ] **Workspace symbol search** — Fuzzy finder for all symbols in the project (functions, types, structs). `Ctrl+T` equivalent. Uses LSP workspace/symbol.
-- [ ] **Document outline panel** — Symbol tree sidebar for the current file showing classes, functions, methods. Navigate with click/Enter.
-- [ ] **Breadcrumbs** — `file > module > function` path at top of buffer. Shows current scope context. One-line breadcrumb bar.
+- [x] **Document outline** — `Ctrl+O` or `:outline` — fuzzy-searchable symbol list for the current file.
+- [x] **Breadcrumbs** — Scope path at top of editor: `file.rs > impl App > fn process_data`.
 - [ ] **Peek definition** — Inline popup showing definition without leaving current file. Like VS Code's Alt+F12.
 
 ### 11.4 Protocol & Integration — High Priority

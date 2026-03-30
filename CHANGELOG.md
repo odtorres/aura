@@ -5,6 +5,22 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.42] - 2026-03-30
+
+### Added
+
+- **Breadcrumbs** — Scope path shown at the top of the editor, updated as you move the cursor.
+  - Format: `file.rs > impl App > fn process_data`
+  - File name in cyan, scope names in light gray, separators dim
+  - Uses tree-sitter `enclosing_scopes()` for accurate scope detection
+  - Automatically hides when cursor is at top-level (no enclosing scopes)
+- **Document Outline** (`Ctrl+O` or `:outline`) — Fuzzy-searchable symbol list for the current file.
+  - Shows all functions, structs, classes, impls, enums, modules, etc.
+  - Type to filter symbols by name
+  - Navigate with `j`/`k` or arrows, `Enter` to jump to symbol
+  - Centered popup following the command palette pattern
+  - Uses tree-sitter foldable ranges — works for all 17+ languages
+
 ## [0.1.41] - 2026-03-30
 
 ### Added
