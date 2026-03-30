@@ -359,8 +359,7 @@ fn read_message(reader: &mut impl BufRead) -> std::io::Result<String> {
 }
 
 fn write_response(writer: &mut impl IoWrite, response: &JsonRpcResponse) -> std::io::Result<()> {
-    let body = serde_json::to_string(response)
-        .map_err(std::io::Error::other)?;
+    let body = serde_json::to_string(response).map_err(std::io::Error::other)?;
     let header = format!("Content-Length: {}\r\n\r\n", body.len());
     writer.write_all(header.as_bytes())?;
     writer.write_all(body.as_bytes())?;

@@ -553,6 +553,7 @@ impl App {
         let acp_server = match crate::acp_server::AcpServer::start() {
             Ok(server) => {
                 tracing::info!("ACP server listening on port {}", server.port);
+                Self::write_acp_discovery(server.port, buffer.file_path());
                 Some(server)
             }
             Err(e) => {
@@ -1049,8 +1050,14 @@ impl App {
             server.shutdown();
         }
 
-        // Clean up MCP discovery file.
+        // Clean up discovery files.
         Self::remove_mcp_discovery();
+        Self::remove_acp_discovery();
+
+        // Shutdown ACP server.
+        if let Some(server) = &self.acp_server {
+            server.shutdown();
+        }
 
         // Shutdown MCP clients on exit.
         for client in &self.mcp_clients {
@@ -6639,6 +6646,47 @@ impl App {
     fn remove_mcp_discovery() {
         let Some(home) = dirs_path() else { return };
         let path = home.join(".aura").join("mcp.json");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Write the ACP discovery file so external agents can auto-discover AURA.
+    fn write_acp_discovery(port: u16, file_path: Option<&std::path::Path>) {
+        let Some(home) = dirs_path() else { return };
+        let aura_dir = home.join(".aura");
+        if std::fs::create_dir_all(&aura_dir).is_err() {
+            return;
+        }
+        let discovery = serde_json::json!({
+            "protocol": "acp",
+            "host": "127.0.0.1",
+            "port": port,
+            "pid": std::process::id(),
+            "editor": "AURA",
+            "version": env!("CARGO_PKG_VERSION"),
+            "file": file_path.map(|p| p.display().to_string()),
+            "started": chrono_now(),
+            "capabilities": [
+                "document/read", "document/edit",
+                "cursor/context", "selection/get",
+                "diagnostics/get",
+                "file/read", "file/list", "file/open",
+                "editor/info", "terminal/run", "project/structure"
+            ]
+        });
+        let path = aura_dir.join("acp.json");
+        match std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&discovery).unwrap_or_default(),
+        ) {
+            Ok(()) => tracing::info!("ACP discovery file written to {}", path.display()),
+            Err(e) => tracing::warn!("Failed to write ACP discovery file: {}", e),
+        }
+    }
+
+    /// Remove the ACP discovery file on shutdown.
+    fn remove_acp_discovery() {
+        let Some(home) = dirs_path() else { return };
+        let path = home.join(".aura").join("acp.json");
         let _ = std::fs::remove_file(&path);
     }
 

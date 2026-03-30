@@ -5190,10 +5190,14 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let mcp_indicator = if let Some(port) = app.mcp_port() {
         let agent_count = app.agent_registry.count();
+        let acp_part = app
+            .acp_port()
+            .map(|p| format!(" ACP:{p}"))
+            .unwrap_or_default();
         if agent_count > 0 {
-            format!(" │ MCP:{port} ({agent_count} agents)")
+            format!(" │ MCP:{port}{acp_part} ({agent_count} agents)")
         } else {
-            format!(" │ MCP:{port}")
+            format!(" │ MCP:{port}{acp_part}")
         }
     } else {
         String::new()
