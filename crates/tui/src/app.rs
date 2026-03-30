@@ -1799,6 +1799,187 @@ impl App {
         self.set_status(format!("Restored to history position {target_pos}"));
     }
 
+    // ── Task Runner ──────────────────────────────────────────────
+
+    /// Run a named task in the embedded terminal.
+    pub fn run_task(&mut self, name: &str) {
+        let tasks = self.get_tasks();
+        let task = match tasks.get(name) {
+            Some(t) => t.clone(),
+            None => {
+                let available: Vec<&str> = tasks.keys().map(|s| s.as_str()).collect();
+                if available.is_empty() {
+                    self.set_status("No tasks configured. Add [tasks] to aura.toml");
+                } else {
+                    self.set_status(format!(
+                        "Unknown task '{}'. Available: {}",
+                        name,
+                        available.join(", ")
+                    ));
+                }
+                return;
+            }
+        };
+
+        // Show terminal and send the command.
+        self.terminal.visible = true;
+        self.terminal_focused = true;
+        self.terminal.send_bytes(task.command.as_bytes());
+        self.terminal.send_enter();
+        self.set_status(format!("Running task: {} ({})", name, task.command));
+    }
+
+    /// Get all available tasks (configured + auto-detected).
+    pub fn get_tasks(&self) -> std::collections::HashMap<String, crate::config::TaskConfig> {
+        if !self.config.tasks.is_empty() {
+            return self.config.tasks.clone();
+        }
+        // Auto-detect from project type.
+        self.auto_detect_tasks()
+    }
+
+    /// Auto-detect tasks based on project files.
+    fn auto_detect_tasks(&self) -> std::collections::HashMap<String, crate::config::TaskConfig> {
+        use crate::config::TaskConfig;
+        let mut tasks = std::collections::HashMap::new();
+        let root = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        if root.join("Cargo.toml").exists() {
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "cargo build".into(),
+                    description: "Build the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "cargo test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "clippy".into(),
+                TaskConfig {
+                    command: "cargo clippy -- -D warnings".into(),
+                    description: "Run lints".into(),
+                },
+            );
+            tasks.insert(
+                "fmt".into(),
+                TaskConfig {
+                    command: "cargo fmt --all".into(),
+                    description: "Format code".into(),
+                },
+            );
+        } else if root.join("package.json").exists() {
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "npm run build".into(),
+                    description: "Build the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "npm test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "lint".into(),
+                TaskConfig {
+                    command: "npm run lint".into(),
+                    description: "Run lints".into(),
+                },
+            );
+            tasks.insert(
+                "dev".into(),
+                TaskConfig {
+                    command: "npm run dev".into(),
+                    description: "Start dev server".into(),
+                },
+            );
+        } else if root.join("Makefile").exists() || root.join("makefile").exists() {
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "make".into(),
+                    description: "Build (default target)".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "make test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "clean".into(),
+                TaskConfig {
+                    command: "make clean".into(),
+                    description: "Clean build artifacts".into(),
+                },
+            );
+        } else if root.join("go.mod").exists() {
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "go build ./...".into(),
+                    description: "Build the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "go test ./...".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "fmt".into(),
+                TaskConfig {
+                    command: "gofmt -w .".into(),
+                    description: "Format code".into(),
+                },
+            );
+        } else if root.join("requirements.txt").exists() || root.join("pyproject.toml").exists() {
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "pytest".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "lint".into(),
+                TaskConfig {
+                    command: "ruff check .".into(),
+                    description: "Run lints".into(),
+                },
+            );
+            tasks.insert(
+                "fmt".into(),
+                TaskConfig {
+                    command: "black .".into(),
+                    description: "Format code".into(),
+                },
+            );
+        }
+
+        tasks
+    }
+
     // ── Document Outline ─────────────────────────────────────────
 
     /// Open the document outline modal.
@@ -6372,7 +6553,21 @@ impl App {
             })
             .collect();
 
-        self.command_palette.open(commands, files, settings);
+        // Add project tasks to the palette.
+        let mut task_items: Vec<crate::command_palette::PaletteItem> = self
+            .get_tasks()
+            .iter()
+            .map(
+                |(name, task)| crate::command_palette::PaletteItem::Command {
+                    id: format!("task {name}"),
+                    label: format!("Task: {} — {}", name, task.description),
+                },
+            )
+            .collect();
+        let mut all_commands = commands;
+        all_commands.append(&mut task_items);
+
+        self.command_palette.open(all_commands, files, settings);
     }
 
     /// Execute the currently selected palette item.

@@ -486,7 +486,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 ### 11.4 Protocol & Integration — High Priority
 - [ ] **ACP (Agent Client Protocol) support** — The emerging standard created by Zed + JetBrains. Claude Code, Copilot CLI, Gemini CLI, and Codex all speak ACP. AURA could be the first terminal editor with native ACP support. Lets any ACP-compatible agent drive the editor.
 - [x] **@-docs indexing** — `@docs:<name>` mentions reference files from `.aura/docs/` directory.
-- [ ] **Task runner integration** — Define and run project tasks (build, test, lint) from within the editor. Like VS Code's `tasks.json`.
+- [x] **Task runner integration** — `:task <name>` runs tasks defined in `aura.toml [tasks]`. Auto-detects for Rust/Node/Go/Python/Make.
 
 ### 11.5 Terminal & Shell — Medium Priority
 - [ ] **Terminal shell integration** — Detect command boundaries, exit codes, and auto-suggest fixes for failed commands. VS Code has this natively.

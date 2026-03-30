@@ -36,6 +36,9 @@ pub struct AuraConfig {
     /// Debug adapter configurations.
     #[serde(default)]
     pub debuggers: HashMap<String, DebuggerConfig>,
+    /// Project tasks (build, test, lint, etc.).
+    #[serde(default)]
+    pub tasks: HashMap<String, TaskConfig>,
 }
 
 impl Default for AuraConfig {
@@ -50,6 +53,7 @@ impl Default for AuraConfig {
             collab: CollabConfig::default(),
             conversations: ConversationConfig::default(),
             debuggers: HashMap::new(),
+            tasks: HashMap::new(),
         }
     }
 }
@@ -146,6 +150,16 @@ pub struct DebuggerConfig {
     /// File extensions this debugger handles (e.g. ["rs", "c", "cpp"]).
     #[serde(default)]
     pub extensions: Vec<String>,
+}
+
+/// Configuration for a project task.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskConfig {
+    /// The shell command to run.
+    pub command: String,
+    /// Human-readable description.
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Editor-specific settings.

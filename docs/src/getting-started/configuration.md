@@ -225,3 +225,25 @@ AURA automatically saves editor state to `.aura/session.json` in the project roo
 Session restore runs when AURA is launched without a file argument (`aura`). When a specific file is given (`aura file.rs`), the session is skipped.
 
 See [Session Persistence](../user-guide/session.md) for full details.
+
+## Tasks
+
+Define project tasks to run from within the editor:
+
+```toml
+[tasks.build]
+command = "cargo build"
+description = "Build the project"
+
+[tasks.test]
+command = "cargo test"
+description = "Run tests"
+
+[tasks.lint]
+command = "cargo clippy -- -D warnings"
+description = "Run lints"
+```
+
+Run with `:task build`, `:task test`, etc. Tasks also appear in the command palette (`Ctrl+P`).
+
+When no tasks are configured, AURA auto-detects common tasks based on project files (Cargo.toml, package.json, go.mod, Makefile, pyproject.toml).

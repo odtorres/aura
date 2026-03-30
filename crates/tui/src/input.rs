@@ -3282,6 +3282,19 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        // --- Tasks ---
+        "task" | "tasks" => {
+            let tasks = app.get_tasks();
+            if tasks.is_empty() {
+                app.set_status("No tasks available. Add [tasks] to aura.toml");
+            } else {
+                let list: Vec<String> = tasks
+                    .iter()
+                    .map(|(name, t)| format!("{name}: {}", t.description))
+                    .collect();
+                app.set_status(format!("Tasks: {}", list.join(" | ")));
+            }
+        }
         // --- Navigation ---
         "outline" | "symbols" => {
             app.open_outline();
@@ -3392,6 +3405,11 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(task_name) = other.strip_prefix("task ") {
+                let task_name = task_name.trim();
+                if !task_name.is_empty() {
+                    app.run_task(task_name);
+                }
             } else if let Some(task) = other.strip_prefix("agent ") {
                 let task = task.trim();
                 if task == "stop" {

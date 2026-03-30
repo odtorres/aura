@@ -5,6 +5,27 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.44] - 2026-03-30
+
+### Added
+
+- **Task runner integration** — Define and run project tasks from `aura.toml`.
+  - `:task <name>` runs a named task in the embedded terminal
+  - `:task` / `:tasks` lists available tasks
+  - Tasks appear in the command palette (Ctrl+P) with "Task:" prefix
+  - Configure in `aura.toml`:
+    ```toml
+    [tasks.build]
+    command = "cargo build"
+    description = "Build the project"
+    ```
+  - **Auto-detection** when no tasks configured:
+    - Rust (Cargo.toml): build, test, clippy, fmt
+    - Node.js (package.json): build, test, lint, dev
+    - Go (go.mod): build, test, fmt
+    - Python (pyproject.toml): test, lint, fmt
+    - Make (Makefile): build, test, clean
+
 ## [0.1.43] - 2026-03-30
 
 ### Fixed
