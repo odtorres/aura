@@ -4372,7 +4372,7 @@ fn draw_editor(
                     let in_leading_ws = content.chars().take(col + 1).all(|c| c == ' ');
                     if in_leading_ws
                         && indent_width > 0
-                        && actual_col % indent_width == 0
+                        && actual_col.is_multiple_of(indent_width)
                         && actual_col > 0
                     {
                         '│'
