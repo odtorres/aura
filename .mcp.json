@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aura-editor": {
+      "command": "python3",
+      "args": ["/Users/odtorres/Code/Aura/aura-editor/scripts/aura-mcp-bridge.py"]
+    }
+  }
+}
