@@ -353,6 +353,15 @@ pub fn replace_in_files(root: &Path, old: &str, new: &str, case_sensitive: bool)
 }
 
 /// Recursively collect all files in a directory, skipping noise.
+/// Collect project files as relative path strings (for @-mention autocomplete).
+pub fn search_collect_files(root: &Path) -> Vec<String> {
+    collect_files(root)
+        .iter()
+        .filter_map(|p| p.strip_prefix(root).ok())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
+}
+
 fn collect_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_files_recursive(root, &mut files);

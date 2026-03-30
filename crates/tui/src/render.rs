@@ -2138,6 +2138,55 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     // ── Render input ──
     draw_chat_input(frame, app, input_area);
+
+    // ── Render @-mention autocomplete dropdown if active ──
+    if app.chat_panel.mention_active && !app.chat_panel.mention_matches.is_empty() {
+        let matches = &app.chat_panel.mention_matches;
+        let max_visible = 8.min(matches.len());
+        let popup_height = max_visible as u16 + 2; // +2 for border
+        let popup_width = area.width.saturating_sub(2).min(40);
+        let popup_y = input_area.y.saturating_sub(popup_height);
+        let popup_x = area.x + 1;
+        let popup = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+        frame.render_widget(Clear, popup);
+        let query_display = format!(" @{} ", app.chat_panel.mention_query);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(query_display);
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+
+        for (i, item) in matches.iter().take(max_visible).enumerate() {
+            let row_y = inner.y + i as u16;
+            let is_selected = i == app.chat_panel.mention_selected;
+            let label = item.label();
+            let is_special = matches!(
+                item,
+                crate::chat_panel::MentionItem::Selection
+                    | crate::chat_panel::MentionItem::Buffer
+                    | crate::chat_panel::MentionItem::Diagnostics
+            );
+
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_special {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let display: String = label.chars().take(inner.width as usize).collect();
+            frame.render_widget(
+                Paragraph::new(format!(" {display}")).style(style),
+                Rect::new(inner.x, row_y, inner.width, 1),
+            );
+        }
+    }
 }
 
 /// Draw the chat input box.

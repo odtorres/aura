@@ -4749,6 +4749,16 @@ impl App {
             self.terminal_focused = false;
             // Load existing chat conversation if we have one.
             self.load_chat_conversation();
+            // Cache project files for @-mention autocomplete.
+            let root = self
+                .tab()
+                .buffer
+                .file_path()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_path_buf())
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            self.chat_panel.cache_project_files(&root);
         }
     }
 
@@ -4823,8 +4833,15 @@ impl App {
             self.chat_panel.selection_context = None;
         }
 
-        // Build system prompt with editor context.
-        let system = self.build_chat_system_prompt();
+        // Expand @-mentions in the last user message.
+        let mention_context = self.expand_mentions(&text);
+
+        // Build system prompt with editor context + mention context.
+        let mut system = self.build_chat_system_prompt();
+        if !mention_context.is_empty() {
+            system.push_str("\n\n--- Referenced content (@-mentions) ---\n");
+            system.push_str(&mention_context);
+        }
         let messages = self.chat_panel.build_messages();
 
         let client = self.ai_client.as_ref().unwrap();
@@ -5097,6 +5114,105 @@ impl App {
     }
 
     /// Build a system prompt for chat that includes editor context.
+    /// Expand @-mentions in a chat message into file/context content.
+    fn expand_mentions(&self, text: &str) -> String {
+        let mut context = String::new();
+        let project_root = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        // Find all @-mentions in the text.
+        for word in text.split_whitespace() {
+            if !word.starts_with('@') || word.len() <= 1 {
+                continue;
+            }
+            let mention = &word[1..]; // Strip leading @.
+
+            match mention {
+                "selection" => {
+                    if let Some((sel_start, sel_end)) = self.visual_selection_range() {
+                        let selected = self
+                            .tab()
+                            .buffer
+                            .rope()
+                            .slice(sel_start..sel_end)
+                            .to_string();
+                        context.push_str(&format!(
+                            "\n--- @selection ---\n{}\n--- end @selection ---\n",
+                            selected
+                        ));
+                    }
+                }
+                "buffer" => {
+                    let content = self.tab().buffer.text();
+                    let file_name = self.tab().file_name();
+                    // Truncate very large buffers.
+                    let truncated: String = content.chars().take(30000).collect();
+                    context.push_str(&format!(
+                        "\n--- @buffer ({}) ---\n{}\n--- end @buffer ---\n",
+                        file_name, truncated
+                    ));
+                }
+                "errors" => {
+                    let diagnostics: Vec<String> = self
+                        .tab()
+                        .diagnostics
+                        .iter()
+                        .map(|d| {
+                            format!(
+                                "L{}:{} [{}] {}",
+                                d.range.start.line + 1,
+                                d.range.start.character + 1,
+                                if d.is_error() {
+                                    "error"
+                                } else if d.is_warning() {
+                                    "warning"
+                                } else {
+                                    "info"
+                                },
+                                d.message
+                            )
+                        })
+                        .collect();
+                    if diagnostics.is_empty() {
+                        context
+                            .push_str("\n--- @errors ---\nNo diagnostics.\n--- end @errors ---\n");
+                    } else {
+                        context.push_str(&format!(
+                            "\n--- @errors ({} diagnostics) ---\n{}\n--- end @errors ---\n",
+                            diagnostics.len(),
+                            diagnostics.join("\n")
+                        ));
+                    }
+                }
+                file_path => {
+                    // Try to read the file from the project.
+                    let full_path = project_root.join(file_path);
+                    match std::fs::read_to_string(&full_path) {
+                        Ok(content) => {
+                            let truncated: String = content.chars().take(30000).collect();
+                            context.push_str(&format!(
+                                "\n--- @{file_path} ---\n{truncated}\n--- end @{file_path} ---\n"
+                            ));
+                        }
+                        Err(_) => {
+                            context.push_str(&format!(
+                                "\n--- @{file_path} ---\n(file not found)\n--- end @{file_path} ---\n"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        context
+    }
+
     fn build_chat_system_prompt(&self) -> String {
         let tab = self.tab();
         let file_path = tab

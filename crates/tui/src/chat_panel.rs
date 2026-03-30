@@ -83,6 +83,44 @@ pub struct ChatMessage {
     pub timestamp: String,
 }
 
+/// An @-mention autocomplete item.
+#[derive(Debug, Clone)]
+pub enum MentionItem {
+    /// A file in the project.
+    File {
+        /// Relative file path.
+        path: String,
+    },
+    /// The current editor selection.
+    Selection,
+    /// The current buffer content.
+    Buffer,
+    /// Current LSP diagnostics.
+    Diagnostics,
+}
+
+impl MentionItem {
+    /// Display label for the autocomplete dropdown.
+    pub fn label(&self) -> String {
+        match self {
+            MentionItem::File { path } => path.clone(),
+            MentionItem::Selection => "@selection".to_string(),
+            MentionItem::Buffer => "@buffer".to_string(),
+            MentionItem::Diagnostics => "@errors".to_string(),
+        }
+    }
+
+    /// The text inserted into the input when this item is selected.
+    pub fn insert_text(&self) -> String {
+        match self {
+            MentionItem::File { path } => format!("@{path} "),
+            MentionItem::Selection => "@selection ".to_string(),
+            MentionItem::Buffer => "@buffer ".to_string(),
+            MentionItem::Diagnostics => "@errors ".to_string(),
+        }
+    }
+}
+
 /// Interactive chat panel state.
 pub struct ChatPanel {
     /// Whether the panel is visible.
@@ -117,6 +155,16 @@ pub struct ChatPanel {
     pub selection_context: Option<String>,
     /// Maximum context messages to keep for API calls (0 = no limit).
     pub max_context_messages: usize,
+    /// Whether the @-mention autocomplete popup is active.
+    pub mention_active: bool,
+    /// The query text after `@` being typed.
+    pub mention_query: String,
+    /// Filtered autocomplete results.
+    pub mention_matches: Vec<MentionItem>,
+    /// Selected item in the autocomplete dropdown.
+    pub mention_selected: usize,
+    /// Cached list of project files for @-mention completion.
+    pub mention_file_cache: Vec<String>,
 }
 
 impl ChatPanel {
@@ -139,6 +187,11 @@ impl ChatPanel {
             tool_loop_count: 0,
             selection_context: None,
             max_context_messages: 40,
+            mention_active: false,
+            mention_query: String::new(),
+            mention_matches: Vec::new(),
+            mention_selected: 0,
+            mention_file_cache: Vec::new(),
         }
     }
 
@@ -488,6 +541,137 @@ impl ChatPanel {
         self.tool_loop_count = 0;
     }
 
+    // ── @-mention autocomplete ────────────────────────────────────
+
+    /// Start @-mention autocomplete.
+    pub fn start_mention(&mut self) {
+        self.mention_active = true;
+        self.mention_query.clear();
+        self.mention_selected = 0;
+        self.filter_mentions();
+    }
+
+    /// Cancel @-mention autocomplete.
+    pub fn cancel_mention(&mut self) {
+        self.mention_active = false;
+        self.mention_query.clear();
+        self.mention_matches.clear();
+    }
+
+    /// Add a character to the mention query and re-filter.
+    pub fn mention_type_char(&mut self, ch: char) {
+        if ch == ' ' || ch == '\n' {
+            // Space/enter completes or cancels.
+            self.cancel_mention();
+            return;
+        }
+        self.mention_query.push(ch);
+        self.mention_selected = 0;
+        self.filter_mentions();
+    }
+
+    /// Backspace in mention query.
+    pub fn mention_backspace(&mut self) {
+        if self.mention_query.is_empty() {
+            // Backspace past @ cancels the mention.
+            self.cancel_mention();
+            // Also remove the @ from input.
+            if self.input_cursor > 0 {
+                self.input_cursor -= 1;
+                let byte_pos = self.byte_offset_of_cursor();
+                if byte_pos < self.input.len() {
+                    self.input.remove(byte_pos);
+                }
+            }
+        } else {
+            self.mention_query.pop();
+            self.mention_selected = 0;
+            self.filter_mentions();
+        }
+    }
+
+    /// Select the next mention match.
+    pub fn mention_next(&mut self) {
+        let max = self.mention_matches.len().saturating_sub(1);
+        if self.mention_selected < max {
+            self.mention_selected += 1;
+        }
+    }
+
+    /// Select the previous mention match.
+    pub fn mention_prev(&mut self) {
+        if self.mention_selected > 0 {
+            self.mention_selected -= 1;
+        }
+    }
+
+    /// Complete the selected mention — insert its text into the input.
+    pub fn complete_mention(&mut self) {
+        let item = match self.mention_matches.get(self.mention_selected) {
+            Some(item) => item.clone(),
+            None => {
+                self.cancel_mention();
+                return;
+            }
+        };
+        // Remove the `@` + query we typed so far from input.
+        // The @ was already inserted, and we need to replace @+query with the full mention.
+        let remove_chars = 1 + self.mention_query.chars().count(); // @ + query
+        for _ in 0..remove_chars {
+            if self.input_cursor > 0 {
+                self.input_cursor -= 1;
+                let byte_pos = self.byte_offset_of_cursor();
+                if byte_pos < self.input.len() {
+                    let ch = self.input[byte_pos..].chars().next().unwrap_or(' ');
+                    self.input
+                        .replace_range(byte_pos..byte_pos + ch.len_utf8(), "");
+                }
+            }
+        }
+        // Insert the completed mention text.
+        let insert = item.insert_text();
+        let byte_pos = self.byte_offset_of_cursor();
+        self.input.insert_str(byte_pos, &insert);
+        self.input_cursor += insert.chars().count();
+        self.cancel_mention();
+    }
+
+    /// Filter mention matches based on current query.
+    fn filter_mentions(&mut self) {
+        self.mention_matches.clear();
+        let query = self.mention_query.to_lowercase();
+
+        // Special mentions first (if query matches).
+        let specials = [
+            MentionItem::Selection,
+            MentionItem::Buffer,
+            MentionItem::Diagnostics,
+        ];
+        for item in &specials {
+            let label = item.label().to_lowercase();
+            if query.is_empty() || label.contains(&query) {
+                self.mention_matches.push(item.clone());
+            }
+        }
+
+        // File matches.
+        for path in &self.mention_file_cache {
+            if self.mention_matches.len() >= 10 {
+                break;
+            }
+            let lower = path.to_lowercase();
+            if query.is_empty() || lower.contains(&query) || is_fuzzy_match(&lower, &query) {
+                self.mention_matches
+                    .push(MentionItem::File { path: path.clone() });
+            }
+        }
+    }
+
+    /// Cache the project file list for @-mention autocomplete.
+    pub fn cache_project_files(&mut self, root: &std::path::Path) {
+        self.mention_file_cache = crate::project_search::search_collect_files(root);
+    }
+
     /// Load an existing conversation from the store.
     pub fn load_conversation(&mut self, store: &ConversationStore, conv_id: &str) {
         match store.messages_for_conversation(conv_id) {
@@ -549,6 +733,24 @@ impl ChatPanel {
             .map(|(i, _)| i)
             .unwrap_or(self.input.len())
     }
+}
+
+/// Check if every character of `query` appears in `text` in order (fuzzy match).
+fn is_fuzzy_match(text: &str, query: &str) -> bool {
+    let mut text_chars = text.chars();
+    for qc in query.chars() {
+        let mut found = false;
+        for tc in text_chars.by_ref() {
+            if tc == qc {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    true
 }
 
 /// Simple timestamp for display.

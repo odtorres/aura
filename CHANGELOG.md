@@ -5,6 +5,24 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.37] - 2026-03-30
+
+### Added
+
+- **@-mentions in chat** — Type `@` in the chat panel to reference files and context.
+  - `@file.rs` — includes the file's full content in AI context
+  - `@selection` — includes the current editor selection
+  - `@buffer` — includes the current buffer content
+  - `@errors` — includes LSP diagnostics (errors/warnings)
+  - Autocomplete dropdown appears when typing `@`, fuzzy-filtered by filename
+  - Navigate with Up/Down, Enter/Tab to select, Esc to cancel
+  - Multiple @-mentions per message supported
+  - Content injected as labeled sections in the AI system prompt
+
+### Improved
+
+- **Syntax highlighting** — Expanded from 24 to 63 highlight groups for dramatically richer colors across all 17+ languages. Variables, parameters, HTML tags, escape sequences, punctuation, and namespaces now properly colored.
+
 ## [0.1.36] - 2026-03-30
 
 ### Added

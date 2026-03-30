@@ -643,11 +643,50 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             return;
         }
 
+        // @-mention autocomplete routing.
+        if app.chat_panel.mention_active {
+            match code {
+                KeyCode::Esc => {
+                    app.chat_panel.cancel_mention();
+                    return;
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    app.chat_panel.complete_mention();
+                    return;
+                }
+                KeyCode::Down => {
+                    app.chat_panel.mention_next();
+                    return;
+                }
+                KeyCode::Up => {
+                    app.chat_panel.mention_prev();
+                    return;
+                }
+                KeyCode::Backspace => {
+                    app.chat_panel.mention_backspace();
+                    return;
+                }
+                KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.chat_panel.mention_type_char(c);
+                    return;
+                }
+                _ => {
+                    app.chat_panel.cancel_mention();
+                }
+            }
+            return;
+        }
+
         match code {
             KeyCode::Enter => {
                 if !app.chat_panel.streaming {
                     app.send_chat_message();
                 }
+            }
+            KeyCode::Char('@') if !modifiers.contains(KeyModifiers::CONTROL) => {
+                // Start @-mention autocomplete.
+                app.chat_panel.input_char('@');
+                app.chat_panel.start_mention();
             }
             KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
                 app.chat_panel.input_char(c);

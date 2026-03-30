@@ -466,7 +466,7 @@ When working on this project with Claude Code:
 Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, and Neovim.
 
 ### 11.1 AI Features — High Priority
-- [ ] **@-mentions in chat** — Reference `@file.rs`, `@functionName`, `@docs:react` in the chat panel to give AI precise context. Every major AI editor has this (Cursor, Copilot, Continue.dev). Table stakes.
+- [x] **@-mentions in chat** — Reference `@file.rs`, `@selection`, `@buffer`, `@errors` in the chat panel to give AI precise context.
 - [ ] **Autonomous agent mode** — Let AI loop autonomously: plan → edit → run → check → fix. Cursor Agent and Copilot Agent Mode both do this. Builds on existing intent+review pipeline.
 - [ ] **Project rules / AI instructions** — `.aura/rules/` files that shape AI behavior per-project (like `.cursorrules`). Configurable per-glob patterns. Teams can share rules.
 - [ ] **Next-edit prediction** — Predict WHERE the user will edit next, not just what. Cursor Tab and Copilot NES both do this. Show ghost cursors at predicted locations.
