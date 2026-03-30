@@ -647,7 +647,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.set_status(format!("Discard changes to {}? (y to confirm)", path));
                         app.source_control.pending_discard = Some(path);
                     }
+                } else if app.source_control.focused_section == GitPanelSection::Stashes {
+                    // Drop the selected stash.
+                    app.sc_stash_drop();
                 }
+            }
+            // z — stash push (save current changes to a stash).
+            KeyCode::Char('z') => {
+                app.sc_stash_push();
+            }
+            // p — stash pop (when in Stashes section).
+            KeyCode::Char('p')
+                if app.source_control.focused_section == GitPanelSection::Stashes =>
+            {
+                app.sc_stash_pop();
             }
             KeyCode::Char('c') => {
                 app.sc_commit();
@@ -3281,6 +3294,19 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "collab-stop" | "collab stop" => {
             app.stop_collab();
+        }
+        // --- Git stash & PR ---
+        "stash" => {
+            app.sc_stash_push();
+        }
+        "stash pop" => {
+            app.sc_stash_pop();
+        }
+        "stash drop" => {
+            app.sc_stash_drop();
+        }
+        "pr" | "pull-request" => {
+            app.create_pr();
         }
         // --- Tasks ---
         "task" | "tasks" => {

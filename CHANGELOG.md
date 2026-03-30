@@ -5,6 +5,21 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.45] - 2026-03-30
+
+### Added
+
+- **Git stash management** — Full stash support in the source control panel.
+  - New "Stashes" section shows all stashes with name + message
+  - `z` — push current changes to a stash
+  - `p` — pop the selected stash (when in Stashes section)
+  - `d` — drop the selected stash (when in Stashes section)
+  - `:stash`, `:stash pop`, `:stash drop` commands
+  - Stashes refresh automatically with the source control panel
+- **PR creation from editor** — `:pr` or `:pull-request` opens `gh pr create` interactively in the embedded terminal.
+  - Auto-detects current branch, refuses to create PR from main/master
+  - Full interactive `gh` CLI experience (title, body, reviewers)
+
 ## [0.1.44] - 2026-03-30
 
 ### Added

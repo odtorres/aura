@@ -669,6 +669,79 @@ impl GitRepo {
         Ok(())
     }
 
+    /// List all stashes. Returns (name, message) pairs.
+    pub fn stash_list(&self) -> anyhow::Result<Vec<(String, String)>> {
+        let output = std::process::Command::new("git")
+            .args(["stash", "list", "--format=%gd|%s"])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stashes = stdout
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                let parts: Vec<&str> = line.splitn(2, '|').collect();
+                let name = parts.first().unwrap_or(&"").to_string();
+                let message = parts.get(1).unwrap_or(&"").to_string();
+                (name, message)
+            })
+            .collect();
+        Ok(stashes)
+    }
+
+    /// Push a new stash with the given message.
+    pub fn stash_push(&self, message: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["stash", "push", "-m", message])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git stash push failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    /// Pop a stash by name (e.g. "stash@{0}").
+    pub fn stash_pop(&self, name: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["stash", "pop", name])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git stash pop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    /// Drop a stash by name.
+    pub fn stash_drop(&self, name: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["stash", "drop", name])
+            .current_dir(&self.workdir)
+            .output()?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git stash drop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
     /// Commit staged changes with the given message. Returns the new commit short hash.
     pub fn commit_staged(&self, message: &str) -> anyhow::Result<String> {
         let output = std::process::Command::new("git")

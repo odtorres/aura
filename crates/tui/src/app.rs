@@ -1799,6 +1799,85 @@ impl App {
         self.set_status(format!("Restored to history position {target_pos}"));
     }
 
+    // ── Git Stash & PR ───────────────────────────────────────────
+
+    /// Push current changes to a stash.
+    pub fn sc_stash_push(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            match repo.stash_push("WIP") {
+                Ok(()) => {
+                    self.set_status("Changes stashed");
+                    self.refresh_source_control();
+                }
+                Err(e) => self.set_status(format!("Stash failed: {e}")),
+            }
+        }
+    }
+
+    /// Pop the selected stash (or the top one).
+    pub fn sc_stash_pop(&mut self) {
+        let name = self
+            .source_control
+            .selected_stash()
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "stash@{0}".to_string());
+
+        if let Some(repo) = &self.git_repo {
+            match repo.stash_pop(&name) {
+                Ok(()) => {
+                    self.set_status(format!("Popped stash: {name}"));
+                    self.refresh_source_control();
+                }
+                Err(e) => self.set_status(format!("Stash pop failed: {e}")),
+            }
+        }
+    }
+
+    /// Drop the selected stash.
+    pub fn sc_stash_drop(&mut self) {
+        let name = match self.source_control.selected_stash() {
+            Some(s) => s.name.clone(),
+            None => {
+                self.set_status("No stash selected");
+                return;
+            }
+        };
+
+        if let Some(repo) = &self.git_repo {
+            match repo.stash_drop(&name) {
+                Ok(()) => {
+                    self.set_status(format!("Dropped stash: {name}"));
+                    self.refresh_source_control();
+                }
+                Err(e) => self.set_status(format!("Stash drop failed: {e}")),
+            }
+        }
+    }
+
+    /// Create a pull request using `gh` CLI.
+    pub fn create_pr(&mut self) {
+        let branch = match self.git_branch() {
+            Some(b) => b,
+            None => {
+                self.set_status("Not on a branch");
+                return;
+            }
+        };
+
+        if branch == "main" || branch == "master" {
+            self.set_status("Cannot create PR from main/master branch");
+            return;
+        }
+
+        // Open terminal and run gh pr create interactively.
+        self.terminal.visible = true;
+        self.terminal_focused = true;
+        let cmd = format!("gh pr create --head {branch}");
+        self.terminal.send_bytes(cmd.as_bytes());
+        self.terminal.send_enter();
+        self.set_status(format!("Creating PR for branch '{branch}'..."));
+    }
+
     // ── Task Runner ──────────────────────────────────────────────
 
     /// Run a named task in the embedded terminal.

@@ -2673,6 +2673,57 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
         }
         y += 1;
     }
+
+    // --- Stashes ---
+    if !sc.stashes.is_empty() {
+        // Blank separator.
+        if y < max_y {
+            y += 1;
+        }
+
+        let stash_focused = sc.focused_section == GitPanelSection::Stashes;
+        if y < max_y {
+            let header_style = if stash_focused {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+            let header = format!(" Stashes ({})", sc.stashes.len());
+            frame.render_widget(
+                Paragraph::new(Span::styled(header, header_style)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+
+        for (i, stash) in sc.stashes.iter().enumerate() {
+            if y >= max_y {
+                break;
+            }
+            let is_selected = stash_focused && i == sc.selected;
+            let display: String = format!(" {} {}", stash.name, stash.message)
+                .chars()
+                .take(inner.width as usize)
+                .collect();
+
+            if is_selected {
+                let style = Style::default().add_modifier(Modifier::REVERSED);
+                frame.render_widget(
+                    Paragraph::new(display).style(style),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+            } else {
+                let style = Style::default().fg(Color::Cyan);
+                frame.render_widget(
+                    Paragraph::new(display).style(style),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+            }
+            y += 1;
+        }
+    }
 }
 
 /// Get the display color for a git file status.

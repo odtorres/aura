@@ -494,8 +494,8 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [ ] **Terminal inline AI suggestions** — AI suggests shell commands based on context. Copilot does this in VS Code terminal.
 
 ### 11.6 Git & Collaboration — Medium Priority
-- [ ] **Stash management** — View, apply, and drop git stashes from the source control panel.
-- [ ] **PR creation from editor** — Create pull requests directly from within AURA using `gh` CLI integration.
+- [x] **Stash management** — View, push (`z`), pop (`p`), drop (`d`) stashes from source control panel.
+- [x] **PR creation from editor** — `:pr` opens `gh pr create` interactively in the terminal.
 - [ ] **Follow mode in collab** — Follow a peer's viewport in real-time. Zed has this.
 - [ ] **Shared terminal in collab** — Share terminal output with collaborators.
 

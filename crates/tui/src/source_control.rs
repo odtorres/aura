@@ -64,10 +64,23 @@ pub enum GitPanelSection {
     StagedFiles,
     /// The unstaged/changed files list.
     ChangedFiles,
+    /// Git stashes.
+    Stashes,
+}
+
+/// A git stash entry.
+#[derive(Debug, Clone)]
+pub struct StashEntry {
+    /// Stash name (e.g. "stash@{0}").
+    pub name: String,
+    /// Stash message.
+    pub message: String,
 }
 
 /// State for the source control sidebar panel.
 pub struct SourceControlPanel {
+    /// Git stashes.
+    pub stashes: Vec<StashEntry>,
     /// Files with merge conflicts.
     pub merge_changes: Vec<GitFileEntry>,
     /// Unstaged changed files.
@@ -99,6 +112,7 @@ impl SourceControlPanel {
     /// Create a new source control panel with the given width.
     pub fn new(width: u16) -> Self {
         Self {
+            stashes: Vec::new(),
             merge_changes: Vec::new(),
             changed: Vec::new(),
             staged: Vec::new(),
@@ -121,9 +135,17 @@ impl SourceControlPanel {
         self.ahead = ahead;
         self.behind = behind;
 
+        self.stashes.clear();
         self.merge_changes.clear();
         self.changed.clear();
         self.staged.clear();
+
+        // Load stashes.
+        if let Ok(stash_list) = git_repo.stash_list() {
+            for (name, message) in stash_list {
+                self.stashes.push(StashEntry { name, message });
+            }
+        }
 
         let entries = match git_repo.file_status() {
             Ok(entries) => entries,
@@ -199,7 +221,8 @@ impl SourceControlPanel {
             GitPanelSection::CommitMessage => GitPanelSection::MergeChanges,
             GitPanelSection::MergeChanges => GitPanelSection::StagedFiles,
             GitPanelSection::StagedFiles => GitPanelSection::ChangedFiles,
-            GitPanelSection::ChangedFiles => GitPanelSection::CommitMessage,
+            GitPanelSection::ChangedFiles => GitPanelSection::Stashes,
+            GitPanelSection::Stashes => GitPanelSection::CommitMessage,
         };
         self.selected = 0;
     }
@@ -207,10 +230,11 @@ impl SourceControlPanel {
     /// Cycle to the previous section.
     pub fn prev_section(&mut self) {
         self.focused_section = match self.focused_section {
-            GitPanelSection::CommitMessage => GitPanelSection::ChangedFiles,
+            GitPanelSection::CommitMessage => GitPanelSection::Stashes,
             GitPanelSection::MergeChanges => GitPanelSection::CommitMessage,
             GitPanelSection::StagedFiles => GitPanelSection::MergeChanges,
             GitPanelSection::ChangedFiles => GitPanelSection::StagedFiles,
+            GitPanelSection::Stashes => GitPanelSection::ChangedFiles,
         };
         self.selected = 0;
     }
@@ -303,7 +327,7 @@ impl SourceControlPanel {
             GitPanelSection::ChangedFiles => {
                 self.changed.get(self.selected).map(|e| e.rel_path.as_str())
             }
-            GitPanelSection::CommitMessage => None,
+            GitPanelSection::CommitMessage | GitPanelSection::Stashes => None,
         }
     }
 
@@ -313,7 +337,16 @@ impl SourceControlPanel {
             GitPanelSection::MergeChanges => self.merge_changes.get(self.selected),
             GitPanelSection::StagedFiles => self.staged.get(self.selected),
             GitPanelSection::ChangedFiles => self.changed.get(self.selected),
-            GitPanelSection::CommitMessage => None,
+            GitPanelSection::CommitMessage | GitPanelSection::Stashes => None,
+        }
+    }
+
+    /// Get the currently selected stash entry (if in Stashes section).
+    pub fn selected_stash(&self) -> Option<&StashEntry> {
+        if self.focused_section == GitPanelSection::Stashes {
+            self.stashes.get(self.selected)
+        } else {
+            None
         }
     }
 
@@ -324,6 +357,7 @@ impl SourceControlPanel {
             GitPanelSection::MergeChanges => self.merge_changes.len(),
             GitPanelSection::StagedFiles => self.staged.len(),
             GitPanelSection::ChangedFiles => self.changed.len(),
+            GitPanelSection::Stashes => self.stashes.len(),
         }
     }
 
