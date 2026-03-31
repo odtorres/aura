@@ -279,6 +279,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_ghost_text(frame, app, editor_inner_for_popups, suggestion);
         }
 
+        // Render next-edit prediction markers.
+        if !app.edit_predictions().is_empty() {
+            draw_edit_predictions(frame, app, editor_inner_for_popups);
+        }
+
         // Render peek definition popup if present.
         if app.peek_definition.is_some() {
             draw_peek_definition(frame, app, editor_inner_for_popups);
@@ -6071,6 +6076,51 @@ fn draw_conflict_actions(frame: &mut Frame, app: &App, editor_area: Rect) {
                 Paragraph::new(display).style(hint_style),
                 Rect::new(hint_x, y, available, 1),
             );
+        }
+    }
+}
+
+/// Draw next-edit prediction markers (gutter arrows + faint line highlight).
+fn draw_edit_predictions(frame: &mut Frame, app: &App, editor_area: Rect) {
+    let predictions = app.edit_predictions();
+    if predictions.is_empty() {
+        return;
+    }
+
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let visible_rows = editor_area.height as usize;
+    let gutter_width = 6u16;
+    let pred_color = Color::Indexed(75); // Muted blue
+
+    for (i, pred) in predictions.iter().enumerate() {
+        if pred.line < scroll_row || pred.line >= scroll_row + visible_rows {
+            continue;
+        }
+        if pred.line == tab.cursor.row {
+            continue; // Don't show on current line.
+        }
+
+        let screen_y = editor_area.y + (pred.line - scroll_row) as u16;
+
+        // Gutter marker: '›' for top prediction, '·' for others.
+        let marker = if i == 0 { "›" } else { "·" };
+        let marker_x = editor_area.x + gutter_width.saturating_sub(2);
+        if marker_x < editor_area.right() && screen_y < editor_area.bottom() {
+            let cell = &mut frame.buffer_mut()[(marker_x, screen_y)];
+            cell.set_char(marker.chars().next().unwrap());
+            cell.set_fg(pred_color);
+        }
+
+        // Faint line highlight (subtle background tint).
+        let line_start = editor_area.x + gutter_width;
+        let line_width = editor_area.width.saturating_sub(gutter_width);
+        for col in 0..line_width {
+            let x = line_start + col;
+            if x < editor_area.right() && screen_y < editor_area.bottom() {
+                let cell = &mut frame.buffer_mut()[(x, screen_y)];
+                cell.set_bg(Color::Indexed(236)); // Very dark gray tint
+            }
         }
     }
 }

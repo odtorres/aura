@@ -69,6 +69,119 @@ impl SuggestionCategory {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Next-edit prediction
+// ---------------------------------------------------------------------------
+
+/// Why a particular line was predicted as the next edit location.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PredictionReason {
+    /// LSP diagnostic (error/warning) at this line.
+    Diagnostic,
+    /// Continuation of a sequential edit pattern.
+    Sequential,
+    /// Same identifier was edited elsewhere.
+    PatternMatch,
+    /// Recently edited line the cursor moved away from.
+    RecentReturn,
+}
+
+impl PredictionReason {
+    /// Short label for status bar display.
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Diagnostic => "diagnostic",
+            Self::Sequential => "sequential",
+            Self::PatternMatch => "pattern",
+            Self::RecentReturn => "recent",
+        }
+    }
+}
+
+/// A predicted next-edit location.
+#[derive(Debug, Clone)]
+pub struct NextEditPrediction {
+    /// Predicted line number (0-indexed).
+    pub line: usize,
+    /// Confidence score (0.0–1.0).
+    pub confidence: f32,
+    /// Why this line was predicted.
+    pub reason: PredictionReason,
+}
+
+/// Predict where the user will edit next based on heuristics.
+///
+/// `recent_edit_lines` should be line numbers of recent edits in reverse
+/// chronological order (most recent first). Returns up to 3 predictions
+/// sorted by confidence, excluding `cursor_line`.
+pub fn predict_next_edits(
+    recent_edit_lines: &[usize],
+    cursor_line: usize,
+    diagnostics: &[(usize, String)],
+    buffer_line_count: usize,
+) -> Vec<NextEditPrediction> {
+    let mut predictions: Vec<NextEditPrediction> = Vec::new();
+    let mut seen_lines = std::collections::HashSet::new();
+    seen_lines.insert(cursor_line);
+
+    // 1. Diagnostic-driven: lines with errors/warnings not recently edited.
+    let recent_set: std::collections::HashSet<usize> =
+        recent_edit_lines.iter().copied().collect();
+    for (line, _msg) in diagnostics {
+        if *line < buffer_line_count && seen_lines.insert(*line) && !recent_set.contains(line) {
+            predictions.push(NextEditPrediction {
+                line: *line,
+                confidence: 0.9,
+                reason: PredictionReason::Diagnostic,
+            });
+        }
+    }
+
+    // 2. Sequential pattern: detect consecutive edit lines and predict next.
+    if recent_edit_lines.len() >= 2 {
+        let last = recent_edit_lines[0];
+        let prev = recent_edit_lines[1];
+        if last == prev.saturating_add(1) {
+            let next = last.saturating_add(1);
+            if next < buffer_line_count && seen_lines.insert(next) {
+                predictions.push(NextEditPrediction {
+                    line: next,
+                    confidence: 0.7,
+                    reason: PredictionReason::Sequential,
+                });
+            }
+        } else if last == prev.saturating_sub(1) && last > 0 {
+            let next = last.saturating_sub(1);
+            if seen_lines.insert(next) {
+                predictions.push(NextEditPrediction {
+                    line: next,
+                    confidence: 0.7,
+                    reason: PredictionReason::Sequential,
+                });
+            }
+        }
+    }
+
+    // 3. Return to recent: lines edited recently that cursor moved away from.
+    for &line in recent_edit_lines.iter().take(5) {
+        if line < buffer_line_count
+            && seen_lines.insert(line)
+            && (line as isize - cursor_line as isize).unsigned_abs() > 5
+        {
+            predictions.push(NextEditPrediction {
+                line,
+                confidence: 0.4,
+                reason: PredictionReason::RecentReturn,
+            });
+        }
+    }
+
+    // Sort by confidence descending, take top 3.
+    predictions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    predictions.truncate(3);
+    predictions
+}
+
 /// A single AI-generated ghost suggestion.
 #[derive(Debug, Clone)]
 pub struct GhostSuggestion {
@@ -198,6 +311,10 @@ pub struct SpeculativeEngine {
     pub pending_changeset: Option<Changeset>,
     /// Idle time (in ms) before triggering analysis.
     idle_threshold_ms: u64,
+    /// Predicted next-edit locations (heuristic-based).
+    pub edit_predictions: Vec<NextEditPrediction>,
+    /// Index for cycling through predictions.
+    pub prediction_index: usize,
 }
 
 impl SpeculativeEngine {
@@ -216,6 +333,8 @@ impl SpeculativeEngine {
             suggestion_index: 0,
             pending_changeset: None,
             idle_threshold_ms: 3000, // 3 seconds of idle before analyzing
+            edit_predictions: Vec::new(),
+            prediction_index: 0,
         })
     }
 
@@ -238,6 +357,62 @@ impl SpeculativeEngine {
         self.cache.clear();
         self.active_suggestions.clear();
         self.suggestion_index = 0;
+        self.edit_predictions.clear();
+        self.prediction_index = 0;
+    }
+
+    /// Update next-edit predictions from heuristics.
+    pub fn update_predictions(
+        &mut self,
+        recent_edit_lines: &[usize],
+        cursor_line: usize,
+        diagnostics: &[(usize, String)],
+        buffer_line_count: usize,
+    ) {
+        // Only predict after 500ms idle.
+        if self.last_cursor_move.elapsed().as_millis() < 500 {
+            self.edit_predictions.clear();
+            self.prediction_index = 0;
+            return;
+        }
+        let new_predictions =
+            predict_next_edits(recent_edit_lines, cursor_line, diagnostics, buffer_line_count);
+        if new_predictions.iter().map(|p| p.line).collect::<Vec<_>>()
+            != self.edit_predictions.iter().map(|p| p.line).collect::<Vec<_>>()
+        {
+            self.edit_predictions = new_predictions;
+            self.prediction_index = 0;
+        }
+    }
+
+    /// Clear all edit predictions.
+    pub fn clear_predictions(&mut self) {
+        self.edit_predictions.clear();
+        self.prediction_index = 0;
+    }
+
+    /// Get the currently selected prediction.
+    pub fn current_prediction(&self) -> Option<&NextEditPrediction> {
+        self.edit_predictions.get(self.prediction_index)
+    }
+
+    /// Cycle to the next prediction.
+    pub fn next_prediction(&mut self) {
+        if !self.edit_predictions.is_empty() {
+            self.prediction_index =
+                (self.prediction_index + 1) % self.edit_predictions.len();
+        }
+    }
+
+    /// Cycle to the previous prediction.
+    pub fn prev_prediction(&mut self) {
+        if !self.edit_predictions.is_empty() {
+            self.prediction_index = if self.prediction_index == 0 {
+                self.edit_predictions.len() - 1
+            } else {
+                self.prediction_index - 1
+            };
+        }
     }
 
     /// Check if we should trigger background analysis (cursor idle long enough).

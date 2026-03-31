@@ -469,7 +469,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **@-mentions in chat** — Reference `@file.rs`, `@selection`, `@buffer`, `@errors` in the chat panel to give AI precise context.
 - [x] **Autonomous agent mode** — `:agent <task>` lets AI loop autonomously with all tools auto-approved. Configurable iteration limit.
 - [x] **Project rules / AI instructions** — `.aura/rules.md` or `.aura/rules/*.md` files automatically injected into AI system prompt.
-- [ ] **Next-edit prediction** — Predict WHERE the user will edit next, not just what. Cursor Tab and Copilot NES both do this. Show ghost cursors at predicted locations.
+- [x] **Next-edit prediction** — Predict WHERE the user will edit next, not just what. Cursor Tab and Copilot NES both do this. Show ghost cursors at predicted locations.
 
 ### 11.2 Editor UX — High Priority
 - [x] **Code folding** — Fold/unfold code blocks using tree-sitter scope data. `zc` fold, `zo` open, `za` toggle, `zM` fold all, `zR` unfold all.

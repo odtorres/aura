@@ -279,6 +279,8 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `:unfollow` | | Stop following a peer |
 | `:share-term` | | Toggle terminal sharing (host only) |
 | `:view-term` | | Toggle shared terminal view (client only) |
+| `Ctrl+]` | | Jump to next edit prediction |
+| `Ctrl+[` | | Jump to previous edit prediction |
 | `:agent <task>` | | Start autonomous AI agent |
 | `:agent -n <N> <task>` | | Agent with custom iteration limit |
 | `:agent stop` | | Stop the running agent |

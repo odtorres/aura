@@ -1202,6 +1202,7 @@ impl App {
             // Poll speculative engine and trigger analysis if idle.
             self.poll_speculative();
             self.maybe_trigger_analysis();
+            self.update_edit_predictions();
 
             // Send debounced didChange and re-index if needed (300ms delay).
             if self.tab().lsp_last_change.elapsed() > Duration::from_millis(300) {
@@ -4571,6 +4572,80 @@ impl App {
             suggestion.category.label(),
             suggestion.explanation
         ))
+    }
+
+    /// Get current edit predictions.
+    pub fn edit_predictions(
+        &self,
+    ) -> &[crate::speculative::NextEditPrediction] {
+        match &self.speculative {
+            Some(engine) => &engine.edit_predictions,
+            None => &[],
+        }
+    }
+
+    /// Jump cursor to the next (or previous) edit prediction.
+    pub fn jump_to_prediction(&mut self, forward: bool) {
+        if let Some(engine) = &mut self.speculative {
+            if engine.edit_predictions.is_empty() {
+                return;
+            }
+            if forward {
+                engine.next_prediction();
+            } else {
+                engine.prev_prediction();
+            }
+            if let Some(pred) = engine.current_prediction() {
+                let line = pred.line;
+                let reason = pred.reason.label().to_string();
+                self.tab_mut().cursor.row = line;
+                self.tab_mut().cursor.col = 0;
+                self.set_status(format!("Prediction: {reason} (line {})", line + 1));
+            }
+        }
+    }
+
+    /// Update next-edit predictions based on recent edit history and diagnostics.
+    fn update_edit_predictions(&mut self) {
+        let has_engine = self.speculative.is_some();
+        if !has_engine {
+            return;
+        }
+
+        // Extract recent edit line numbers from buffer history.
+        let buffer = &self.tabs.active().buffer;
+        let history = buffer.history();
+        let recent_edit_lines: Vec<usize> = history
+            .iter()
+            .rev()
+            .take(20)
+            .filter_map(|edit| {
+                let pos = match &edit.kind {
+                    aura_core::buffer::EditKind::Insert { pos, .. } => *pos,
+                    aura_core::buffer::EditKind::Delete { start, .. } => *start,
+                };
+                // Convert char position to line number safely.
+                if pos <= buffer.len_chars() {
+                    Some(buffer.char_idx_to_cursor(pos).row)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let cursor_line = self.tabs.active().cursor.row;
+        let diagnostics: Vec<(usize, String)> = self
+            .tabs
+            .active()
+            .diagnostics
+            .iter()
+            .map(|d| (d.range.start.line as usize, d.message.clone()))
+            .collect();
+        let line_count = buffer.line_count();
+
+        if let Some(engine) = &mut self.speculative {
+            engine.update_predictions(&recent_edit_lines, cursor_line, &diagnostics, line_count);
+        }
     }
 
     /// Toggle speculative aggressiveness.

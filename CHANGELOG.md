@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.55] - 2026-03-31
+
+### Added
+
+- **Next-edit prediction** — Ghost cursors at predicted edit locations using fast local heuristics.
+  - Analyzes recent edit history and LSP diagnostics to predict where you'll edit next
+  - Heuristic patterns: sequential edits, diagnostic-driven, return-to-recent
+  - Gutter markers (`›` / `·`) and faint line highlights at predicted lines (up to 3)
+  - `Ctrl+]` / `Ctrl+[` to jump to next/previous prediction
+  - No API calls — runs purely from local data, near-instant
+  - Respects speculative aggressiveness setting (disabled in Minimal mode)
+  - Predictions appear after 500ms idle, clear on edit or cursor movement
+
 ## [0.1.54] - 2026-03-31
 
 ### Added

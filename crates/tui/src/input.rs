@@ -1808,6 +1808,22 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.dismiss_ghost_suggestions();
         }
 
+        // Next-edit prediction navigation.
+        KeyCode::Char(']')
+            if modifiers.contains(KeyModifiers::CONTROL)
+                && !app.edit_predictions().is_empty() =>
+        {
+            app.jump_to_prediction(true);
+            app.notify_cursor_moved();
+        }
+        KeyCode::Char('[')
+            if modifiers.contains(KeyModifiers::CONTROL)
+                && !app.edit_predictions().is_empty() =>
+        {
+            app.jump_to_prediction(false);
+            app.notify_cursor_moved();
+        }
+
         // Navigation with count support.
         KeyCode::Char('h') | KeyCode::Left => {
             let tab = app.tab_mut();
