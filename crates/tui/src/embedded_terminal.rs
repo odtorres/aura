@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Terminal color — supports default, ANSI 256, and true color (RGB).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum TermColor {
     /// Default terminal color.
     #[default]
@@ -23,7 +23,7 @@ pub enum TermColor {
 }
 
 /// A single cell in the terminal screen grid.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct TerminalCell {
     /// The character displayed in this cell.
     pub ch: char,
@@ -47,7 +47,7 @@ impl Default for TerminalCell {
 }
 
 /// A completed or in-progress shell command detected via shell integration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommandRecord {
     /// The command text entered by the user.
     pub command: String,
@@ -55,6 +55,23 @@ pub struct CommandRecord {
     pub exit_code: Option<i32>,
     /// Screen row where the prompt appeared.
     pub prompt_row: usize,
+}
+
+/// A serializable snapshot of the terminal screen for sharing over the network.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TerminalSnapshot {
+    /// Visible cell grid.
+    pub cells: Vec<Vec<TerminalCell>>,
+    /// Cursor row within the visible grid.
+    pub cursor_row: usize,
+    /// Cursor column.
+    pub cursor_col: usize,
+    /// Screen width in columns.
+    pub cols: usize,
+    /// Screen height in rows.
+    pub rows: usize,
+    /// Shell command records.
+    pub commands: Vec<CommandRecord>,
 }
 
 /// The virtual screen buffer that the PTY output renders into.
@@ -1203,6 +1220,20 @@ impl EmbeddedTerminal {
 
         let adjusted_cursor_row = scr.cursor_row + shift;
         (result, adjusted_cursor_row, scr.cursor_col)
+    }
+
+    /// Create a serializable snapshot of the terminal screen for network sharing.
+    pub fn terminal_snapshot(&self) -> TerminalSnapshot {
+        let (cells, cursor_row, cursor_col) = self.snapshot();
+        let scr = self.screen.lock().unwrap();
+        TerminalSnapshot {
+            cells,
+            cursor_row,
+            cursor_col,
+            cols: scr.cols,
+            rows: scr.rows,
+            commands: scr.commands.clone(),
+        }
     }
 
     /// Get the current cursor position (row, col) for rendering.

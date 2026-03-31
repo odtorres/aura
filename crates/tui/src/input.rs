@@ -3441,6 +3441,36 @@ fn execute_command(app: &mut App, cmd: &str) {
         "unfollow" => {
             app.stop_follow();
         }
+        "share-term" | "share-terminal" => {
+            if let Some(session) = &app.collab {
+                if session.is_host {
+                    app.collab_sharing_terminal = !app.collab_sharing_terminal;
+                    let state = if app.collab_sharing_terminal {
+                        "on"
+                    } else {
+                        "off"
+                    };
+                    app.set_status(format!("Terminal sharing {state}"));
+                } else {
+                    app.set_status("Only the host can share their terminal");
+                }
+            } else {
+                app.set_status("Not in a collab session");
+            }
+        }
+        "view-term" | "view-terminal" => {
+            if app.collab_shared_terminal.is_some() {
+                app.viewing_shared_terminal = !app.viewing_shared_terminal;
+                let state = if app.viewing_shared_terminal {
+                    "showing host terminal"
+                } else {
+                    "showing local terminal"
+                };
+                app.set_status(format!("Terminal view: {state}"));
+            } else {
+                app.set_status("No shared terminal available");
+            }
+        }
         // --- Git stash & PR ---
         "stash" => {
             app.sc_stash_push();

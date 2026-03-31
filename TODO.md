@@ -497,7 +497,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **Stash management** — View, push (`z`), pop (`p`), drop (`d`) stashes from source control panel.
 - [x] **PR creation from editor** — `:pr` opens `gh pr create` interactively in the terminal.
 - [x] **Follow mode in collab** — Follow a peer's viewport in real-time. Zed has this.
-- [ ] **Shared terminal in collab** — Share terminal output with collaborators.
+- [x] **Shared terminal in collab** — Share terminal output with collaborators.
 
 ### 11.7 Editor Polish — Nice to Have
 - [x] **Auto-close brackets/quotes** — Automatically insert matching pair when typing `(`, `[`, `{`, `"`, `'`.

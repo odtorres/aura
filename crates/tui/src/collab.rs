@@ -39,6 +39,7 @@ const MSG_DOC_SNAPSHOT: u8 = 0x05;
 const MSG_FILE_OPENED: u8 = 0x06;
 const MSG_FILE_CLOSED: u8 = 0x07;
 const MSG_AUTHENTICATE: u8 = 0x08;
+const MSG_TERMINAL_SNAPSHOT: u8 = 0x09;
 
 // ---------------------------------------------------------------------------
 // TLS + Auth configuration
@@ -460,6 +461,11 @@ pub enum CollabEvent {
     },
     /// Client successfully reconnected.
     Reconnected,
+    /// Host shared a terminal screen snapshot.
+    TerminalSnapshot {
+        /// JSON-serialized snapshot data.
+        data: Vec<u8>,
+    },
     /// An error occurred on the network layer.
     Error(String),
 }
@@ -489,6 +495,11 @@ pub enum CollabCommand {
     NotifyFileClosed {
         /// File identifier.
         file_id: u64,
+    },
+    /// Broadcast a terminal screen snapshot to all peers (host only).
+    BroadcastTerminalSnapshot {
+        /// JSON-serialized TerminalSnapshot.
+        data: Vec<u8>,
     },
     /// Shut down the collaboration session.
     Shutdown,
@@ -732,6 +743,9 @@ impl CollabSession {
                             let payload = file_id.to_be_bytes().to_vec();
                             broadcast(&clients_for_cmd, MSG_FILE_CLOSED, &payload);
                         }
+                        CollabCommand::BroadcastTerminalSnapshot { data } => {
+                            broadcast(&clients_for_cmd, MSG_TERMINAL_SNAPSHOT, &data);
+                        }
                         CollabCommand::Shutdown => break,
                     }
                 }
@@ -861,8 +875,9 @@ impl CollabSession {
                             }
                         }
                         CollabCommand::NotifyFileOpened { .. }
-                        | CollabCommand::NotifyFileClosed { .. } => {
-                            // Only host sends file open/close notifications.
+                        | CollabCommand::NotifyFileClosed { .. }
+                        | CollabCommand::BroadcastTerminalSnapshot { .. } => {
+                            // Only host sends these notifications.
                         }
                         CollabCommand::Shutdown => break,
                     }
@@ -911,6 +926,11 @@ impl CollabSession {
     /// Broadcast an awareness update.
     pub fn broadcast_awareness(&self, update: AwarenessUpdate) {
         self.send_command(CollabCommand::BroadcastAwareness(update));
+    }
+
+    /// Broadcast a terminal screen snapshot to all peers (host only).
+    pub fn broadcast_terminal_snapshot(&self, data: Vec<u8>) {
+        self.send_command(CollabCommand::BroadcastTerminalSnapshot { data });
     }
 
     /// Notify peers that a file was opened (host only).
@@ -1335,6 +1355,7 @@ fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
                 CollabEvent::Error("malformed file-closed message".to_string())
             }
         }
+        MSG_TERMINAL_SNAPSHOT => CollabEvent::TerminalSnapshot { data: payload },
         _ => CollabEvent::Error(format!("unknown message type: 0x{msg_type:02x}")),
     }
 }

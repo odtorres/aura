@@ -536,6 +536,16 @@ pub struct App {
     pub collab_follow_peer: Option<u64>,
     /// Last scroll position applied from the followed peer (for break detection).
     collab_follow_last_applied: Option<(usize, usize)>,
+    /// Whether terminal sharing is active (host only).
+    pub collab_sharing_terminal: bool,
+    /// Timestamp of the last terminal snapshot broadcast.
+    collab_last_terminal_broadcast: std::time::Instant,
+    /// Hash of the last broadcast terminal snapshot (change detection).
+    collab_last_terminal_hash: u64,
+    /// Shared terminal snapshot received from the host (client only).
+    pub collab_shared_terminal: Option<crate::embedded_terminal::TerminalSnapshot>,
+    /// Whether to show the shared terminal instead of local terminal (client only).
+    pub viewing_shared_terminal: bool,
 
     // --- Debugger ---
     /// Active DAP debug adapter client (None when not debugging).
@@ -914,6 +924,11 @@ impl App {
             collab_last_scroll: None,
             collab_follow_peer: None,
             collab_follow_last_applied: None,
+            collab_sharing_terminal: false,
+            collab_last_terminal_broadcast: std::time::Instant::now(),
+            collab_last_terminal_hash: 0,
+            collab_shared_terminal: None,
+            viewing_shared_terminal: false,
             dap_client: None,
             debug_panel: crate::debug_panel::DebugPanel::new(),
             debug_panel_focused: false,
@@ -1179,6 +1194,7 @@ impl App {
             self.poll_collab_events();
             self.apply_follow_viewport();
             self.maybe_send_awareness();
+            self.maybe_broadcast_terminal_snapshot();
 
             // Poll for update check result.
             self.poll_update_check();
@@ -7451,6 +7467,9 @@ impl App {
             session.shutdown();
             self.collab_follow_peer = None;
             self.collab_follow_last_applied = None;
+            self.collab_sharing_terminal = false;
+            self.collab_shared_terminal = None;
+            self.viewing_shared_terminal = false;
             self.set_status("Collab session ended");
         }
     }
@@ -7755,6 +7774,19 @@ impl App {
                         session.update_peer_awareness(update);
                     }
                 }
+                crate::collab::CollabEvent::TerminalSnapshot { data } => {
+                    match serde_json::from_slice::<
+                        crate::embedded_terminal::TerminalSnapshot,
+                    >(&data)
+                    {
+                        Ok(snapshot) => {
+                            self.collab_shared_terminal = Some(snapshot);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to decode terminal snapshot: {e}");
+                        }
+                    }
+                }
                 crate::collab::CollabEvent::Reconnecting { attempt } => {
                     if let Some(session) = &mut self.collab {
                         session.reconnecting = true;
@@ -7882,6 +7914,58 @@ impl App {
                 scroll_col: Some(current_scroll.1),
             };
             session.broadcast_awareness(update);
+        }
+    }
+
+    /// Broadcast terminal screen snapshot to collab peers (host only, throttled).
+    fn maybe_broadcast_terminal_snapshot(&mut self) {
+        if !self.collab_sharing_terminal || self.collab.is_none() {
+            return;
+        }
+        if let Some(session) = &self.collab {
+            if !session.is_host {
+                return;
+            }
+        }
+
+        let now = std::time::Instant::now();
+        if now.duration_since(self.collab_last_terminal_broadcast) < Duration::from_millis(150) {
+            return;
+        }
+
+        let snapshot = self.terminal().terminal_snapshot();
+
+        // Quick change detection via hash.
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            snapshot.cursor_row.hash(&mut hasher);
+            snapshot.cursor_col.hash(&mut hasher);
+            snapshot.rows.hash(&mut hasher);
+            snapshot.cols.hash(&mut hasher);
+            if let Some(first_row) = snapshot.cells.first() {
+                for cell in first_row {
+                    cell.ch.hash(&mut hasher);
+                }
+            }
+            if let Some(last_row) = snapshot.cells.last() {
+                for cell in last_row {
+                    cell.ch.hash(&mut hasher);
+                }
+            }
+            hasher.finish()
+        };
+
+        if hash == self.collab_last_terminal_hash {
+            return;
+        }
+
+        if let Ok(data) = serde_json::to_vec(&snapshot) {
+            if let Some(session) = &self.collab {
+                session.broadcast_terminal_snapshot(data);
+            }
+            self.collab_last_terminal_hash = hash;
+            self.collab_last_terminal_broadcast = now;
         }
     }
 

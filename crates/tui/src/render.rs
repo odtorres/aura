@@ -150,7 +150,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             if inner_h > 0 && inner_w > 0 {
                 app.terminal_mut().resize(inner_w, inner_h);
             }
-            draw_terminal(frame, app, terminal_area);
+            if app.viewing_shared_terminal && app.collab_shared_terminal.is_some() {
+                draw_shared_terminal(frame, app, terminal_area);
+            } else {
+                draw_terminal(frame, app, terminal_area);
+            }
         }
 
         if has_debug_panel {
@@ -173,7 +177,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             if inner_h > 0 && inner_w > 0 {
                 app.terminal_mut().resize(inner_w, inner_h);
             }
-            draw_terminal(frame, app, terminal_area);
+            if app.viewing_shared_terminal && app.collab_shared_terminal.is_some() {
+                draw_shared_terminal(frame, app, terminal_area);
+            } else {
+                draw_terminal(frame, app, terminal_area);
+            }
         }
 
         // Draw debug panel if visible.
@@ -237,7 +245,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             if inner_h > 0 && inner_w > 0 {
                 app.terminal_mut().resize(inner_w, inner_h);
             }
-            draw_terminal(frame, app, terminal_area);
+            if app.viewing_shared_terminal && app.collab_shared_terminal.is_some() {
+                draw_shared_terminal(frame, app, terminal_area);
+            } else {
+                draw_terminal(frame, app, terminal_area);
+            }
         }
 
         // Draw debug panel if visible.
@@ -1425,6 +1437,71 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
                     ));
                 }
             }
+        }
+
+        let line = ratatui::text::Line::from(spans);
+        frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+    }
+}
+
+/// Draw a read-only shared terminal received from the collab host.
+fn draw_shared_terminal(frame: &mut Frame, app: &App, area: Rect) {
+    let snapshot = match &app.collab_shared_terminal {
+        Some(s) => s,
+        None => return,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Host Terminal (read-only) ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    for (row_idx, row) in snapshot.cells.iter().enumerate() {
+        let y = inner.y + row_idx as u16;
+        if y >= inner.y + inner.height {
+            break;
+        }
+
+        let mut spans: Vec<Span> = Vec::new();
+        let max_col = (inner.width as usize).min(row.len());
+
+        let mut col = 0;
+        while col < max_col {
+            let cell = &row[col];
+            let fg = term_color_to_ratatui(cell.fg, Color::White);
+            let bg = term_color_to_ratatui(cell.bg, Color::Reset);
+            let bold = cell.bold;
+
+            let mut text = String::new();
+            text.push(cell.ch);
+
+            let mut next = col + 1;
+            while next < max_col {
+                let nc = &row[next];
+                let nfg = term_color_to_ratatui(nc.fg, Color::White);
+                let nbg = term_color_to_ratatui(nc.bg, Color::Reset);
+                if nfg == fg && nbg == bg && nc.bold == bold {
+                    text.push(nc.ch);
+                    next += 1;
+                } else {
+                    break;
+                }
+            }
+
+            let mut style = Style::default().fg(fg).bg(bg);
+            if bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            spans.push(Span::styled(text, style));
+
+            col = next;
         }
 
         let line = ratatui::text::Line::from(spans);
@@ -5445,8 +5522,14 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
+    let share_term_indicator = if app.collab_sharing_terminal {
+        " │ [sharing term]".to_string()
+    } else {
+        String::new()
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -5457,6 +5540,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         mcp_indicator,
         collab_indicator,
         follow_indicator,
+        share_term_indicator,
         claude_indicator,
         experiment_indicator,
         agent_indicator,

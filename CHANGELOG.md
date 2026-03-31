@@ -5,6 +5,18 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.54] - 2026-03-31
+
+### Added
+
+- **Shared terminal in collab** — Host can share their terminal screen to all connected peers in real-time.
+  - `:share-term` — toggle terminal sharing (host only)
+  - `:view-term` — toggle between local and shared terminal view (client only)
+  - Read-only rendering with cyan border and "Host Terminal (read-only)" title
+  - Throttled snapshots (~7 Hz) with hash-based change detection to minimize bandwidth
+  - Status bar shows `[sharing term]` indicator when active
+  - Automatic cleanup on disconnect or session end
+
 ## [0.1.53] - 2026-03-31
 
 ### Added
