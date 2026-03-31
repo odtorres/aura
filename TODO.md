@@ -481,7 +481,7 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 ### 11.3 Code Navigation — Medium Priority
 - [x] **Document outline** — `Ctrl+O` or `:outline` — fuzzy-searchable symbol list for the current file.
 - [x] **Breadcrumbs** — Scope path at top of editor: `file.rs > impl App > fn process_data`.
-- [ ] **Peek definition** — Inline popup showing definition without leaving current file. Like VS Code's Alt+F12.
+- [x] **Peek definition** — Inline popup showing definition without leaving current file. Like VS Code's Alt+F12.
 
 ### 11.4 Protocol & Integration — High Priority
 - [x] **ACP (Agent Client Protocol) server** — JSON-RPC 2.0 over TCP. Exposes document read/edit, cursor, diagnostics, selection, file ops, terminal, project structure. Any ACP agent can drive AURA.
@@ -489,14 +489,14 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **Task runner integration** — `:task <name>` runs tasks defined in `aura.toml [tasks]`. Auto-detects for Rust/Node/Go/Python/Make.
 
 ### 11.5 Terminal & Shell — Medium Priority
-- [ ] **Terminal shell integration** — Detect command boundaries, exit codes, and auto-suggest fixes for failed commands. VS Code has this natively.
-- [ ] **Multiple terminal tabs** — Split terminals or tabbed terminals. Currently only one terminal pane.
-- [ ] **Terminal inline AI suggestions** — AI suggests shell commands based on context. Copilot does this in VS Code terminal.
+- [x] **Terminal shell integration** — Detect command boundaries, exit codes, and auto-suggest fixes for failed commands. VS Code has this natively.
+- [x] **Multiple terminal tabs** — Split terminals or tabbed terminals. Currently only one terminal pane.
+- [x] **Terminal inline AI suggestions** — AI suggests shell commands based on context. Copilot does this in VS Code terminal.
 
 ### 11.6 Git & Collaboration — Medium Priority
 - [x] **Stash management** — View, push (`z`), pop (`p`), drop (`d`) stashes from source control panel.
 - [x] **PR creation from editor** — `:pr` opens `gh pr create` interactively in the terminal.
-- [ ] **Follow mode in collab** — Follow a peer's viewport in real-time. Zed has this.
+- [x] **Follow mode in collab** — Follow a peer's viewport in real-time. Zed has this.
 - [ ] **Shared terminal in collab** — Share terminal output with collaborators.
 
 ### 11.7 Editor Polish — Nice to Have
@@ -505,8 +505,8 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **Word wrap / soft wrap** — Toggle with `:set wrap` / `:set nowrap`.
 - [x] **Relative line numbers** — `:set rnu` / `:set nornu`. Current line shows absolute.
 - [x] **Marks / bookmarks** — `m{a-z}` to set, `'{a-z}` to jump. `:marks` to list.
-- [ ] **Registers display** — `:registers` to show yank/delete register contents.
-- [ ] **Macro editing** — Edit macro contents before replaying.
+- [x] **Registers display** — `:registers` to show yank/delete register contents.
+- [x] **Macro editing** — Edit macro contents before replaying.
 
 ### 11.8 Distribution
 - [ ] Create `aura-editor/homebrew-tap` repo on GitHub

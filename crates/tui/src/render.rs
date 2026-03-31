@@ -18,9 +18,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Layout: optional tab bar + editor area + optional proposal + optional debug panel + optional terminal + status bar + command bar.
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
-    let has_terminal = app.terminal.visible;
+    let has_terminal = app.terminal().visible;
     let has_debug_panel = app.debug_panel.visible;
-    let terminal_height = if has_terminal { app.terminal.height } else { 0 };
+    let terminal_height = if has_terminal { app.terminal().height } else { 0 };
     let debug_panel_height = if has_debug_panel {
         app.debug_panel.height
     } else {
@@ -148,7 +148,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let inner_h = terminal_area.height.saturating_sub(2);
             let inner_w = terminal_area.width.saturating_sub(2);
             if inner_h > 0 && inner_w > 0 {
-                app.terminal.resize(inner_w, inner_h);
+                app.terminal_mut().resize(inner_w, inner_h);
             }
             draw_terminal(frame, app, terminal_area);
         }
@@ -171,7 +171,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let inner_h = terminal_area.height.saturating_sub(2);
             let inner_w = terminal_area.width.saturating_sub(2);
             if inner_h > 0 && inner_w > 0 {
-                app.terminal.resize(inner_w, inner_h);
+                app.terminal_mut().resize(inner_w, inner_h);
             }
             draw_terminal(frame, app, terminal_area);
         }
@@ -235,7 +235,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let inner_h = terminal_area.height.saturating_sub(2); // borders
             let inner_w = terminal_area.width.saturating_sub(2);
             if inner_h > 0 && inner_w > 0 {
-                app.terminal.resize(inner_w, inner_h);
+                app.terminal_mut().resize(inner_w, inner_h);
             }
             draw_terminal(frame, app, terminal_area);
         }
@@ -265,6 +265,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         // Render ghost suggestion if present.
         if let Some(suggestion) = app.current_ghost_suggestion() {
             draw_ghost_text(frame, app, editor_inner_for_popups, suggestion);
+        }
+
+        // Render peek definition popup if present.
+        if app.peek_definition.is_some() {
+            draw_peek_definition(frame, app, editor_inner_for_popups);
         }
 
         // Render hover popup if present.
@@ -317,6 +322,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_undo_tree_modal(frame, app, area);
         }
 
+        // Render registers modal if visible.
+        if app.registers_visible {
+            draw_registers_modal(frame, app, area);
+        }
+
         // Render document outline if visible.
         if app.outline_visible {
             draw_outline_modal(frame, app, area);
@@ -363,7 +373,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 horizontal: 1,
                 vertical: 1,
             });
-            let (_snap, t_cursor_row, t_cursor_col) = app.terminal.snapshot();
+            let (_snap, t_cursor_row, t_cursor_col) = app.terminal().snapshot();
             let cx = inner.x + t_cursor_col as u16;
             let cy = inner.y + t_cursor_row as u16;
             if cx < inner.right() && cy < inner.bottom() {
@@ -1265,16 +1275,47 @@ fn draw_debug_panel(frame: &mut Frame, app: &App, area: Rect) {
 /// Draw the embedded PTY terminal pane.
 fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.terminal_focused;
+    let multi_tab = app.terminals.len() > 1;
 
-    let title = if focused {
-        let offset = app.terminal.scroll_offset();
-        if offset > 0 {
-            " Terminal (scrollback) "
+    // Build exit code indicator from last command.
+    let last_exit = {
+        let cmds = app.terminal().commands();
+        if let Some(last) = cmds.last() {
+            match last.exit_code {
+                Some(0) => " [ok] ".to_string(),
+                Some(code) => format!(" [exit {code}] "),
+                None => " [running] ".to_string(),
+            }
         } else {
-            " Terminal (focused) "
+            String::new()
+        }
+    };
+
+    let title = if multi_tab {
+        // Build tab bar: [1: zsh] [2: cargo] ...
+        let mut tabs = String::from(" ");
+        for (i, t) in app.terminals.iter().enumerate() {
+            let label = if t.label.is_empty() {
+                format!("{}", i + 1)
+            } else {
+                t.label.clone()
+            };
+            if i == app.active_terminal {
+                tabs.push_str(&format!("[{label}] "));
+            } else {
+                tabs.push_str(&format!(" {label}  "));
+            }
+        }
+        format!("{tabs}{last_exit}")
+    } else if focused {
+        let offset = app.terminal().scroll_offset();
+        if offset > 0 {
+            format!(" Terminal (scrollback){last_exit}")
+        } else {
+            format!(" Terminal (focused){last_exit}")
         }
     } else {
-        " Terminal "
+        format!(" Terminal{last_exit}")
     };
 
     let border_style = if focused {
@@ -1296,7 +1337,7 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Get a bottom-anchored snapshot of the terminal screen.
-    let (snapshot, cursor_row, cursor_col) = app.terminal.snapshot();
+    let (snapshot, cursor_row, cursor_col) = app.terminal().snapshot();
 
     for (row_idx, row) in snapshot.iter().enumerate() {
         let y = inner.y + row_idx as u16;
@@ -1342,7 +1383,7 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
                 && row_idx == cursor_row
                 && col <= cursor_col
                 && cursor_col < next
-                && app.terminal.scroll_offset() == 0
+                && app.terminal().scroll_offset() == 0
             {
                 // Split the span at the cursor position to reverse just that cell.
                 let cursor_offset = cursor_col - col;
@@ -1367,6 +1408,23 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
             }
 
             col = next;
+        }
+
+        // Append AI suggestion ghost text on the cursor row.
+        if focused
+            && row_idx == cursor_row
+            && app.terminal().scroll_offset() == 0
+        {
+            if let Some(ref suggestion) = app.terminal_suggestion {
+                let avail = (inner.width as usize).saturating_sub(col);
+                let ghost: String = suggestion.chars().take(avail).collect();
+                if !ghost.is_empty() {
+                    spans.push(Span::styled(
+                        ghost,
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                }
+            }
         }
 
         let line = ratatui::text::Line::from(spans);
@@ -3350,6 +3408,141 @@ fn draw_conversation_detail(
 /// Draw the git graph modal (near full-screen with commit list + detail panel).
 /// Draw the undo tree visualization modal (two-panel: list + detail).
 /// Draw the document outline modal (symbol list for current file).
+/// Draw the registers modal — shows yank register and macro registers.
+fn draw_registers_modal(frame: &mut Frame, app: &App, area: Rect) {
+    let width = area.width.saturating_sub(6).min(80);
+    let height = area.height.saturating_sub(4).min(30);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+
+    if let Some(editing_ch) = app.macro_editing {
+        // Macro editing sub-view.
+        let keys = app.macro_registers.get(&editing_ch);
+        let count = keys.map_or(0, |k| k.len());
+        let title = format!(" Edit Macro @{editing_ch} ({count} keys) — d:delete  Esc:back ");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(title);
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+
+        if let Some(keys) = keys {
+            let list_h = inner.height as usize;
+            let selected = app.macro_edit_selected;
+            let scroll = if selected >= list_h {
+                selected.saturating_sub(list_h / 2)
+            } else {
+                0
+            };
+
+            for (vis_idx, key) in keys.iter().enumerate().skip(scroll).take(list_h) {
+                let row_y = inner.y + (vis_idx - scroll) as u16;
+                if row_y >= inner.y + inner.height {
+                    break;
+                }
+                let is_selected = vis_idx == selected;
+                let key_str = crate::app::format_key_event(key);
+                let display = format!("  {:>3}  {}", vis_idx + 1, key_str);
+                let style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                frame.render_widget(
+                    Paragraph::new(display).style(style),
+                    Rect::new(inner.x, row_y, inner.width, 1),
+                );
+            }
+
+            if keys.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  (empty)")
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(inner.x, inner.y, inner.width, 1),
+                );
+            }
+        }
+    } else {
+        // Register list view.
+        let entries = app.register_entries();
+        let count = entries.len();
+        let title = format!(" Registers ({count}) — e:edit  q:close ");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(title);
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+
+        if inner.height < 2 {
+            return;
+        }
+
+        // Header row.
+        let header = format!("  {:<5} {}", "Reg", "Content");
+        frame.render_widget(
+            Paragraph::new(header).style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+
+        let list_y = inner.y + 1;
+        let list_h = inner.height.saturating_sub(1) as usize;
+        let selected = app.registers_selected;
+        let scroll = if selected >= list_h {
+            selected.saturating_sub(list_h / 2)
+        } else {
+            0
+        };
+
+        for (vis_idx, (name, preview)) in entries.iter().enumerate().skip(scroll).take(list_h) {
+            let row_y = list_y + (vis_idx - scroll) as u16;
+            if row_y >= inner.y + inner.height {
+                break;
+            }
+            let is_selected = vis_idx == selected;
+            let max_preview = (inner.width as usize).saturating_sub(8);
+            let truncated: String = preview.chars().take(max_preview).collect();
+            let is_macro = name.len() == 1
+                && name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            let prefix = if is_macro { "@" } else { " " };
+            let display = format!("  {}{:<4} {}", prefix, name, truncated);
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_macro {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            frame.render_widget(
+                Paragraph::new(display).style(style),
+                Rect::new(inner.x, row_y, inner.width, 1),
+            );
+        }
+
+        if entries.is_empty() {
+            frame.render_widget(
+                Paragraph::new("  No registers in use")
+                    .style(Style::default().fg(Color::DarkGray)),
+                Rect::new(inner.x, list_y, inner.width, 1),
+            );
+        }
+    }
+}
+
 fn draw_outline_modal(frame: &mut Frame, app: &App, area: Rect) {
     let width = area.width.saturating_sub(6).min(80);
     let height = area.height.saturating_sub(4).min(30);
@@ -5240,8 +5433,20 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         .map(|a| format!(" │ {a}"))
         .unwrap_or_default();
 
+    let follow_indicator = if let Some(peer_id) = app.collab_follow_peer {
+        let name = app
+            .collab
+            .as_ref()
+            .and_then(|s| s.peers.get(&peer_id))
+            .map(|p| p.name.as_str())
+            .unwrap_or("?");
+        format!(" │ FOLLOWING {name}")
+    } else {
+        String::new()
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}{}{}{}{}",
+        " {} │ {}{}{}{}{}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
@@ -5251,6 +5456,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         lsp_indicator,
         mcp_indicator,
         collab_indicator,
+        follow_indicator,
         claude_indicator,
         experiment_indicator,
         agent_indicator,
@@ -5463,6 +5669,160 @@ fn draw_rename_input(frame: &mut Frame, app: &App, area: Rect) {
     let text = format!("Rename: {}", app.rename_input);
     let style = Style::default().fg(Color::Yellow).bg(Color::Black);
     frame.render_widget(Paragraph::new(text).style(style), area);
+}
+
+/// Draw the peek definition inline popup near the cursor.
+fn draw_peek_definition(frame: &mut Frame, app: &App, editor_area: Rect) {
+    let peek = match &app.peek_definition {
+        Some(p) => p,
+        None => return,
+    };
+
+    let max_visible: usize = 18;
+    let visible_lines: Vec<&str> = peek
+        .lines
+        .iter()
+        .skip(peek.scroll_offset)
+        .take(max_visible)
+        .map(|s| s.as_str())
+        .collect();
+
+    let height = (visible_lines.len() as u16 + 2).min(editor_area.height / 2);
+    let width = 80u16.min(editor_area.width.saturating_sub(4));
+
+    // Position below the cursor, or above if not enough room.
+    let cursor_x = (app.cursor().col.saturating_sub(app.tab().scroll_col)) as u16
+        + editor_area.x
+        + 6;
+    let cursor_y = (app.cursor().row.saturating_sub(app.tab().scroll_row)) as u16
+        + editor_area.y
+        + 1;
+
+    let x = cursor_x.min(editor_area.right().saturating_sub(width));
+    let y = if cursor_y + height + 1 < editor_area.bottom() {
+        cursor_y + 1
+    } else {
+        cursor_y.saturating_sub(height + 1)
+    };
+
+    let popup_area = Rect::new(x, y, width, height);
+    frame.render_widget(Clear, popup_area);
+
+    let display_name = peek
+        .file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let title = format!(
+        " Peek: {}:{} ",
+        display_name,
+        peek.target_line + 1
+    );
+
+    // Scroll indicator.
+    let can_scroll = peek.lines.len() > max_visible;
+    let scroll_hint = if can_scroll {
+        let pos = peek.scroll_offset + 1;
+        let total = peek.lines.len().saturating_sub(max_visible) + 1;
+        format!(" {}/{} ", pos, total)
+    } else {
+        String::new()
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_alignment(ratatui::layout::Alignment::Left)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    // Render syntax-highlighted lines.
+    let hl_offset = peek.scroll_offset;
+    let inner_width = inner.width as usize;
+
+    for (i, line_text) in visible_lines.iter().enumerate() {
+        if i as u16 >= inner.height {
+            break;
+        }
+        let line_row = inner.y + i as u16;
+        let line_no = peek.first_line + hl_offset + i;
+        let is_target = line_no == peek.target_line;
+
+        // Line number gutter (4 chars).
+        let gutter = format!("{:>3} ", line_no + 1);
+        let gutter_style = if is_target {
+            Style::default().fg(Color::Yellow).bg(Color::Black)
+        } else {
+            Style::default().fg(Color::DarkGray).bg(Color::Black)
+        };
+        let gutter_span = Span::styled(gutter, gutter_style);
+
+        // Build syntax-highlighted spans for the code portion.
+        let hl_line = peek.highlighted.get(hl_offset + i);
+        let code_width = inner_width.saturating_sub(4);
+        let truncated: String = line_text.chars().take(code_width).collect();
+
+        let code_spans: Vec<Span> = if let Some(hl) = hl_line {
+            // Build character-by-character coloured spans, coalescing adjacent same-colour chars.
+            let mut spans = Vec::new();
+            let mut current_color = Color::Reset;
+            let mut buf = String::new();
+            let bg = if is_target {
+                Color::Rgb(40, 40, 60)
+            } else {
+                Color::Black
+            };
+            for (ci, ch) in truncated.chars().enumerate() {
+                let c = hl.colors.get(ci).copied().unwrap_or(Color::Reset);
+                if c != current_color && !buf.is_empty() {
+                    spans.push(Span::styled(
+                        std::mem::take(&mut buf),
+                        Style::default().fg(current_color).bg(bg),
+                    ));
+                }
+                current_color = c;
+                buf.push(ch);
+            }
+            if !buf.is_empty() {
+                spans.push(Span::styled(buf, Style::default().fg(current_color).bg(bg)));
+            }
+            spans
+        } else {
+            let bg = if is_target {
+                Color::Rgb(40, 40, 60)
+            } else {
+                Color::Black
+            };
+            vec![Span::styled(
+                truncated,
+                Style::default().fg(Color::White).bg(bg),
+            )]
+        };
+
+        let mut all_spans = vec![gutter_span];
+        all_spans.extend(code_spans);
+        let line_widget = Line::from(all_spans);
+
+        frame.render_widget(
+            Paragraph::new(line_widget).style(Style::default().bg(Color::Black)),
+            Rect::new(inner.x, line_row, inner.width, 1),
+        );
+    }
+
+    // Scroll hint in bottom-right corner.
+    if !scroll_hint.is_empty() {
+        let hint_len = scroll_hint.len() as u16;
+        let hint_x = popup_area.right().saturating_sub(hint_len + 1);
+        let hint_y = popup_area.bottom().saturating_sub(1);
+        frame.render_widget(
+            Paragraph::new(scroll_hint)
+                .style(Style::default().fg(Color::DarkGray).bg(Color::Black)),
+            Rect::new(hint_x, hint_y, hint_len, 1),
+        );
+    }
 }
 
 fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str) {

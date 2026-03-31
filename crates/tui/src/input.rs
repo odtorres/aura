@@ -47,6 +47,59 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // When the peek definition popup is visible, intercept navigation/close keys.
+    if app.peek_definition.is_some() {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.peek_definition = None;
+                return;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(peek) = &mut app.peek_definition {
+                    let max = peek.lines.len().saturating_sub(1);
+                    if peek.scroll_offset < max {
+                        peek.scroll_offset += 1;
+                    }
+                }
+                return;
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(peek) = &mut app.peek_definition {
+                    peek.scroll_offset = peek.scroll_offset.saturating_sub(1);
+                }
+                return;
+            }
+            KeyCode::Enter => {
+                // Navigate to definition and close peek.
+                if let Some(peek) = app.peek_definition.take() {
+                    let current_uri = app
+                        .tab()
+                        .buffer
+                        .file_path()
+                        .map(|p| format!("file://{}", p.display()))
+                        .unwrap_or_default();
+                    let peek_uri = format!("file://{}", peek.file_path.display());
+                    if peek_uri == current_uri {
+                        let tab = app.tab_mut();
+                        tab.cursor.row = peek.target_line;
+                        tab.cursor.col = peek.target_col;
+                        app.clamp_cursor();
+                    }
+                    app.set_status(format!(
+                        "Definition at {}:{}",
+                        peek.target_line + 1,
+                        peek.target_col + 1
+                    ));
+                }
+                return;
+            }
+            _ => {
+                // Any other key closes the peek and is processed normally.
+                app.peek_definition = None;
+            }
+        }
+    }
+
     // When the close-tab confirmation modal is visible, intercept S/D/Esc.
     if app.tab_close_confirm.is_some() {
         match code {
@@ -142,11 +195,11 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Char('t') | KeyCode::Char('`') => {
                 // Unfocus whatever panel is focused.
                 unfocus_all_panels(app);
-                if app.terminal.visible && app.terminal_focused {
-                    app.terminal.visible = false;
+                if app.terminal().visible && app.terminal_focused {
+                    app.terminal_mut().visible = false;
                     app.terminal_focused = false;
                 } else {
-                    app.terminal.visible = true;
+                    app.terminal_mut().visible = true;
                     app.terminal_focused = true;
                 }
                 true
@@ -271,6 +324,54 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.goto_reference();
             }
             _ => {}
+        }
+        return;
+    }
+
+    // When the registers modal is visible, route keys to it.
+    if app.registers_visible {
+        if let Some(_editing_reg) = app.macro_editing {
+            // Macro editing sub-view.
+            match code {
+                KeyCode::Esc => {
+                    app.macro_editing = None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if let Some(ch) = app.macro_editing {
+                        let len = app.macro_registers.get(&ch).map_or(0, |k| k.len());
+                        if app.macro_edit_selected < len.saturating_sub(1) {
+                            app.macro_edit_selected += 1;
+                        }
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.macro_edit_selected = app.macro_edit_selected.saturating_sub(1);
+                }
+                KeyCode::Char('d') | KeyCode::Char('x') | KeyCode::Delete => {
+                    app.delete_macro_key();
+                }
+                _ => {}
+            }
+        } else {
+            // Register list view.
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.registers_visible = false;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let count = app.register_entries().len();
+                    if app.registers_selected < count.saturating_sub(1) {
+                        app.registers_selected += 1;
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.registers_selected = app.registers_selected.saturating_sub(1);
+                }
+                KeyCode::Enter | KeyCode::Char('e') => {
+                    app.edit_selected_macro();
+                }
+                _ => {}
+            }
         }
         return;
     }
@@ -465,58 +566,85 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // When the terminal pane is focused, route all keystrokes to the PTY.
     if app.terminal_focused {
+        // Reset idle timer for AI suggestions.
+        app.terminal_last_key = std::time::Instant::now();
+
+        // Handle AI suggestion: Tab to accept, any other key dismisses.
+        if app.terminal_suggestion.is_some() {
+            if code == KeyCode::Tab {
+                if let Some(suggestion) = app.terminal_suggestion.take() {
+                    app.terminal_mut().send_bytes(suggestion.as_bytes());
+                }
+                return;
+            }
+            // Dismiss suggestion on any other key (key is still processed below).
+            app.terminal_suggestion = None;
+        }
+
         match code {
             // Esc — unfocus terminal (return focus to editor).
             KeyCode::Esc => {
                 app.terminal_focused = false;
             }
+            // Ctrl+Shift+T — new terminal tab.
+            KeyCode::Char('T') if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                app.new_terminal_tab();
+            }
+            // Ctrl+Shift+] — next terminal tab.
+            KeyCode::Char(']') if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                app.next_terminal_tab();
+            }
+            // Ctrl+Shift+[ — previous terminal tab.
+            KeyCode::Char('[') if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                app.prev_terminal_tab();
+            }
             // Ctrl+Shift+Up / Ctrl+Shift+Down — resize terminal pane.
             KeyCode::Up if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
-                app.terminal.height = (app.terminal.height + 2).min(50);
+                app.terminal_mut().height = (app.terminal().height + 2).min(50);
             }
             KeyCode::Down if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
-                app.terminal.height = app.terminal.height.saturating_sub(2).max(5);
+                app.terminal_mut().height = app.terminal().height.saturating_sub(2).max(5);
             }
             // Ctrl+C — send interrupt.
             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.terminal.send_ctrl_c();
+                app.terminal_mut().send_ctrl_c();
             }
             // Ctrl+D — send EOF.
             KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.terminal.send_ctrl_d();
+                app.terminal_mut().send_ctrl_d();
             }
             // Ctrl+L — clear screen.
             KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.terminal.send_ctrl_l();
+                app.terminal_mut().send_ctrl_l();
             }
             // Other Ctrl+char — send as control code.
             KeyCode::Char(c) if modifiers.contains(KeyModifiers::CONTROL) => {
                 let ctrl_byte = (c as u8).wrapping_sub(b'a').wrapping_add(1);
-                app.terminal.send_bytes(&[ctrl_byte]);
+                app.terminal_mut().send_bytes(&[ctrl_byte]);
             }
             KeyCode::Enter => {
-                app.terminal.send_enter();
+                app.terminal_mut().send_enter();
             }
             KeyCode::Backspace => {
-                app.terminal.send_backspace();
+                app.terminal_mut().send_backspace();
             }
             KeyCode::Tab => {
-                app.terminal.send_tab();
+                app.terminal_mut().send_tab();
             }
             KeyCode::Up => {
-                app.terminal.send_arrow_up();
+                app.terminal_mut().send_arrow_up();
             }
             KeyCode::Down => {
-                app.terminal.send_arrow_down();
+                app.terminal_mut().send_arrow_down();
             }
             KeyCode::Left => {
-                app.terminal.send_arrow_left();
+                app.terminal_mut().send_arrow_left();
             }
             KeyCode::Right => {
-                app.terminal.send_arrow_right();
+                app.terminal_mut().send_arrow_right();
             }
             KeyCode::Char(c) => {
-                app.terminal.send_char(c);
+                app.terminal_mut().send_char(c);
             }
             _ => {}
         }
@@ -1314,6 +1442,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Char('d') => {
                 app.lsp_goto_definition();
+                return;
+            }
+            KeyCode::Char('p') => {
+                app.lsp_peek_definition();
                 return;
             }
             KeyCode::Char('r') => {
@@ -3162,14 +3294,25 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         // :term / :terminal — toggle terminal pane and give it focus.
         "term" | "terminal" => {
-            if app.terminal.visible && app.terminal_focused {
-                // Already visible and focused: hide it and release focus.
-                app.terminal.visible = false;
+            if app.terminal().visible && app.terminal_focused {
+                app.terminal_mut().visible = false;
                 app.terminal_focused = false;
             } else {
-                app.terminal.visible = true;
+                app.terminal_mut().visible = true;
                 app.terminal_focused = true;
             }
+        }
+        "term new" => {
+            app.new_terminal_tab();
+        }
+        "term close" => {
+            app.close_terminal_tab();
+        }
+        "term next" => {
+            app.next_terminal_tab();
+        }
+        "term prev" => {
+            app.prev_terminal_tab();
         }
         // :tree — toggle the file tree sidebar.
         "tree" => {
@@ -3193,13 +3336,13 @@ fn execute_command(app: &mut App, cmd: &str) {
             match arg.parse::<u16>() {
                 Ok(h) => {
                     let h = h.clamp(5, 50);
-                    app.terminal.height = h;
+                    app.terminal_mut().height = h;
                     app.set_status(format!("Terminal height: {h} rows"));
                 }
                 Err(_) => {
                     app.set_status(format!(
                         "Current terminal height: {} rows",
-                        app.terminal.height
+                        app.terminal().height
                     ));
                 }
             }
@@ -3295,6 +3438,9 @@ fn execute_command(app: &mut App, cmd: &str) {
         "collab-stop" | "collab stop" => {
             app.stop_collab();
         }
+        "unfollow" => {
+            app.stop_follow();
+        }
         // --- Git stash & PR ---
         "stash" => {
             app.sc_stash_push();
@@ -3330,6 +3476,12 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.stop_agent("user request");
         }
         // --- Marks ---
+        "fix" => {
+            app.fix_last_failed_command();
+        }
+        "registers" | "reg" => {
+            app.open_registers_modal();
+        }
         "marks" => {
             let marks: Vec<String> = app
                 .tab()
@@ -3425,7 +3577,14 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         other => {
             // Handle commands with arguments.
-            if let Some(rest) = other.strip_prefix("join ") {
+            if let Some(name) = other.strip_prefix("follow ") {
+                let name = name.trim();
+                if !name.is_empty() {
+                    app.start_follow(name);
+                } else {
+                    app.set_status("Usage: :follow <peer-name>");
+                }
+            } else if let Some(rest) = other.strip_prefix("join ") {
                 // Support ":join addr:port token" format.
                 let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
                 let addr = parts[0];

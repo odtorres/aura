@@ -46,6 +46,17 @@ impl Default for TerminalCell {
     }
 }
 
+/// A completed or in-progress shell command detected via shell integration.
+#[derive(Debug, Clone)]
+pub struct CommandRecord {
+    /// The command text entered by the user.
+    pub command: String,
+    /// Exit code (None if still running).
+    pub exit_code: Option<i32>,
+    /// Screen row where the prompt appeared.
+    pub prompt_row: usize,
+}
+
 /// The virtual screen buffer that the PTY output renders into.
 pub struct TerminalScreen {
     /// 2D grid of cells: `cells[row][col]`.
@@ -90,6 +101,14 @@ pub struct TerminalScreen {
     auto_wrap: bool,
     /// Whether we are pending a wrap (cursor is past last col).
     wrap_pending: bool,
+
+    // --- Shell integration (OSC 133) ---
+    /// Completed command records.
+    pub commands: Vec<CommandRecord>,
+    /// Row where the current prompt started (set by OSC 133;A).
+    prompt_start_row: Option<usize>,
+    /// Whether we are between prompt end (B) and command finish (D).
+    command_running: bool,
 }
 
 impl TerminalScreen {
@@ -118,6 +137,9 @@ impl TerminalScreen {
             alt_saved_cursor: (0, 0),
             auto_wrap: true,
             wrap_pending: false,
+            commands: Vec::new(),
+            prompt_start_row: None,
+            command_running: false,
         }
     }
 
@@ -308,6 +330,23 @@ struct Performer {
     screen: Arc<Mutex<TerminalScreen>>,
 }
 
+impl Performer {
+    /// Extract text from a screen row, trimming trailing spaces.
+    fn extract_line_text(cells: &[Vec<TerminalCell>], row: usize, cols: usize) -> String {
+        if row >= cells.len() {
+            return String::new();
+        }
+        let line: String = cells[row].iter().take(cols).map(|c| c.ch).collect();
+        // Strip the prompt prefix (everything up to and including the last $, %, >, or #).
+        let stripped = if let Some(pos) = line.rfind(|c: char| "$ %>#".contains(c)) {
+            line[pos + 1..].trim().to_string()
+        } else {
+            line.trim().to_string()
+        };
+        stripped
+    }
+}
+
 impl vte::Perform for Performer {
     fn print(&mut self, c: char) {
         let mut scr = self.screen.lock().unwrap();
@@ -382,8 +421,54 @@ impl vte::Perform for Performer {
 
     fn unhook(&mut self) {}
 
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
-        // OSC sequences (title changes, etc.) — ignore for now.
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        // Check for shell integration sequences (OSC 133).
+        if let Some(first) = params.first() {
+            let s = String::from_utf8_lossy(first);
+            if let Some(marker) = s.strip_prefix("133;") {
+                let mut scr = self.screen.lock().unwrap();
+                if marker == "A" {
+                    // Prompt start — record the row.
+                    scr.prompt_start_row = Some(scr.cursor_row);
+                } else if marker == "B" {
+                    // Command start (user pressed Enter).
+                    scr.command_running = true;
+                    // Try to capture command text from the prompt row.
+                    if let Some(prompt_row) = scr.prompt_start_row {
+                        let cmd = Self::extract_line_text(&scr.cells, prompt_row, scr.cols);
+                        if !cmd.trim().is_empty() {
+                            scr.commands.push(CommandRecord {
+                                command: cmd.trim().to_string(),
+                                exit_code: None,
+                                prompt_row,
+                            });
+                        }
+                    }
+                } else if marker == "C" {
+                    // Command output start — nothing extra needed.
+                } else if let Some(rest) = marker.strip_prefix("D;") {
+                    // Command finished with exit code.
+                    let code = rest.parse::<i32>().unwrap_or(-1);
+                    if let Some(last) = scr.commands.last_mut() {
+                        if last.exit_code.is_none() {
+                            last.exit_code = Some(code);
+                        }
+                    }
+                    scr.command_running = false;
+                    scr.prompt_start_row = None;
+                } else if marker == "D" {
+                    // Command finished without exit code.
+                    if let Some(last) = scr.commands.last_mut() {
+                        if last.exit_code.is_none() {
+                            last.exit_code = Some(0);
+                        }
+                    }
+                    scr.command_running = false;
+                    scr.prompt_start_row = None;
+                }
+            }
+        }
+        // Other OSC sequences (title changes, etc.) — ignore.
     }
 
     fn csi_dispatch(
@@ -714,6 +799,8 @@ pub struct EmbeddedTerminal {
     pub visible: bool,
     /// Height of the terminal pane (in rows).
     pub height: u16,
+    /// Human-readable label for this terminal tab.
+    pub label: String,
     /// Shared screen buffer updated by the reader thread.
     screen: Arc<Mutex<TerminalScreen>>,
     /// Writer end of the PTY master — used to send keystrokes to the shell.
@@ -763,6 +850,7 @@ impl EmbeddedTerminal {
                     screen,
                     writer: None,
                     master: None,
+                    label: String::new(),
                     running: false,
                 };
             }
@@ -800,6 +888,7 @@ impl EmbeddedTerminal {
                     screen,
                     writer: None,
                     master: None,
+                    label: String::new(),
                     running: false,
                 };
             }
@@ -816,6 +905,7 @@ impl EmbeddedTerminal {
                     screen,
                     writer: None,
                     master: None,
+                    label: String::new(),
                     running: false,
                 };
             }
@@ -832,6 +922,7 @@ impl EmbeddedTerminal {
                     screen,
                     writer: Some(writer),
                     master: None,
+                    label: String::new(),
                     running: false,
                 };
             }
@@ -848,6 +939,7 @@ impl EmbeddedTerminal {
             screen,
             writer: Some(writer),
             master: Some(pair.master),
+            label: String::new(),
             running: true,
         }
     }
@@ -876,6 +968,30 @@ impl EmbeddedTerminal {
                 Err(_) => break,
             }
         }
+    }
+
+    /// Inject shell integration hooks (OSC 133) for command boundary detection.
+    ///
+    /// This sends a tiny script to the shell that emits OSC 133 markers around
+    /// each command, enabling exit code tracking and command boundary detection.
+    pub fn inject_shell_integration(&mut self) {
+        let shell = std::env::var("SHELL").unwrap_or_default();
+        let script = if shell.ends_with("zsh") {
+            // Zsh: use precmd and preexec hooks.
+            concat!(
+                " precmd() { print -Pn '\\e]133;D;$?\\a\\e]133;A\\a' }; ",
+                "preexec() { print -Pn '\\e]133;B\\a' }\n"
+            )
+        } else {
+            // Bash: use PROMPT_COMMAND and PS0.
+            concat!(
+                " PROMPT_COMMAND='printf \"\\e]133;D;$?\\a\\e]133;A\\a\"'; ",
+                "PS0='\\[\\e]133;B\\a\\]'\n"
+            )
+        };
+        self.send_bytes(script.as_bytes());
+        // Send a clear to avoid showing the integration commands.
+        self.send_bytes(b" clear\n");
     }
 
     /// Toggle pane visibility.
@@ -1100,6 +1216,26 @@ impl EmbeddedTerminal {
     /// Get the current scroll offset.
     pub fn scroll_offset(&self) -> usize {
         self.screen.lock().unwrap().scroll_offset
+    }
+
+    /// Get completed command records (for shell integration).
+    pub fn commands(&self) -> Vec<CommandRecord> {
+        self.screen.lock().unwrap().commands.clone()
+    }
+
+    /// Get the last failed command, if any.
+    pub fn last_failed_command(&self) -> Option<CommandRecord> {
+        let scr = self.screen.lock().unwrap();
+        scr.commands
+            .iter()
+            .rev()
+            .find(|c| c.exit_code.is_some_and(|e| e != 0))
+            .cloned()
+    }
+
+    /// Whether a command is currently running.
+    pub fn command_running(&self) -> bool {
+        self.screen.lock().unwrap().command_running
     }
 
     // Keep these stubs for compatibility — old code called them.

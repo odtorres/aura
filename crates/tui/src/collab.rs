@@ -394,6 +394,12 @@ pub struct AwarenessUpdate {
     pub cursor: Option<(usize, usize)>,
     /// Selection range as ((start_row, start_col), (end_row, end_col)).
     pub selection: Option<((usize, usize), (usize, usize))>,
+    /// Viewport scroll row (top visible line).
+    #[serde(default)]
+    pub scroll_row: Option<usize>,
+    /// Viewport scroll column (leftmost visible column).
+    #[serde(default)]
+    pub scroll_col: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1436,6 +1442,8 @@ mod tests {
             file_id: 123,
             cursor: Some((10, 5)),
             selection: None,
+            scroll_row: Some(5),
+            scroll_col: Some(0),
         };
         let json = serde_json::to_vec(&update).unwrap();
         let decoded: AwarenessUpdate = serde_json::from_slice(&json).unwrap();
@@ -1444,14 +1452,19 @@ mod tests {
         assert_eq!(decoded.file_id, 123);
         assert_eq!(decoded.cursor, Some((10, 5)));
         assert!(decoded.selection.is_none());
+        assert_eq!(decoded.scroll_row, Some(5));
+        assert_eq!(decoded.scroll_col, Some(0));
     }
 
     #[test]
     fn test_awareness_file_id_defaults_to_zero() {
         // Deserializing JSON without file_id should default to 0.
+        // Also verifies scroll fields default to None when absent.
         let json = r#"{"peer_id":1,"name":"bob","cursor":[0,0],"selection":null}"#;
         let decoded: AwarenessUpdate = serde_json::from_str(json).unwrap();
         assert_eq!(decoded.file_id, 0);
+        assert!(decoded.scroll_row.is_none());
+        assert!(decoded.scroll_col.is_none());
     }
 
     #[test]

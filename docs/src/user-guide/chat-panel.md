@@ -9,7 +9,7 @@ AURA includes an interactive AI chat panel for conversational interaction with C
 | `Ctrl+J` | Toggle chat panel visibility and focus |
 | `<Space>j` | Toggle chat panel from Normal mode |
 
-The chat panel appears on the right side of the editor. When visible but unfocused, pressing the shortcut again focuses it. When focused, pressing it hides the panel.
+The chat panel appears on the right side of the editor. Pressing the shortcut again closes the panel.
 
 ## Sending Messages
 

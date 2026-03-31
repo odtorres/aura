@@ -233,6 +233,71 @@ impl ReferencesPanel {
     }
 }
 
+/// Inline peek definition popup showing a symbol's definition without navigating.
+pub struct PeekDefinition {
+    /// Resolved file path of the definition.
+    pub file_path: std::path::PathBuf,
+    /// Line number (0-indexed) of the definition in the target file.
+    pub target_line: usize,
+    /// Column (0-indexed) of the definition.
+    pub target_col: usize,
+    /// Lines of source content to display.
+    pub lines: Vec<String>,
+    /// First line number in the original file (for line number display).
+    pub first_line: usize,
+    /// Scroll offset within the popup.
+    pub scroll_offset: usize,
+    /// Syntax-highlighted colour per character per line.
+    pub highlighted: Vec<crate::highlight::HighlightedLine>,
+}
+
+/// Format a `KeyEvent` as a human-readable string (e.g. "a", "Ctrl+s", "Esc").
+pub fn format_key_event(key: &crossterm::event::KeyEvent) -> String {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut parts = Vec::new();
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        parts.push("C");
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        parts.push("A");
+    }
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        parts.push("S");
+    }
+    let code_str = match key.code {
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Esc => "Esc".to_string(),
+        KeyCode::Backspace => "BS".to_string(),
+        KeyCode::Tab => "Tab".to_string(),
+        KeyCode::Delete => "Del".to_string(),
+        KeyCode::Up => "Up".to_string(),
+        KeyCode::Down => "Down".to_string(),
+        KeyCode::Left => "Left".to_string(),
+        KeyCode::Right => "Right".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::PageUp => "PgUp".to_string(),
+        KeyCode::PageDown => "PgDn".to_string(),
+        KeyCode::F(n) => format!("F{n}"),
+        _ => "?".to_string(),
+    };
+    if parts.is_empty() {
+        code_str
+    } else {
+        let prefix = parts.join("-");
+        format!("{}-{}", prefix, code_str)
+    }
+}
+
+/// Format a sequence of key events as a compact string.
+pub fn format_key_sequence(keys: &[crossterm::event::KeyEvent]) -> String {
+    keys.iter()
+        .map(format_key_event)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Top-level application state.
 pub struct App {
     /// Tab manager holding all open editor buffers.
@@ -352,8 +417,10 @@ pub struct App {
     pub experimental_mode: bool,
     /// Plugin system — holds all registered plugins and routes events to them.
     pub plugin_manager: PluginManager,
-    /// Embedded terminal / command runner pane.
-    pub terminal: EmbeddedTerminal,
+    /// Embedded terminal tabs (multiple PTY instances).
+    pub terminals: Vec<EmbeddedTerminal>,
+    /// Index of the active terminal tab.
+    pub active_terminal: usize,
     /// When `true`, keystrokes are routed to the terminal input instead of the
     /// editor.
     pub terminal_focused: bool,
@@ -463,6 +530,12 @@ pub struct App {
     collab_last_selection: Option<((usize, usize), (usize, usize))>,
     /// Timestamp of last awareness broadcast (for throttling).
     collab_last_awareness: std::time::Instant,
+    /// Last scroll position sent in an awareness update (for change detection).
+    collab_last_scroll: Option<(usize, usize)>,
+    /// Peer ID we are currently following in follow mode (None = not following).
+    pub collab_follow_peer: Option<u64>,
+    /// Last scroll position applied from the followed peer (for break detection).
+    collab_follow_last_applied: Option<(usize, usize)>,
 
     // --- Debugger ---
     /// Active DAP debug adapter client (None when not debugging).
@@ -491,6 +564,32 @@ pub struct App {
     pub search_matches: Vec<(usize, usize)>,
     /// Index into search_matches for the current/focused match.
     pub search_current: usize,
+
+    // --- Peek definition ---
+    /// Inline peek definition popup (shows definition without navigating).
+    pub peek_definition: Option<PeekDefinition>,
+    /// Flag: the next LSP Definition response should open peek, not navigate.
+    pub peek_definition_pending: bool,
+
+    // --- Terminal AI suggestions ---
+    /// Current AI suggestion for the terminal prompt.
+    pub terminal_suggestion: Option<String>,
+    /// Receiver for terminal suggestion AI response.
+    terminal_suggestion_rx: Option<mpsc::Receiver<AiEvent>>,
+    /// Timestamp of last terminal keypress (for idle detection).
+    pub terminal_last_key: std::time::Instant,
+    /// Whether a terminal suggestion request is in flight.
+    terminal_suggestion_pending: bool,
+
+    // --- Registers modal ---
+    /// Whether the registers modal is visible.
+    pub registers_visible: bool,
+    /// Selected index in the registers list.
+    pub registers_selected: usize,
+    /// Which macro register is being edited (None = not editing).
+    pub macro_editing: Option<char>,
+    /// Selected key index within the macro being edited.
+    pub macro_edit_selected: usize,
 
     // --- Update checker ---
     /// Receiver for background update check results.
@@ -748,14 +847,18 @@ impl App {
             revising_proposal: false,
             experimental_mode: false,
             plugin_manager: PluginManager::new(),
-            terminal: {
+            terminals: {
                 let port_str = mcp_port.map(|p| p.to_string());
                 let mut env_vars: Vec<(&str, &str)> = Vec::new();
                 if let Some(ref ps) = port_str {
                     env_vars.push(("AURA_MCP_PORT", ps.as_str()));
                 }
-                EmbeddedTerminal::with_env(terminal_cwd.clone(), &env_vars)
+                let mut t = EmbeddedTerminal::with_env(terminal_cwd.clone(), &env_vars);
+                t.label = "Terminal 1".to_string();
+                t.inject_shell_integration();
+                vec![t]
             },
+            active_terminal: 0,
             terminal_focused: false,
             file_tree_focused: false,
             file_picker: FilePicker::new(terminal_cwd.clone()),
@@ -808,6 +911,9 @@ impl App {
             collab_last_cursor: None,
             collab_last_selection: None,
             collab_last_awareness: std::time::Instant::now(),
+            collab_last_scroll: None,
+            collab_follow_peer: None,
+            collab_follow_last_applied: None,
             dap_client: None,
             debug_panel: crate::debug_panel::DebugPanel::new(),
             debug_panel_focused: false,
@@ -819,6 +925,16 @@ impl App {
             search_forward: true,
             search_matches: Vec::new(),
             search_current: 0,
+            peek_definition: None,
+            peek_definition_pending: false,
+            terminal_suggestion: None,
+            terminal_suggestion_rx: None,
+            terminal_last_key: std::time::Instant::now(),
+            terminal_suggestion_pending: false,
+            registers_visible: false,
+            registers_selected: 0,
+            macro_editing: None,
+            macro_edit_selected: 0,
             update_receiver: None,
             update_status: None,
             update_notification_visible: false,
@@ -869,6 +985,72 @@ impl App {
     #[inline]
     pub fn tab_mut(&mut self) -> &mut EditorTab {
         self.tabs.active_mut()
+    }
+
+    /// Convenience: reference to the active terminal tab.
+    #[inline]
+    pub fn terminal(&self) -> &EmbeddedTerminal {
+        &self.terminals[self.active_terminal]
+    }
+
+    /// Convenience: mutable reference to the active terminal tab.
+    #[inline]
+    pub fn terminal_mut(&mut self) -> &mut EmbeddedTerminal {
+        &mut self.terminals[self.active_terminal]
+    }
+
+    /// Spawn a new terminal tab and make it active.
+    pub fn new_terminal_tab(&mut self) {
+        let cwd = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let idx = self.terminals.len() + 1;
+        let mut t = EmbeddedTerminal::new(cwd);
+        t.label = format!("Terminal {idx}");
+        // Match height of existing terminals.
+        t.height = self.terminal().height;
+        t.visible = true;
+        t.inject_shell_integration();
+        self.terminals.push(t);
+        self.active_terminal = self.terminals.len() - 1;
+        self.terminal_focused = true;
+    }
+
+    /// Close the active terminal tab.
+    pub fn close_terminal_tab(&mut self) {
+        if self.terminals.len() <= 1 {
+            // Last terminal — just hide it.
+            self.terminal_mut().visible = false;
+            self.terminal_focused = false;
+            return;
+        }
+        self.terminals.remove(self.active_terminal);
+        if self.active_terminal >= self.terminals.len() {
+            self.active_terminal = self.terminals.len() - 1;
+        }
+    }
+
+    /// Switch to the next terminal tab.
+    pub fn next_terminal_tab(&mut self) {
+        if self.terminals.len() > 1 {
+            self.active_terminal = (self.active_terminal + 1) % self.terminals.len();
+        }
+    }
+
+    /// Switch to the previous terminal tab.
+    pub fn prev_terminal_tab(&mut self) {
+        if self.terminals.len() > 1 {
+            self.active_terminal = if self.active_terminal == 0 {
+                self.terminals.len() - 1
+            } else {
+                self.active_terminal - 1
+            };
+        }
     }
 
     // ---- Compatibility accessors ----
@@ -962,6 +1144,19 @@ impl App {
             self.poll_commit_msg();
             self.poll_summarize();
 
+            // Poll for terminal AI suggestion.
+            self.poll_terminal_suggestion();
+
+            // Request terminal suggestion after 2s idle when terminal is focused.
+            if self.terminal_focused
+                && self.terminal_suggestion.is_none()
+                && !self.terminal_suggestion_pending
+                && !self.terminal().command_running()
+                && self.terminal_last_key.elapsed() > std::time::Duration::from_secs(2)
+            {
+                self.request_terminal_suggestion();
+            }
+
             // Poll for DAP debugger events.
             self.poll_dap_events();
 
@@ -980,8 +1175,9 @@ impl App {
                 }
             }
 
-            // Poll for collaboration events and broadcast awareness.
+            // Poll for collaboration events, apply follow viewport, broadcast awareness.
             self.poll_collab_events();
+            self.apply_follow_viewport();
             self.maybe_send_awareness();
 
             // Poll for update check result.
@@ -1115,7 +1311,7 @@ impl App {
             ui: UiState {
                 file_tree_visible: self.file_tree.visible,
                 chat_panel_visible: self.chat_panel.visible,
-                terminal_visible: self.terminal.visible,
+                terminal_visible: self.terminal().visible,
                 sidebar_view: sidebar_view.into(),
             },
         };
@@ -1198,7 +1394,7 @@ impl App {
         // Restore UI state.
         self.file_tree.visible = session.ui.file_tree_visible;
         self.chat_panel.visible = session.ui.chat_panel_visible;
-        self.terminal.visible = session.ui.terminal_visible;
+        self.terminal_mut().visible = session.ui.terminal_visible;
         self.sidebar_view = match session.ui.sidebar_view.as_str() {
             "git" => SidebarView::Git,
             _ => SidebarView::Files,
@@ -1879,6 +2075,30 @@ impl App {
         }
     }
 
+    /// Send the last failed terminal command to the AI chat for diagnosis and fix.
+    pub fn fix_last_failed_command(&mut self) {
+        if let Some(cmd_record) = self.terminal().last_failed_command() {
+            let exit = cmd_record.exit_code.unwrap_or(-1);
+            let msg = format!(
+                "The command `{}` failed with exit code {}. What went wrong and how can I fix it?",
+                cmd_record.command, exit
+            );
+            // Open chat panel and inject the message.
+            if !self.chat_panel.visible {
+                self.chat_panel.visible = true;
+                self.chat_panel_focused = true;
+                self.load_chat_conversation();
+            }
+            self.chat_panel.input = msg;
+            self.set_status(format!(
+                "Fix: sent failed command '{}' to chat",
+                cmd_record.command
+            ));
+        } else {
+            self.set_status("No failed command to fix");
+        }
+    }
+
     /// Create a pull request using `gh` CLI.
     pub fn create_pr(&mut self) {
         let branch = match self.git_branch() {
@@ -1895,11 +2115,11 @@ impl App {
         }
 
         // Open terminal and run gh pr create interactively.
-        self.terminal.visible = true;
+        self.terminal_mut().visible = true;
         self.terminal_focused = true;
         let cmd = format!("gh pr create --head {branch}");
-        self.terminal.send_bytes(cmd.as_bytes());
-        self.terminal.send_enter();
+        self.terminal_mut().send_bytes(cmd.as_bytes());
+        self.terminal_mut().send_enter();
         self.set_status(format!("Creating PR for branch '{branch}'..."));
     }
 
@@ -1926,10 +2146,10 @@ impl App {
         };
 
         // Show terminal and send the command.
-        self.terminal.visible = true;
+        self.terminal_mut().visible = true;
         self.terminal_focused = true;
-        self.terminal.send_bytes(task.command.as_bytes());
-        self.terminal.send_enter();
+        self.terminal_mut().send_bytes(task.command.as_bytes());
+        self.terminal_mut().send_enter();
         self.set_status(format!("Running task: {} ({})", name, task.command));
     }
 
@@ -2132,6 +2352,74 @@ impl App {
             }
         }
         self.outline_visible = false;
+    }
+
+    // ── Registers Modal ────────────────────────────────────────
+
+    /// Build the list of register entries for display.
+    /// Returns: Vec of (register_name, content_preview).
+    pub fn register_entries(&self) -> Vec<(String, String)> {
+        let mut entries = Vec::new();
+
+        // Yank register (").
+        if let Some(ref text) = self.register {
+            let preview: String = text.chars().take(60).collect();
+            entries.push(("\"".to_string(), preview));
+        }
+
+        // Macro registers (a-z), sorted.
+        let mut keys: Vec<char> = self.macro_registers.keys().copied().collect();
+        keys.sort();
+        for ch in keys {
+            if let Some(keys_vec) = self.macro_registers.get(&ch) {
+                let preview = format_key_sequence(keys_vec);
+                entries.push((ch.to_string(), preview));
+            }
+        }
+
+        entries
+    }
+
+    /// Open the registers modal.
+    pub fn open_registers_modal(&mut self) {
+        self.registers_selected = 0;
+        self.macro_editing = None;
+        self.registers_visible = true;
+    }
+
+    /// Enter macro editing mode for the selected register.
+    pub fn edit_selected_macro(&mut self) {
+        let entries = self.register_entries();
+        if let Some((name, _)) = entries.get(self.registers_selected) {
+            if name.len() == 1 {
+                let ch = name.chars().next().unwrap();
+                // Only macro registers (a-z) are editable.
+                if ch.is_ascii_lowercase() && self.macro_registers.contains_key(&ch) {
+                    self.macro_editing = Some(ch);
+                    self.macro_edit_selected = 0;
+                } else {
+                    self.set_status("Only macro registers (a-z) can be edited");
+                }
+            }
+        }
+    }
+
+    /// Delete the selected key from the macro being edited.
+    pub fn delete_macro_key(&mut self) {
+        if let Some(ch) = self.macro_editing {
+            if let Some(keys) = self.macro_registers.get_mut(&ch) {
+                if !keys.is_empty() && self.macro_edit_selected < keys.len() {
+                    keys.remove(self.macro_edit_selected);
+                    if self.macro_edit_selected >= keys.len() && self.macro_edit_selected > 0 {
+                        self.macro_edit_selected -= 1;
+                    }
+                }
+                if keys.is_empty() {
+                    self.macro_registers.remove(&ch);
+                    self.macro_editing = None;
+                }
+            }
+        }
     }
 
     // ── Project Rules ────────────────────────────────────────────
@@ -2536,7 +2824,7 @@ impl App {
 
     /// Toggle the AI Visor panel.
     pub fn toggle_ai_visor(&mut self) {
-        if self.ai_visor.visible && self.ai_visor_focused {
+        if self.ai_visor.visible {
             self.ai_visor.visible = false;
             self.ai_visor_focused = false;
         } else {
@@ -2632,12 +2920,13 @@ impl App {
                     self.tab_mut().diagnostics = diags;
                 }
                 LspEvent::Definition(locations) => {
+                    let is_peek = self.peek_definition_pending;
+                    self.peek_definition_pending = false;
+
                     if let Some(loc) = locations.first() {
-                        // Jump to the definition location.
                         let target_row = loc.range.start.line as usize;
                         let target_col = loc.range.start.character as usize;
 
-                        // Check if it's in the same file.
                         let current_uri = self
                             .tab()
                             .buffer
@@ -2645,7 +2934,10 @@ impl App {
                             .map(|p| format!("file://{}", p.display()))
                             .unwrap_or_default();
 
-                        if loc.uri == current_uri {
+                        if is_peek {
+                            // Peek mode: show inline popup without navigating.
+                            self.open_peek_definition(loc, &current_uri);
+                        } else if loc.uri == current_uri {
                             let tab = self.tab_mut();
                             tab.cursor.row = target_row;
                             tab.cursor.col = target_col;
@@ -2769,6 +3061,92 @@ impl App {
         } else {
             self.set_status("No LSP server");
         }
+    }
+
+    /// Request peek definition at the current cursor position (shows inline popup).
+    pub fn lsp_peek_definition(&mut self) {
+        let row = self.tab().cursor.row as u32;
+        let col = self.tab().cursor.col as u32;
+        let has_lsp = self.tab().lsp_client.is_some();
+        if has_lsp {
+            self.peek_definition_pending = true;
+            self.tab_mut().lsp_client.as_mut().unwrap().goto_definition(row, col);
+            self.set_status("Peeking definition...");
+        } else {
+            self.set_status("No LSP server");
+        }
+    }
+
+    /// Open the peek definition popup for the given LSP location.
+    fn open_peek_definition(&mut self, loc: &crate::lsp::LspLocation, current_uri: &str) {
+        use std::path::PathBuf;
+
+        let target_row = loc.range.start.line as usize;
+        let target_col = loc.range.start.character as usize;
+        let context_lines: usize = 20;
+
+        // Resolve file path and read content.
+        let (file_path, content) = if loc.uri == current_uri {
+            // Same file — read from buffer.
+            let path = self
+                .tab()
+                .buffer
+                .file_path()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+            let text = self.tab().buffer.text();
+            (path, text)
+        } else {
+            // Cross-file — read from disk.
+            let path_str = loc.uri.strip_prefix("file://").unwrap_or(&loc.uri);
+            let path = PathBuf::from(path_str);
+            match std::fs::read_to_string(&path) {
+                Ok(text) => (path, text),
+                Err(_) => {
+                    self.set_status("Could not read definition file");
+                    return;
+                }
+            }
+        };
+
+        let all_lines: Vec<&str> = content.lines().collect();
+        let total = all_lines.len();
+        let start = target_row.saturating_sub(2); // 2 lines of context above
+        let end = total.min(start + context_lines);
+        let lines: Vec<String> = all_lines[start..end].iter().map(|s| s.to_string()).collect();
+        let slice_text = lines.join("\n");
+
+        // Syntax-highlight the slice.
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let highlighted =
+            if let Some(lang) = crate::highlight::Language::from_extension(ext) {
+                if let Some(mut hl) = crate::highlight::SyntaxHighlighter::new(lang) {
+                    hl.highlight(&slice_text, Some(&self.theme))
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+
+        let display_path = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        self.set_status(format!("Peek: {}:{}", display_path, target_row + 1));
+
+        self.peek_definition = Some(PeekDefinition {
+            file_path,
+            target_line: target_row,
+            target_col,
+            lines,
+            first_line: start,
+            scroll_offset: 0,
+            highlighted,
+        });
     }
 
     /// Request hover info at the current cursor position.
@@ -3374,9 +3752,9 @@ impl App {
                 }
             }
             AcpAction::RunCommand { command } => {
-                self.terminal.visible = true;
-                self.terminal.send_bytes(command.as_bytes());
-                self.terminal.send_enter();
+                self.terminal_mut().visible = true;
+                self.terminal_mut().send_bytes(command.as_bytes());
+                self.terminal_mut().send_enter();
                 AcpAppResponse {
                     success: true,
                     data: serde_json::json!({ "command": command, "status": "sent_to_terminal" }),
@@ -4045,9 +4423,9 @@ impl App {
             let cmd = "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh".to_string();
             self.set_status(format!("Updating to v{}...", version));
             // Run the update command in the embedded terminal.
-            self.terminal.visible = true;
+            self.terminal_mut().visible = true;
             self.terminal_focused = true;
-            self.terminal.send_bytes(format!("{}\n", cmd).as_bytes());
+            self.terminal_mut().send_bytes(format!("{}\n", cmd).as_bytes());
         }
     }
 
@@ -4432,6 +4810,112 @@ impl App {
             } else {
                 self.set_status("Commit message ready — review and press c to commit");
             }
+        }
+    }
+
+    /// Request an AI suggestion for the terminal prompt.
+    pub fn request_terminal_suggestion(&mut self) {
+        if self.terminal_suggestion_pending {
+            return;
+        }
+        let client = match &self.ai_client {
+            Some(c) => c,
+            None => return,
+        };
+
+        // Only suggest when at a prompt (not while a command is running).
+        if self.terminal().command_running() {
+            return;
+        }
+
+        // Build context from recent commands.
+        let cmds = self.terminal().commands();
+        let recent: Vec<String> = cmds
+            .iter()
+            .rev()
+            .take(5)
+            .map(|c| {
+                let exit = c
+                    .exit_code
+                    .map(|e| format!(" (exit {e})"))
+                    .unwrap_or_default();
+                format!("$ {}{}", c.command, exit)
+            })
+            .collect();
+        let history = recent.into_iter().rev().collect::<Vec<_>>().join("\n");
+
+        // Detect project type from cwd.
+        let project_hint = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .map(|dir| {
+                if dir.join("Cargo.toml").exists() {
+                    "Rust (Cargo)"
+                } else if dir.join("package.json").exists() {
+                    "Node.js"
+                } else if dir.join("go.mod").exists() {
+                    "Go"
+                } else if dir.join("pyproject.toml").exists() || dir.join("setup.py").exists() {
+                    "Python"
+                } else {
+                    "Unknown"
+                }
+            })
+            .unwrap_or("Unknown");
+
+        let system = "You are a terminal command assistant. Suggest the single most likely \
+                      next command the user would run. Output ONLY the command, nothing else. \
+                      No explanation, no markdown, no quotes."
+            .to_string();
+        let prompt = format!(
+            "Project type: {project_hint}\n\
+             Recent commands:\n{history}\n\n\
+             Suggest the next command:"
+        );
+        let messages = vec![aura_ai::Message::text("user", &prompt)];
+        let rx = client.stream_completion(&system, messages);
+        self.terminal_suggestion_rx = Some(rx);
+        self.terminal_suggestion_pending = true;
+    }
+
+    /// Poll for terminal suggestion AI response.
+    fn poll_terminal_suggestion(&mut self) {
+        let rx = match &self.terminal_suggestion_rx {
+            Some(r) => r,
+            None => return,
+        };
+
+        let mut done = false;
+        loop {
+            match rx.try_recv() {
+                Ok(AiEvent::Token(t)) => {
+                    let suggestion = self.terminal_suggestion.get_or_insert_with(String::new);
+                    suggestion.push_str(&t);
+                }
+                Ok(AiEvent::Done(full)) => {
+                    let trimmed = full.trim().to_string();
+                    self.terminal_suggestion = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
+                    done = true;
+                    break;
+                }
+                Ok(AiEvent::Error(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(mpsc::TryRecvError::Empty) => break,
+            }
+        }
+
+        if done {
+            self.terminal_suggestion_rx = None;
+            self.terminal_suggestion_pending = false;
         }
     }
 
@@ -4992,15 +5476,8 @@ impl App {
     /// If hidden → open, refresh, and focus.
     pub fn toggle_conversation_history(&mut self) {
         if self.conversation_history.visible {
-            if self.conversation_history_focused {
-                self.conversation_history.visible = false;
-                self.conversation_history_focused = false;
-            } else {
-                self.conversation_history_focused = true;
-                self.file_tree_focused = false;
-                self.source_control_focused = false;
-                self.terminal_focused = false;
-            }
+            self.conversation_history.visible = false;
+            self.conversation_history_focused = false;
         } else {
             // Hide chat panel — same right-side area.
             self.chat_panel.visible = false;
@@ -5087,7 +5564,7 @@ impl App {
             return;
         }
 
-        if self.terminal.visible && point_in(self.terminal_rect) {
+        if self.terminal().visible && point_in(self.terminal_rect) {
             self.terminal_focused = true;
             self.file_tree_focused = false;
             self.source_control_focused = false;
@@ -5389,13 +5866,13 @@ impl App {
                     }
                 }
             }
-        } else if self.terminal.visible && point_in(self.terminal_rect) {
+        } else if self.terminal().visible && point_in(self.terminal_rect) {
             // Scroll the terminal scrollback.
             for _ in 0..scroll_lines {
                 if up {
-                    self.terminal.scroll_up();
+                    self.terminal_mut().scroll_up();
                 } else {
-                    self.terminal.scroll_down();
+                    self.terminal_mut().scroll_down();
                 }
             }
         } else if self.chat_panel.visible && point_in(self.chat_panel_rect) {
@@ -5436,16 +5913,8 @@ impl App {
     /// If hidden → open and focus. Mutually exclusive with conversation history.
     pub fn toggle_chat_panel(&mut self) {
         if self.chat_panel.visible {
-            if self.chat_panel_focused {
-                self.chat_panel.visible = false;
-                self.chat_panel_focused = false;
-            } else {
-                self.chat_panel_focused = true;
-                self.conversation_history_focused = false;
-                self.file_tree_focused = false;
-                self.source_control_focused = false;
-                self.terminal_focused = false;
-            }
+            self.chat_panel.visible = false;
+            self.chat_panel_focused = false;
         } else {
             // Hide conversation history — same right-side area.
             self.conversation_history.visible = false;
@@ -6980,7 +7449,132 @@ impl App {
     pub fn stop_collab(&mut self) {
         if let Some(session) = self.collab.take() {
             session.shutdown();
+            self.collab_follow_peer = None;
+            self.collab_follow_last_applied = None;
             self.set_status("Collab session ended");
+        }
+    }
+
+    /// Start following a peer's viewport by display name.
+    pub fn start_follow(&mut self, name: &str) {
+        let session = match &self.collab {
+            Some(s) => s,
+            None => {
+                self.set_status("Not in a collab session");
+                return;
+            }
+        };
+
+        // Reject following self.
+        if session.local_name.eq_ignore_ascii_case(name) {
+            self.set_status("Cannot follow yourself");
+            return;
+        }
+
+        // Find peer by name (case-insensitive).
+        let found = session
+            .peers
+            .values()
+            .find(|p| p.name.eq_ignore_ascii_case(name));
+        match found {
+            Some(peer) => {
+                let peer_id = peer.peer_id;
+                let peer_name = peer.name.clone();
+                self.collab_follow_peer = Some(peer_id);
+                self.collab_follow_last_applied = None;
+                self.set_status(format!("Following {peer_name}"));
+            }
+            None => {
+                let names: Vec<String> =
+                    session.peers.values().map(|p| p.name.clone()).collect();
+                if names.is_empty() {
+                    self.set_status("No peers connected");
+                } else {
+                    self.set_status(format!(
+                        "Peer '{}' not found. Available: {}",
+                        name,
+                        names.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Stop following a peer.
+    pub fn stop_follow(&mut self) {
+        if self.collab_follow_peer.is_some() {
+            self.collab_follow_peer = None;
+            self.collab_follow_last_applied = None;
+            self.set_status("Stopped following");
+        } else {
+            self.set_status("Not following anyone");
+        }
+    }
+
+    /// If following a peer, sync local viewport to theirs. Auto-breaks on local navigation.
+    fn apply_follow_viewport(&mut self) {
+        let peer_id = match self.collab_follow_peer {
+            Some(id) => id,
+            None => return,
+        };
+
+        // Detect local scroll that breaks follow mode.
+        if let Some((last_sr, last_sc)) = self.collab_follow_last_applied {
+            let tab = self.tab();
+            if tab.scroll_row != last_sr || tab.scroll_col != last_sc {
+                self.collab_follow_peer = None;
+                self.collab_follow_last_applied = None;
+                self.set_status("Follow ended: local navigation");
+                return;
+            }
+        }
+
+        // Check peer still exists.
+        let (awareness_file_id, scroll_row, scroll_col) = {
+            let session = match &self.collab {
+                Some(s) => s,
+                None => {
+                    self.collab_follow_peer = None;
+                    self.collab_follow_last_applied = None;
+                    return;
+                }
+            };
+            let peer = match session.peers.get(&peer_id) {
+                Some(p) => p,
+                None => {
+                    self.collab_follow_peer = None;
+                    self.collab_follow_last_applied = None;
+                    self.set_status("Follow ended: peer disconnected");
+                    return;
+                }
+            };
+
+            // Get the peer's latest awareness (prefer the one with scroll data).
+            let awareness = peer
+                .awareness
+                .values()
+                .filter(|a| a.scroll_row.is_some())
+                .max_by_key(|a| a.scroll_row.unwrap_or(0));
+            match awareness {
+                Some(a) => (a.file_id, a.scroll_row, a.scroll_col),
+                None => return,
+            }
+        };
+
+        // File switching: if the peer is on a different file, switch to it.
+        let current_file_id = self.tab().file_id();
+        if awareness_file_id != 0 && awareness_file_id != current_file_id {
+            if let Some(idx) = self.find_tab_by_file_id(awareness_file_id) {
+                self.tabs.switch_to(idx);
+            }
+        }
+
+        // Apply viewport.
+        if let (Some(sr), Some(sc)) = (scroll_row, scroll_col) {
+            let tab = self.tab_mut();
+            tab.scroll_row = sr;
+            tab.scroll_col = sc;
+            self.collab_follow_last_applied = Some((sr, sc));
         }
     }
 
@@ -7149,6 +7743,11 @@ impl App {
                     if let Some(session) = &mut self.collab {
                         session.remove_peer(peer_id);
                     }
+                    // Break follow mode if we were following this peer.
+                    if self.collab_follow_peer == Some(peer_id) {
+                        self.collab_follow_peer = None;
+                        self.collab_follow_last_applied = None;
+                    }
                     self.set_status(format!("Peer left: {name}"));
                 }
                 crate::collab::CollabEvent::Awareness(update) => {
@@ -7256,13 +7855,19 @@ impl App {
             .as_ref()
             .map(|anchor| ((anchor.row, anchor.col), (tab.cursor.row, tab.cursor.col)));
 
-        // Only send if changed.
-        if self.collab_last_cursor == Some(cursor) && self.collab_last_selection == selection {
+        let current_scroll = (tab.scroll_row, tab.scroll_col);
+
+        // Only send if something changed.
+        if self.collab_last_cursor == Some(cursor)
+            && self.collab_last_selection == selection
+            && self.collab_last_scroll == Some(current_scroll)
+        {
             return;
         }
 
         self.collab_last_cursor = Some(cursor);
         self.collab_last_selection = selection;
+        self.collab_last_scroll = Some(current_scroll);
         self.collab_last_awareness = now;
 
         if let Some(session) = &self.collab {
@@ -7273,6 +7878,8 @@ impl App {
                 file_id,
                 cursor: Some(cursor),
                 selection,
+                scroll_row: Some(current_scroll.0),
+                scroll_col: Some(current_scroll.1),
             };
             session.broadcast_awareness(update);
         }

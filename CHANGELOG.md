@@ -5,6 +5,91 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.53] - 2026-03-31
+
+### Added
+
+- **Follow mode in collab** — Lock your viewport to a peer's scroll position in real-time.
+  - `:follow <name>` — start following a peer by display name
+  - `:unfollow` — stop following
+  - Viewport syncs automatically: scroll position and file switching
+  - Any local navigation (scroll, cursor move, mouse wheel) breaks follow mode
+  - Status bar shows `FOLLOWING <name>` indicator when active
+  - Backward-compatible: extends awareness protocol with optional scroll fields
+
+## [0.1.52] - 2026-03-31
+
+### Added
+
+- **Terminal inline AI suggestions** — AI suggests shell commands as ghost text at the prompt.
+  - Triggers after 2 seconds idle when terminal is focused and no command is running
+  - Context-aware: uses recent commands, exit codes, and project type (Rust/Node/Go/Python)
+  - Ghost text shown in gray after the cursor on the prompt line
+  - `Tab` to accept (sends command to PTY), any other key dismisses
+  - Requires AI backend (Anthropic API key or Claude Code CLI)
+
+## [0.1.51] - 2026-03-31
+
+### Added
+
+- **Terminal shell integration** — Automatic command boundary and exit code detection via OSC 133 protocol.
+  - Shell hooks injected automatically for zsh and bash (precmd/preexec and PROMPT_COMMAND/PS0)
+  - Command records tracked: command text, exit code, prompt row
+  - Exit code shown in terminal title bar: `[ok]`, `[exit 1]`, or `[running]`
+  - `:fix` command — sends last failed command to AI chat for diagnosis
+  - `commands()`, `last_failed_command()`, `command_running()` API on `EmbeddedTerminal`
+
+## [0.1.50] - 2026-03-31
+
+### Added
+
+- **Multiple terminal tabs** — Spawn and switch between multiple independent terminal instances.
+  - `:term new` — open a new terminal tab
+  - `:term close` — close the active terminal tab
+  - `:term next` / `:term prev` — switch between tabs
+  - `Ctrl+Shift+T` — new terminal tab (when terminal focused)
+  - `Ctrl+Shift+]` / `Ctrl+Shift+[` — switch tabs (when terminal focused)
+  - Tab bar displayed in terminal pane header when multiple tabs exist
+  - Each tab has its own PTY, scrollback, and screen buffer
+  - Task runner sends commands to the active terminal tab
+
+## [0.1.49] - 2026-03-31
+
+### Added
+
+- **Registers modal** (`:registers` or `:reg`) — View all yank and macro registers in a centered modal.
+  - Shows yank register (`"`) and all macro registers (`@a`–`@z`)
+  - `j`/`k` to navigate, `e`/`Enter` to edit a macro, `q`/`Esc` to close
+  - Macro registers shown in green with `@` prefix
+- **Macro editing** — Edit recorded macro key sequences before replaying.
+  - Select a macro register in the registers modal and press `e` or `Enter`
+  - View individual keystrokes with human-readable names (e.g. `C-s`, `Esc`, `Enter`)
+  - `d`/`x`/`Delete` to remove a key from the sequence
+  - `Esc` to return to register list
+
+## [0.1.48] - 2026-03-31
+
+### Added
+
+- **Peek definition** (`gp`) — Inline popup showing a symbol's definition without navigating away.
+  - Syntax-highlighted code with line numbers
+  - Target line highlighted with distinct background
+  - `j`/`k` to scroll within the popup
+  - `Enter` to navigate to the definition (like `gd`)
+  - `Esc`/`q` to close; any other key closes and is processed normally
+  - Works for same-file and cross-file definitions
+  - Scroll position indicator when content exceeds popup height
+
+## [0.1.47] - 2026-03-30
+
+### Fixed
+
+- **Panel toggle shortcuts now close on first press** — `Ctrl+J` (chat), `Ctrl+H` (conversation history), and `Ctrl+I` (AI visor) now immediately close their panel when pressed again, instead of requiring two presses (one to focus, one to close).
+
+### Changed
+
+- Updated chat panel documentation to reflect the simplified toggle behavior.
+
 ## [0.1.46] - 2026-03-30
 
 ### Added

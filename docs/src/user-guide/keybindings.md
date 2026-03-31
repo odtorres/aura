@@ -92,6 +92,7 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | `q{a-z}` | Start recording macro into register |
 | `q` | Stop recording macro |
 | `@{a-z}` | Play back macro from register |
+| `:registers` | Open registers modal (view/edit macros) |
 
 ### Surround Editing
 
@@ -123,6 +124,7 @@ This is a comprehensive reference of all keybindings in AURA. For a conceptual o
 | Key | Action |
 |-----|--------|
 | `gd` | Go to definition |
+| `gp` | Peek definition (inline popup) |
 | `gr` | Find all references |
 | `gn` | Rename symbol |
 | `K` | Show hover info |
@@ -148,6 +150,7 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | Key | Action |
 |-----|--------|
 | `gd` | Go to definition |
+| `gp` | Peek definition (inline popup) |
 | `gr` | Find all references |
 | `gn` | Rename symbol |
 | `K` | Show hover information |
@@ -255,6 +258,10 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `:plugins` | | List loaded plugins |
 | `:files` | `:fp` | Open fuzzy file picker |
 | `:term` | `:terminal` | Toggle terminal pane |
+| `:term new` | | Open new terminal tab |
+| `:term close` | | Close active terminal tab |
+| `:term next` | | Switch to next terminal tab |
+| `:term prev` | | Switch to previous terminal tab |
 | `:tree` | | Toggle file tree sidebar |
 | `:term-height <N>` | `:th <N>` | Set terminal pane height |
 | `:compact` | | Compact conversation database |
@@ -268,6 +275,8 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `:host` | | Start hosting a collab session |
 | `:join <addr:port>` | | Join a collab session |
 | `:collab-stop` | | End the collab session |
+| `:follow <name>` | | Follow a peer's viewport in real-time |
+| `:unfollow` | | Stop following a peer |
 | `:agent <task>` | | Start autonomous AI agent |
 | `:agent -n <N> <task>` | | Agent with custom iteration limit |
 | `:agent stop` | | Stop the running agent |
@@ -282,6 +291,8 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `:debug` | `:db` | Start debug session |
 | `:breakpoint` | `:bp` | Toggle breakpoint |
 | `:marks` | | List all marks |
+| `:registers` | `:reg` | Show registers modal (yank + macros) |
+| `:fix` | | Send last failed terminal command to AI chat |
 | `:set rnu` | | Enable relative line numbers |
 | `:set nornu` | | Disable relative line numbers |
 | `:set wrap` | | Enable word wrap |
@@ -311,6 +322,9 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 |-----|--------|
 | `Esc` | Return focus to editor |
 | `Ctrl+J` / `` Ctrl+` `` | Return focus to editor |
+| `Ctrl+Shift+T` | Open new terminal tab |
+| `Ctrl+Shift+]` | Switch to next terminal tab |
+| `Ctrl+Shift+[` | Switch to previous terminal tab |
 | `Ctrl+Shift+Up` | Increase terminal height |
 | `Ctrl+Shift+Down` | Decrease terminal height |
 | `Ctrl+C` | Send interrupt signal |
