@@ -1178,15 +1178,8 @@ impl App {
             // Poll for Claude Code activity.
             if let Some(watcher) = &mut self.claude_watcher {
                 let events = watcher.poll_events();
-                for event in &events {
-                    if let crate::claude_watcher::ClaudeActivity::ToolCall {
-                        name,
-                        input_summary,
-                        ..
-                    } = event
-                    {
-                        tracing::debug!("Claude Code: {name}({input_summary})");
-                    }
+                if !events.is_empty() {
+                    self.persist_claude_code_activity(&events);
                 }
             }
 
@@ -6692,6 +6685,69 @@ impl App {
         }
 
         prompt
+    }
+
+    /// Persist Claude Code activity events to the conversation store.
+    fn persist_claude_code_activity(&mut self, events: &[crate::claude_watcher::ClaudeActivity]) {
+        use crate::claude_watcher::ClaudeActivity;
+        use aura_core::conversation::MessageRole;
+
+        self.ensure_conversation_store();
+        let store = match &self.conversation_store {
+            Some(s) => s,
+            None => return,
+        };
+        let (branch, _) = self.git_context();
+
+        let mut needs_refresh = false;
+        for event in events {
+            let (session_id, role, content, model) = match event {
+                ClaudeActivity::UserMessage { text, session_id } => {
+                    (session_id.as_str(), MessageRole::HumanIntent, text.as_str(), None)
+                }
+                ClaudeActivity::AssistantMessage {
+                    text,
+                    model,
+                    session_id,
+                } => (
+                    session_id.as_str(),
+                    MessageRole::AiResponse,
+                    text.as_str(),
+                    Some(model.as_str()),
+                ),
+                ClaudeActivity::ToolCall {
+                    name,
+                    input_summary,
+                    session_id,
+                } => {
+                    tracing::debug!("Claude Code: {name}({input_summary})");
+                    // Skip tool calls — only persist user/assistant messages.
+                    let _ = session_id;
+                    continue;
+                }
+                ClaudeActivity::Progress { .. } => continue,
+            };
+
+            let conv = match store
+                .find_or_create_claude_code_conversation(session_id, branch.as_deref())
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to create Claude Code conversation: {e}");
+                    continue;
+                }
+            };
+
+            if let Err(e) = store.add_message(&conv.id, role, content, model) {
+                tracing::warn!("Failed to persist Claude Code message: {e}");
+            } else {
+                needs_refresh = true;
+            }
+        }
+
+        if needs_refresh {
+            self.refresh_conversation_history();
+        }
     }
 
     /// Ensure a chat conversation exists in the database.

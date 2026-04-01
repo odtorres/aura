@@ -706,6 +706,29 @@ impl ConversationStore {
         }
     }
 
+    /// Find or create a conversation for Claude Code activity observations.
+    pub fn find_or_create_claude_code_conversation(
+        &self,
+        session_id: &str,
+        branch: Option<&str>,
+    ) -> Result<Conversation> {
+        let file_path = format!("__claude_code__{session_id}");
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
+             FROM conversations WHERE file_path = ?1
+             ORDER BY updated_at DESC LIMIT 1",
+        )?;
+        let existing: Option<Conversation> = stmt
+            .query_map(params![file_path], row_to_conversation)?
+            .next()
+            .transpose()?;
+
+        match existing {
+            Some(conv) => Ok(conv),
+            None => self.create_conversation(&file_path, 0, 0, None, branch),
+        }
+    }
+
     /// Get lines that have conversation history (for gutter markers).
     pub fn lines_with_conversations(&self, file_path: &str) -> Result<Vec<(usize, usize)>> {
         let mut stmt = self.conn.prepare(

@@ -55,6 +55,14 @@ impl ConversationEntry {
                 "Chat session".to_string()
             };
         }
+        // Friendly label for Claude Code observed conversations.
+        if self.file_path.starts_with("__claude_code__") {
+            return if let Some(ref first_msg) = self.first_user_message {
+                format!("CC: {}", smart_truncate(first_msg, 57))
+            } else {
+                "Claude Code session".to_string()
+            };
+        }
         // Fall back to file basename.
         self.file_path
             .rsplit('/')
@@ -154,8 +162,11 @@ impl ConversationHistoryPanel {
                             .map(|i| i.intent_text);
                         // Load decision stats.
                         let (accepted, rejected) = store.decision_stats(&conv.id).unwrap_or((0, 0));
-                        // For chat conversations, load first user message as title fallback.
-                        let first_user_message = if conv.file_path == "__chat__" && intent.is_none() {
+                        // For chat/Claude Code conversations, load first user message as title.
+                        let first_user_message = if intent.is_none()
+                            && (conv.file_path == "__chat__"
+                                || conv.file_path.starts_with("__claude_code__"))
+                        {
                             store.first_user_message(&conv.id).ok().flatten()
                         } else {
                             None
