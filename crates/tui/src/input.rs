@@ -246,7 +246,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 true
             }
             // Ctrl+H — toggle conversation history panel.
-            KeyCode::Char('h') => {
+            // Note: some terminals send Backspace for Ctrl+H.
+            KeyCode::Char('h') | KeyCode::Backspace => {
                 unfocus_all_panels(app);
                 app.toggle_conversation_history();
                 true
