@@ -24,6 +24,8 @@ pub struct GitGraphModal {
     pub detail_files: Vec<(char, String)>,
     /// Whether the detail panel is shown.
     pub show_detail: bool,
+    /// Set of commit indices that have linked AI conversations.
+    pub commits_with_conversations: std::collections::HashSet<usize>,
 }
 
 impl GitGraphModal {
@@ -38,6 +40,7 @@ impl GitGraphModal {
             scroll: 0,
             detail_files: Vec::new(),
             show_detail: true,
+            commits_with_conversations: std::collections::HashSet::new(),
         }
     }
 
@@ -50,6 +53,7 @@ impl GitGraphModal {
         self.selected = 0;
         self.scroll = 0;
         self.detail_files.clear();
+        self.commits_with_conversations.clear();
         self.visible = true;
     }
 

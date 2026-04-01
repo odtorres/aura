@@ -729,6 +729,37 @@ impl ConversationStore {
         }
     }
 
+    /// Find conversations linked to a specific git commit hash.
+    ///
+    /// Matches on full or prefix hash (at least 7 chars).
+    pub fn conversations_for_commit(&self, commit_hash: &str) -> Result<Vec<Conversation>> {
+        let pattern = format!("{}%", &commit_hash[..commit_hash.len().min(7)]);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
+             FROM conversations WHERE git_commit LIKE ?1
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![pattern], row_to_conversation)?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Check if any conversations exist for a given commit hash.
+    pub fn has_conversations_for_commit(&self, commit_hash: &str) -> bool {
+        let pattern = format!("{}%", &commit_hash[..commit_hash.len().min(7)]);
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM conversations WHERE git_commit LIKE ?1",
+                params![pattern],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false)
+    }
+
     /// Get lines that have conversation history (for gutter markers).
     pub fn lines_with_conversations(&self, file_path: &str) -> Result<Vec<(usize, usize)>> {
         let mut stmt = self.conn.prepare(

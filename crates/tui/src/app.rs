@@ -5173,6 +5173,14 @@ impl App {
             match repo.graph_log(100) {
                 Ok(commits) => {
                     self.git_graph.open(commits);
+                    // Mark commits that have linked AI conversations.
+                    if let Some(store) = &self.conversation_store {
+                        for (i, commit) in self.git_graph.commits.iter().enumerate() {
+                            if store.has_conversations_for_commit(&commit.hash) {
+                                self.git_graph.commits_with_conversations.insert(i);
+                            }
+                        }
+                    }
                     // Load files for first commit.
                     self.load_graph_commit_files();
                 }
@@ -5180,6 +5188,56 @@ impl App {
             }
         } else {
             self.set_status("Not a git repository");
+        }
+    }
+
+    /// Open the AI conversation linked to the selected git graph commit.
+    pub fn open_graph_commit_conversation(&mut self) {
+        let hash = match self.git_graph.selected_hash() {
+            Some(h) => h.to_string(),
+            None => return,
+        };
+        let store = match &self.conversation_store {
+            Some(s) => s,
+            None => {
+                self.set_status("No conversation store");
+                return;
+            }
+        };
+        match store.conversations_for_commit(&hash) {
+            Ok(convs) if !convs.is_empty() => {
+                let conv_id = convs[0].id.clone();
+                // Close the graph, open history panel, and expand the conversation.
+                self.git_graph.close();
+                self.conversation_history.visible = true;
+                self.conversation_history_focused = true;
+                self.refresh_conversation_history();
+                // Find and select the conversation in the history panel.
+                if let Some(idx) = self
+                    .conversation_history
+                    .conversations
+                    .iter()
+                    .position(|c| c.id == conv_id)
+                {
+                    self.conversation_history.selected = idx;
+                    if let Some(store) = &self.conversation_store {
+                        self.conversation_history.toggle_expand(store);
+                    }
+                }
+                self.set_status(format!(
+                    "Conversation for commit {}",
+                    &hash[..hash.len().min(7)]
+                ));
+            }
+            Ok(_) => {
+                self.set_status(format!(
+                    "No conversations for commit {}",
+                    &hash[..hash.len().min(7)]
+                ));
+            }
+            Err(e) => {
+                self.set_status(format!("Failed to query conversations: {e}"));
+            }
         }
     }
 

@@ -1166,6 +1166,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Enter => {
                 app.git_graph.show_detail = !app.git_graph.show_detail;
             }
+            // c — open AI conversation linked to this commit.
+            KeyCode::Char('c') => {
+                app.open_graph_commit_conversation();
+            }
             _ => {}
         }
         return;

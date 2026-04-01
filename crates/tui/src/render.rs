@@ -4200,6 +4200,14 @@ fn draw_git_graph_modal(frame: &mut Frame, modal: &crate::git_graph::GitGraphMod
 
         spans.push(Span::styled(format!("  {time}"), bg.fg(Color::DarkGray)));
 
+        // Show conversation indicator if this commit has linked AI conversations.
+        if modal.commits_with_conversations.contains(&commit_idx) {
+            spans.push(Span::styled(
+                " [c]AI",
+                bg.fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ));
+        }
+
         let line = ratatui::text::Line::from(spans);
         frame.render_widget(
             Paragraph::new(line).style(bg),
