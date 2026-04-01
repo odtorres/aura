@@ -85,7 +85,9 @@ fn highlight_style(idx: usize, theme: Option<&Theme>) -> (Color, Modifier) {
     match HIGHLIGHT_NAMES.get(idx) {
         // Comments — subtle gray + italic.
         Some(&"comment") => (
-            theme.map(|t| t.comment).unwrap_or(Color::Rgb(100, 100, 100)),
+            theme
+                .map(|t| t.comment)
+                .unwrap_or(Color::Rgb(100, 100, 100)),
             Modifier::ITALIC,
         ),
 
@@ -258,8 +260,8 @@ impl Language {
     /// Detect language from a filename (for dotfiles like `.env`).
     pub fn from_filename(name: &str) -> Option<Self> {
         match name {
-            ".env" | ".env.local" | ".env.development" | ".env.production"
-            | ".env.test" | ".env.staging" | ".env.example" => Some(Self::Dotenv),
+            ".env" | ".env.local" | ".env.development" | ".env.production" | ".env.test"
+            | ".env.staging" | ".env.example" => Some(Self::Dotenv),
             "Dockerfile" => Some(Self::Bash), // Close enough for highlighting
             "Makefile" | "makefile" => Some(Self::Bash),
             _ => None,
@@ -710,10 +712,7 @@ fn highlight_markdown_inline(lines: &mut [HighlightedLine], source: &str) {
         }
 
         // --- List markers: -, *, +, or 1. at start ---
-        if trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || trimmed.starts_with("+ ")
-        {
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
             let offset = line_text.len() - trimmed.len();
             if offset < len {
                 hl.colors[offset] = Color::Rgb(200, 160, 80); // Orange marker
@@ -787,9 +786,7 @@ fn highlight_markdown_inline(lines: &mut [HighlightedLine], source: &str) {
             }
 
             // Italic: *text* or _text_
-            if (chars[i] == '*' || chars[i] == '_')
-                && i + 1 < len
-                && !chars[i + 1].is_whitespace()
+            if (chars[i] == '*' || chars[i] == '_') && i + 1 < len && !chars[i + 1].is_whitespace()
             {
                 let marker = chars[i];
                 if let Some(end) = find_closing_marker(&chars, i + 1, &[marker]) {
@@ -946,7 +943,10 @@ fn highlight_dotenv(lines: &mut [HighlightedLine], source: &str) {
                         hl.colors[val_start] = Color::Rgb(80, 130, 80);
                     }
                     // Find and dim the closing quote.
-                    if let Some(close) = chars[val_start + 1..].iter().position(|c| *c == first_val_char) {
+                    if let Some(close) = chars[val_start + 1..]
+                        .iter()
+                        .position(|c| *c == first_val_char)
+                    {
                         let close_idx = val_start + 1 + close;
                         if close_idx < len {
                             hl.colors[close_idx] = Color::Rgb(80, 130, 80);
@@ -976,7 +976,9 @@ fn highlight_dotenv(lines: &mut [HighlightedLine], source: &str) {
                     if chars[i] == '$' {
                         if i + 1 < len && chars[i + 1] == '{' {
                             // ${VAR} — orange.
-                            let end = chars[i + 2..].iter().position(|c| *c == '}')
+                            let end = chars[i + 2..]
+                                .iter()
+                                .position(|c| *c == '}')
                                 .map(|p| i + 2 + p)
                                 .unwrap_or(len - 1);
                             for j in i..=end.min(len - 1) {
@@ -986,7 +988,8 @@ fn highlight_dotenv(lines: &mut [HighlightedLine], source: &str) {
                             i = end + 1;
                         } else {
                             // $VAR — orange.
-                            let end = chars[i + 1..].iter()
+                            let end = chars[i + 1..]
+                                .iter()
                                 .position(|c| !c.is_alphanumeric() && *c != '_')
                                 .map(|p| i + 1 + p)
                                 .unwrap_or(len);

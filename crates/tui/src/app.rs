@@ -3116,7 +3116,11 @@ impl App {
         let has_lsp = self.tab().lsp_client.is_some();
         if has_lsp {
             self.peek_definition_pending = true;
-            self.tab_mut().lsp_client.as_mut().unwrap().goto_definition(row, col);
+            self.tab_mut()
+                .lsp_client
+                .as_mut()
+                .unwrap()
+                .goto_definition(row, col);
             self.set_status("Peeking definition...");
         } else {
             self.set_status("No LSP server");
@@ -3159,24 +3163,23 @@ impl App {
         let total = all_lines.len();
         let start = target_row.saturating_sub(2); // 2 lines of context above
         let end = total.min(start + context_lines);
-        let lines: Vec<String> = all_lines[start..end].iter().map(|s| s.to_string()).collect();
+        let lines: Vec<String> = all_lines[start..end]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let slice_text = lines.join("\n");
 
         // Syntax-highlight the slice.
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        let highlighted =
-            if let Some(lang) = crate::highlight::Language::from_extension(ext) {
-                if let Some(mut hl) = crate::highlight::SyntaxHighlighter::new(lang) {
-                    hl.highlight(&slice_text, Some(&self.theme))
-                } else {
-                    Vec::new()
-                }
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let highlighted = if let Some(lang) = crate::highlight::Language::from_extension(ext) {
+            if let Some(mut hl) = crate::highlight::SyntaxHighlighter::new(lang) {
+                hl.highlight(&slice_text, Some(&self.theme))
             } else {
                 Vec::new()
-            };
+            }
+        } else {
+            Vec::new()
+        };
 
         let display_path = file_path
             .file_name()
@@ -4473,7 +4476,8 @@ impl App {
             // Run the update command in the embedded terminal.
             self.terminal_mut().visible = true;
             self.terminal_focused = true;
-            self.terminal_mut().send_bytes(format!("{}\n", cmd).as_bytes());
+            self.terminal_mut()
+                .send_bytes(format!("{}\n", cmd).as_bytes());
         }
     }
 
@@ -4606,9 +4610,7 @@ impl App {
     }
 
     /// Get current edit predictions.
-    pub fn edit_predictions(
-        &self,
-    ) -> &[crate::speculative::NextEditPrediction] {
+    pub fn edit_predictions(&self) -> &[crate::speculative::NextEditPrediction] {
         match &self.speculative {
             Some(engine) => &engine.edit_predictions,
             None => &[],
@@ -6760,9 +6762,12 @@ impl App {
         let mut needs_refresh = false;
         for event in events {
             let (session_id, role, content, model) = match event {
-                ClaudeActivity::UserMessage { text, session_id } => {
-                    (session_id.as_str(), MessageRole::HumanIntent, text.as_str(), None)
-                }
+                ClaudeActivity::UserMessage { text, session_id } => (
+                    session_id.as_str(),
+                    MessageRole::HumanIntent,
+                    text.as_str(),
+                    None,
+                ),
                 ClaudeActivity::AssistantMessage {
                     text,
                     model,
@@ -6786,9 +6791,11 @@ impl App {
                 ClaudeActivity::Progress { .. } => continue,
             };
 
-            let conv = match store
-                .find_or_create_claude_code_conversation(session_id, commit.as_deref(), branch.as_deref())
-            {
+            let conv = match store.find_or_create_claude_code_conversation(
+                session_id,
+                commit.as_deref(),
+                branch.as_deref(),
+            ) {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!("Failed to create Claude Code conversation: {e}");
@@ -7739,8 +7746,7 @@ impl App {
                 self.set_status(format!("Following {peer_name}"));
             }
             None => {
-                let names: Vec<String> =
-                    session.peers.values().map(|p| p.name.clone()).collect();
+                let names: Vec<String> = session.peers.values().map(|p| p.name.clone()).collect();
                 if names.is_empty() {
                     self.set_status("No peers connected");
                 } else {
@@ -8010,10 +8016,9 @@ impl App {
                     }
                 }
                 crate::collab::CollabEvent::TerminalSnapshot { data } => {
-                    match serde_json::from_slice::<
-                        crate::embedded_terminal::TerminalSnapshot,
-                    >(&data)
-                    {
+                    match serde_json::from_slice::<crate::embedded_terminal::TerminalSnapshot>(
+                        &data,
+                    ) {
                         Ok(snapshot) => {
                             self.collab_shared_terminal = Some(snapshot);
                         }

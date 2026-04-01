@@ -125,8 +125,7 @@ pub fn predict_next_edits(
     seen_lines.insert(cursor_line);
 
     // 1. Diagnostic-driven: lines with errors/warnings not recently edited.
-    let recent_set: std::collections::HashSet<usize> =
-        recent_edit_lines.iter().copied().collect();
+    let recent_set: std::collections::HashSet<usize> = recent_edit_lines.iter().copied().collect();
     for (line, _msg) in diagnostics {
         if *line < buffer_line_count && seen_lines.insert(*line) && !recent_set.contains(line) {
             predictions.push(NextEditPrediction {
@@ -375,10 +374,18 @@ impl SpeculativeEngine {
             self.prediction_index = 0;
             return;
         }
-        let new_predictions =
-            predict_next_edits(recent_edit_lines, cursor_line, diagnostics, buffer_line_count);
+        let new_predictions = predict_next_edits(
+            recent_edit_lines,
+            cursor_line,
+            diagnostics,
+            buffer_line_count,
+        );
         if new_predictions.iter().map(|p| p.line).collect::<Vec<_>>()
-            != self.edit_predictions.iter().map(|p| p.line).collect::<Vec<_>>()
+            != self
+                .edit_predictions
+                .iter()
+                .map(|p| p.line)
+                .collect::<Vec<_>>()
         {
             self.edit_predictions = new_predictions;
             self.prediction_index = 0;
@@ -399,8 +406,7 @@ impl SpeculativeEngine {
     /// Cycle to the next prediction.
     pub fn next_prediction(&mut self) {
         if !self.edit_predictions.is_empty() {
-            self.prediction_index =
-                (self.prediction_index + 1) % self.edit_predictions.len();
+            self.prediction_index = (self.prediction_index + 1) % self.edit_predictions.len();
         }
     }
 

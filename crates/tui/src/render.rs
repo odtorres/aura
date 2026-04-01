@@ -20,7 +20,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
     let has_terminal = app.terminal().visible;
     let has_debug_panel = app.debug_panel.visible;
-    let terminal_height = if has_terminal { app.terminal().height } else { 0 };
+    let terminal_height = if has_terminal {
+        app.terminal().height
+    } else {
+        0
+    };
     let debug_panel_height = if has_debug_panel {
         app.debug_panel.height
     } else {
@@ -536,11 +540,17 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
     let result_lines = view.result_lines();
 
     let hl_incoming = highlighter.as_mut().map(|h| {
-        let text: String = incoming_lines.iter().map(|(l, _)| format!("{l}\n")).collect();
+        let text: String = incoming_lines
+            .iter()
+            .map(|(l, _)| format!("{l}\n"))
+            .collect();
         h.highlight(&text, Some(&app.theme))
     });
     let hl_current = highlighter.as_mut().map(|h| {
-        let text: String = current_lines.iter().map(|(l, _)| format!("{l}\n")).collect();
+        let text: String = current_lines
+            .iter()
+            .map(|(l, _)| format!("{l}\n"))
+            .collect();
         h.highlight(&text, Some(&app.theme))
     });
     let hl_result = highlighter.as_mut().map(|h| {
@@ -585,7 +595,12 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
         let scroll = view.scroll_incoming;
         draw_merge_panel_lines(
-            frame, inner, &incoming_lines, scroll, active_conflict, Color::Green,
+            frame,
+            inner,
+            &incoming_lines,
+            scroll,
+            active_conflict,
+            Color::Green,
             hl_incoming.as_deref(),
         );
     }
@@ -606,7 +621,12 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
         let scroll = view.scroll_current;
         draw_merge_panel_lines(
-            frame, inner, &current_lines, scroll, active_conflict, Color::Blue,
+            frame,
+            inner,
+            &current_lines,
+            scroll,
+            active_conflict,
+            Color::Blue,
             hl_current.as_deref(),
         );
     }
@@ -677,8 +697,12 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 text.push(chars[col]);
                 let mut next = col + 1;
                 while next < max_col {
-                    let nfg = hl.and_then(|h| h.colors.get(next).copied()).unwrap_or(Color::Reset);
-                    let nmods = hl.and_then(|h| h.modifiers.get(next).copied()).unwrap_or(Modifier::empty());
+                    let nfg = hl
+                        .and_then(|h| h.colors.get(next).copied())
+                        .unwrap_or(Color::Reset);
+                    let nmods = hl
+                        .and_then(|h| h.modifiers.get(next).copied())
+                        .unwrap_or(Modifier::empty());
                     if nfg == fg && nmods == mods {
                         text.push(chars[next]);
                         next += 1;
@@ -716,9 +740,8 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         None => return,
     };
     let active = view.active_conflict;
-    let is_unresolved = view
-        .conflict_resolution(active)
-        == crate::merge_view::Resolution::Unresolved;
+    let is_unresolved =
+        view.conflict_resolution(active) == crate::merge_view::Resolution::Unresolved;
 
     if is_unresolved {
         let action_text = " [1]Current  [2]Incoming  [3]Both(C+I)  [4]Both(I+C)  [n]Next ";
@@ -729,9 +752,7 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
         // Find the screen row of the active conflict's first line in each panel.
         // Result panel:
-        let result_inner = Block::default()
-            .borders(Borders::ALL)
-            .inner(bottom_area);
+        let result_inner = Block::default().borders(Borders::ALL).inner(bottom_area);
         for (i, (_line, conflict_idx)) in result_lines.iter().skip(view.scroll_result).enumerate() {
             if i as u16 >= result_inner.height {
                 break;
@@ -756,10 +777,9 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         }
 
         // Incoming panel:
-        let incoming_inner = Block::default()
-            .borders(Borders::ALL)
-            .inner(incoming_area);
-        for (i, (_line, conflict_idx)) in incoming_lines.iter().skip(view.scroll_incoming).enumerate()
+        let incoming_inner = Block::default().borders(Borders::ALL).inner(incoming_area);
+        for (i, (_line, conflict_idx)) in
+            incoming_lines.iter().skip(view.scroll_incoming).enumerate()
         {
             if i as u16 >= incoming_inner.height {
                 break;
@@ -783,9 +803,7 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         }
 
         // Current panel:
-        let current_inner = Block::default()
-            .borders(Borders::ALL)
-            .inner(current_area);
+        let current_inner = Block::default().borders(Borders::ALL).inner(current_area);
         for (i, (_line, conflict_idx)) in current_lines.iter().skip(view.scroll_current).enumerate()
         {
             if i as u16 >= current_inner.height {
@@ -1639,18 +1657,12 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
         }
 
         // Append AI suggestion ghost text on the cursor row.
-        if focused
-            && row_idx == cursor_row
-            && app.terminal().scroll_offset() == 0
-        {
+        if focused && row_idx == cursor_row && app.terminal().scroll_offset() == 0 {
             if let Some(ref suggestion) = app.terminal_suggestion {
                 let avail = (inner.width as usize).saturating_sub(col);
                 let ghost: String = suggestion.chars().take(avail).collect();
                 if !ghost.is_empty() {
-                    spans.push(Span::styled(
-                        ghost,
-                        Style::default().fg(Color::DarkGray),
-                    ));
+                    spans.push(Span::styled(ghost, Style::default().fg(Color::DarkGray)));
                 }
             }
         }
@@ -3756,8 +3768,7 @@ fn draw_registers_modal(frame: &mut Frame, app: &App, area: Rect) {
 
             if keys.is_empty() {
                 frame.render_widget(
-                    Paragraph::new("  (empty)")
-                        .style(Style::default().fg(Color::DarkGray)),
+                    Paragraph::new("  (empty)").style(Style::default().fg(Color::DarkGray)),
                     Rect::new(inner.x, inner.y, inner.width, 1),
                 );
             }
@@ -3806,8 +3817,8 @@ fn draw_registers_modal(frame: &mut Frame, app: &App, area: Rect) {
             let is_selected = vis_idx == selected;
             let max_preview = (inner.width as usize).saturating_sub(8);
             let truncated: String = preview.chars().take(max_preview).collect();
-            let is_macro = name.len() == 1
-                && name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            let is_macro =
+                name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
             let prefix = if is_macro { "@" } else { " " };
             let display = format!("  {}{:<4} {}", prefix, name, truncated);
             let style = if is_selected {
@@ -3828,8 +3839,7 @@ fn draw_registers_modal(frame: &mut Frame, app: &App, area: Rect) {
 
         if entries.is_empty() {
             frame.render_widget(
-                Paragraph::new("  No registers in use")
-                    .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new("  No registers in use").style(Style::default().fg(Color::DarkGray)),
                 Rect::new(inner.x, list_y, inner.width, 1),
             );
         }
@@ -6005,12 +6015,10 @@ fn draw_peek_definition(frame: &mut Frame, app: &App, editor_area: Rect) {
     let width = 80u16.min(editor_area.width.saturating_sub(4));
 
     // Position below the cursor, or above if not enough room.
-    let cursor_x = (app.cursor().col.saturating_sub(app.tab().scroll_col)) as u16
-        + editor_area.x
-        + 6;
-    let cursor_y = (app.cursor().row.saturating_sub(app.tab().scroll_row)) as u16
-        + editor_area.y
-        + 1;
+    let cursor_x =
+        (app.cursor().col.saturating_sub(app.tab().scroll_col)) as u16 + editor_area.x + 6;
+    let cursor_y =
+        (app.cursor().row.saturating_sub(app.tab().scroll_row)) as u16 + editor_area.y + 1;
 
     let x = cursor_x.min(editor_area.right().saturating_sub(width));
     let y = if cursor_y + height + 1 < editor_area.bottom() {
@@ -6027,11 +6035,7 @@ fn draw_peek_definition(frame: &mut Frame, app: &App, editor_area: Rect) {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
-    let title = format!(
-        " Peek: {}:{} ",
-        display_name,
-        peek.target_line + 1
-    );
+    let title = format!(" Peek: {}:{} ", display_name, peek.target_line + 1);
 
     // Scroll indicator.
     let can_scroll = peek.lines.len() > max_visible;

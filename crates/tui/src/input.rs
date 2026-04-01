@@ -594,15 +594,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.terminal_focused = false;
             }
             // Ctrl+Shift+T — new terminal tab.
-            KeyCode::Char('T') if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+            KeyCode::Char('T')
+                if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+            {
                 app.new_terminal_tab();
             }
             // Ctrl+Shift+] — next terminal tab.
-            KeyCode::Char(']') if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+            KeyCode::Char(']')
+                if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+            {
                 app.next_terminal_tab();
             }
             // Ctrl+Shift+[ — previous terminal tab.
-            KeyCode::Char('[') if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+            KeyCode::Char('[')
+                if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+            {
                 app.prev_terminal_tab();
             }
             // Ctrl+Shift+Up / Ctrl+Shift+Down — resize terminal pane.
@@ -1196,12 +1202,16 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     }
 
     // Ctrl+P — open fuzzy file picker (VS Code convention).
-    if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::SHIFT) {
+    if code == KeyCode::Char('p')
+        && modifiers.contains(KeyModifiers::CONTROL)
+        && !modifiers.contains(KeyModifiers::SHIFT)
+    {
         app.open_file_picker();
         return;
     }
     // Ctrl+Shift+P — open command palette.
-    if code == KeyCode::Char('P') && modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) {
+    if code == KeyCode::Char('P') && modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+    {
         app.open_command_palette();
         return;
     }
@@ -1855,15 +1865,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
         // Next-edit prediction navigation.
         KeyCode::Char(']')
-            if modifiers.contains(KeyModifiers::CONTROL)
-                && !app.edit_predictions().is_empty() =>
+            if modifiers.contains(KeyModifiers::CONTROL) && !app.edit_predictions().is_empty() =>
         {
             app.jump_to_prediction(true);
             app.notify_cursor_moved();
         }
         KeyCode::Char('[')
-            if modifiers.contains(KeyModifiers::CONTROL)
-                && !app.edit_predictions().is_empty() =>
+            if modifiers.contains(KeyModifiers::CONTROL) && !app.edit_predictions().is_empty() =>
         {
             app.jump_to_prediction(false);
             app.notify_cursor_moved();

@@ -52,8 +52,8 @@ See `TODO.md` for the full roadmap.
 
 ### Rust Style
 
-- Run `cargo fmt` before every commit.
-- Run `cargo clippy -- -W clippy::all` and fix all warnings.
+- **CRITICAL: Run `cargo fmt --all` before every commit.** CI will reject unformatted code. Always run formatting as the last step before `git add` and `git commit`.
+- Run `cargo clippy --workspace -- -W clippy::all` and fix all warnings.
 - No `unwrap()` in library code. `unwrap()` is acceptable only in tests.
 - Use `saturating_sub`, `checked_add`, etc. for arithmetic on indices — never risk overflow.
 - Prefer iterators over manual loops where it improves clarity.
@@ -184,8 +184,14 @@ cargo test --workspace
 # Lint
 cargo clippy --workspace -- -W clippy::all
 
-# Format
+# Format (MUST run before every commit — CI enforces this)
 cargo fmt --all
+
+# Verify formatting passes (CI check)
+cargo fmt --all -- --check
+
+# Pre-commit checklist (run all three before committing):
+cargo fmt --all && cargo clippy --workspace -- -W clippy::all && cargo test --workspace
 
 # Check for unused dependencies
 cargo +nightly udeps --workspace
