@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.59] - 2026-04-01
+
+### Added
+
+- **Merge editor: synchronized scrolling** — All three panels (Incoming, Current, Result) scroll together so you always see the same code region
+- **Merge editor: conflict action bar** — Gold-colored bar above active conflicts showing `[1]Current [2]Incoming [3]Both(C+I) [4]Both(I+C) [n]Next`
+- **Merge editor: syntax highlighting** — All three panels now render with full tree-sitter syntax highlighting for all 19 supported languages
+- **Chat conversations in AI History** — Chat sessions now appear with "Chat: first message" title instead of cryptic `__chat__` label; history refreshes immediately on send
+
+### Fixed
+
+- **Tab close button** — Click on × in file tab bar now works correctly (was offset due to Unicode byte-length vs display-width mismatch)
+
 ## [0.1.58] - 2026-04-01
 
 ### Added
