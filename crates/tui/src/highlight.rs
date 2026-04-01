@@ -263,11 +263,13 @@ pub struct HighlightedLine {
     pub modifiers: Vec<ratatui::style::Modifier>,
 }
 
-/// Syntax highlighter that wraps tree-sitter.
+/// Syntax highlighter that wraps tree-sitter (or regex for Markdown).
 pub struct SyntaxHighlighter {
     language: Language,
-    config: HighlightConfiguration,
-    parser: Parser,
+    /// None for Markdown (uses regex-only highlighting).
+    config: Option<HighlightConfiguration>,
+    /// None for Markdown (no tree-sitter parser needed).
+    parser: Option<Parser>,
     /// Most-recently parsed tree, kept for node-at-position queries.
     last_tree: Option<tree_sitter::Tree>,
 }
@@ -275,6 +277,17 @@ pub struct SyntaxHighlighter {
 impl SyntaxHighlighter {
     /// Create a new highlighter for the given language.
     pub fn new(language: Language) -> Option<Self> {
+        // Markdown uses a pure regex-based highlighter — tree-sitter-md's block
+        // grammar doesn't work with HighlightConfiguration for inline syntax.
+        if language == Language::Markdown {
+            return Some(Self {
+                language,
+                config: None,
+                parser: None,
+                last_tree: None,
+            });
+        }
+
         let (ts_language, highlights_query): (tree_sitter::Language, &str) = match language {
             Language::Rust => (
                 tree_sitter_rust::LANGUAGE.into(),
@@ -340,10 +353,7 @@ impl SyntaxHighlighter {
                 tree_sitter_yaml::LANGUAGE.into(),
                 tree_sitter_yaml::HIGHLIGHTS_QUERY,
             ),
-            Language::Markdown => (
-                tree_sitter_md::LANGUAGE.into(),
-                tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
-            ),
+            Language::Markdown => unreachable!("handled above"),
             Language::Elixir => (
                 tree_sitter_elixir::LANGUAGE.into(),
                 tree_sitter_elixir::HIGHLIGHTS_QUERY,
@@ -364,8 +374,8 @@ impl SyntaxHighlighter {
 
         Some(Self {
             language,
-            config,
-            parser,
+            config: Some(config),
+            parser: Some(parser),
             last_tree: None,
         })
     }
@@ -376,10 +386,24 @@ impl SyntaxHighlighter {
     /// otherwise built-in defaults are applied.
     pub fn highlight(&mut self, source: &str, theme: Option<&Theme>) -> Vec<HighlightedLine> {
         // Re-parse the tree so node-at-position queries stay current.
-        self.last_tree = self.parser.parse(source, None);
+        if let Some(parser) = &mut self.parser {
+            self.last_tree = parser.parse(source, None);
+        }
+
+        // For Markdown (no tree-sitter config), produce empty lines then apply regex.
+        let config = match &self.config {
+            Some(c) => c,
+            None => {
+                let mut result = self.empty_lines(source);
+                if self.language == Language::Markdown {
+                    highlight_markdown_inline(&mut result, source);
+                }
+                return result;
+            }
+        };
 
         let mut highlighter = Highlighter::new();
-        let events = highlighter.highlight(&self.config, source.as_bytes(), None, |_| None);
+        let events = highlighter.highlight(config, source.as_bytes(), None, |_| None);
 
         let events = match events {
             Ok(e) => e,
@@ -841,4 +865,38 @@ fn find_closing_marker(chars: &[char], start: usize, marker: &[char]) -> Option<
     }
     (start..=chars.len().saturating_sub(mlen))
         .find(|&i| &chars[i..i + mlen] == marker && (i == start || !chars[i - 1].is_whitespace()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_markdown_highlighter_creates() {
+        let hl = SyntaxHighlighter::new(Language::Markdown);
+        assert!(hl.is_some(), "Markdown SyntaxHighlighter should be created");
+    }
+
+    #[test]
+    fn test_markdown_heading_highlighted() {
+        let mut hl = SyntaxHighlighter::new(Language::Markdown).unwrap();
+        let source = "# Heading\n\nHello world\n";
+        let lines = hl.highlight(source, None);
+        assert!(!lines.is_empty());
+        // The heading line should have non-Reset colors (from tree-sitter or inline pass).
+        let heading = &lines[0];
+        let has_color = heading.colors.iter().any(|c| *c != Color::Reset);
+        assert!(has_color, "Heading line should have syntax colors");
+    }
+
+    #[test]
+    fn test_markdown_bold_gets_modifier() {
+        let mut hl = SyntaxHighlighter::new(Language::Markdown).unwrap();
+        let source = "Hello **bold** world\n";
+        let lines = hl.highlight(source, None);
+        assert!(!lines.is_empty());
+        let line = &lines[0];
+        let has_bold = line.modifiers.iter().any(|m| m.contains(Modifier::BOLD));
+        assert!(has_bold, "Bold text should have BOLD modifier");
+    }
 }
