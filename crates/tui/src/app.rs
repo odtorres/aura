@@ -3343,7 +3343,9 @@ impl App {
                     }
 
                     let new_content = lines.join("\n");
-                    let _ = std::fs::write(&path, new_content);
+                    if let Err(e) = std::fs::write(&path, &new_content) {
+                        tracing::warn!("Failed to write {}: {e}", path.display());
+                    }
                     files_changed += 1;
                 }
             }
@@ -5088,7 +5090,9 @@ impl App {
             self.summarize_receiver = None;
             if !summary.is_empty() {
                 if let Some(store) = &self.conversation_store {
-                    let _ = store.update_summary(&conv_id, &summary);
+                    if let Err(e) = store.update_summary(&conv_id, &summary) {
+                        tracing::warn!("Failed to update conversation summary: {e}");
+                    }
                     // Insert the summary as a system message for future context.
                     let _ = store.add_message(
                         &conv_id,
@@ -7145,7 +7149,9 @@ impl App {
         }
 
         if let Some(ref repo) = self.git_repo {
-            let _ = repo.stage_file(&file_path);
+            if let Err(e) = repo.stage_file(&file_path) {
+                tracing::warn!("Failed to stage {file_path}: {e}");
+            }
         }
 
         self.merge_view = None;

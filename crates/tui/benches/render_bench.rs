@@ -6,7 +6,7 @@
 //! - Syntax highlighting: reasonable on large files
 
 use aura_core::{AuthorId, Buffer};
-use aura_tui::app::App;
+use aura_tui::app::{App, Mode};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -60,17 +60,18 @@ fn bench_keystroke_insert_render(c: &mut Criterion) {
     let mut terminal = Terminal::new(backend).unwrap();
 
     // Switch to insert mode.
-    app.mode = aura_tui::app::Mode::Insert;
+    app.mode = Mode::Insert;
 
     c.bench_function("keystroke_insert_render_1k", |b| {
         b.iter(|| {
             // Simulate a keystroke: insert a character then render.
-            app.buffer.insert(app.cursor.col, "x", AuthorId::human());
+            let col = app.cursor().col;
+            app.buffer_mut().insert(col, "x", AuthorId::human());
             terminal
                 .draw(|frame| aura_tui::render::draw(frame, &mut app))
                 .unwrap();
             // Undo to keep buffer stable.
-            app.buffer.undo();
+            app.buffer_mut().undo();
             black_box(());
         });
     });
@@ -78,7 +79,6 @@ fn bench_keystroke_insert_render(c: &mut Criterion) {
 
 fn bench_render_with_highlights(c: &mut Criterion) {
     let mut app = make_app(5_000);
-    // Ensure highlights are computed.
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -105,8 +105,10 @@ fn bench_scroll_and_render(c: &mut Criterion) {
     c.bench_function("scroll_and_render_10k", |b| {
         b.iter(|| {
             // Simulate scrolling through the file.
-            app.scroll_row = (app.scroll_row + 40) % 9_960;
-            app.cursor.row = app.scroll_row + 20;
+            let scroll = app.tab().scroll_row;
+            let new_scroll = (scroll + 40) % 9_960;
+            app.tab_mut().scroll_row = new_scroll;
+            app.tab_mut().cursor.row = new_scroll + 20;
             terminal
                 .draw(|frame| aura_tui::render::draw(frame, &mut app))
                 .unwrap();

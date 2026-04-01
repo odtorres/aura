@@ -294,6 +294,66 @@ pub fn editor_commands() -> Vec<PaletteItem> {
             id: "intent".into(),
             label: "AI Intent Mode (:intent)".into(),
         },
+        PaletteItem::Command {
+            id: "outline".into(),
+            label: "Document Outline (:outline)".into(),
+        },
+        PaletteItem::Command {
+            id: "visor".into(),
+            label: "AI Visor (:visor)".into(),
+        },
+        PaletteItem::Command {
+            id: "search".into(),
+            label: "Project Search (:search)".into(),
+        },
+        PaletteItem::Command {
+            id: "graph".into(),
+            label: "Git Graph (:graph)".into(),
+        },
+        PaletteItem::Command {
+            id: "stash".into(),
+            label: "Git Stash (:stash)".into(),
+        },
+        PaletteItem::Command {
+            id: "pr".into(),
+            label: "Create PR (:pr)".into(),
+        },
+        PaletteItem::Command {
+            id: "follow".into(),
+            label: "Follow Peer (:follow <name>)".into(),
+        },
+        PaletteItem::Command {
+            id: "unfollow".into(),
+            label: "Stop Following (:unfollow)".into(),
+        },
+        PaletteItem::Command {
+            id: "share-term".into(),
+            label: "Share Terminal (:share-term)".into(),
+        },
+        PaletteItem::Command {
+            id: "view-term".into(),
+            label: "View Shared Terminal (:view-term)".into(),
+        },
+        PaletteItem::Command {
+            id: "term new".into(),
+            label: "New Terminal Tab (:term new)".into(),
+        },
+        PaletteItem::Command {
+            id: "fix".into(),
+            label: "Fix Last Failed Command (:fix)".into(),
+        },
+        PaletteItem::Command {
+            id: "agent".into(),
+            label: "AI Agent (:agent <task>)".into(),
+        },
+        PaletteItem::Command {
+            id: "registers".into(),
+            label: "View Registers (:registers)".into(),
+        },
+        PaletteItem::Command {
+            id: "marks".into(),
+            label: "View Marks (:marks)".into(),
+        },
     ]
 }
 
