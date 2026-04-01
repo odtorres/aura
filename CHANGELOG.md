@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.64] - 2026-04-01
+
+### Fixed
+
+- **Git graph `[c]AI` badges now work** — Conversations were being created without a git commit hash, so the graph could never match them. Chat and Claude Code conversations now store the current HEAD hash, enabling `[c]AI` badges and the `c` key to open linked conversations.
+
 ## [0.1.63] - 2026-04-01
 
 ### Added
