@@ -6128,6 +6128,8 @@ impl App {
                 tracing::warn!("Failed to persist chat user message: {e}");
             }
         }
+        // Refresh history panel so the chat interaction appears immediately.
+        self.refresh_conversation_history();
 
         // Capture selection context for the chat indicator.
         if let Some((sel_start, sel_end)) = self.visual_selection_range() {

@@ -445,6 +445,22 @@ impl ConversationStore {
         }
     }
 
+    /// Get the first user message in a conversation (for display titles).
+    pub fn first_user_message(&self, conversation_id: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT content FROM messages
+             WHERE conversation_id = ?1 AND role IN ('human_intent', 'human')
+             ORDER BY created_at ASC LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![conversation_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
     // ── Decision logging ──────────────────────────────────────────
 
     /// Log an accept/reject decision.

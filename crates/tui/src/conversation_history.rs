@@ -30,6 +30,8 @@ pub struct ConversationEntry {
     pub accepted: usize,
     /// Rejected edit count.
     pub rejected: usize,
+    /// First user message (for chat conversations that lack intents).
+    pub first_user_message: Option<String>,
 }
 
 impl ConversationEntry {
@@ -44,6 +46,14 @@ impl ConversationEntry {
             if !summary.is_empty() {
                 return smart_truncate(summary, 60);
             }
+        }
+        // Friendly label for chat conversations.
+        if self.file_path == "__chat__" {
+            return if let Some(ref first_msg) = self.first_user_message {
+                format!("Chat: {}", smart_truncate(first_msg, 55))
+            } else {
+                "Chat session".to_string()
+            };
         }
         // Fall back to file basename.
         self.file_path
@@ -144,6 +154,12 @@ impl ConversationHistoryPanel {
                             .map(|i| i.intent_text);
                         // Load decision stats.
                         let (accepted, rejected) = store.decision_stats(&conv.id).unwrap_or((0, 0));
+                        // For chat conversations, load first user message as title fallback.
+                        let first_user_message = if conv.file_path == "__chat__" && intent.is_none() {
+                            store.first_user_message(&conv.id).ok().flatten()
+                        } else {
+                            None
+                        };
                         ConversationEntry {
                             id: conv.id,
                             summary: conv.summary,
@@ -156,6 +172,7 @@ impl ConversationHistoryPanel {
                             intent,
                             accepted,
                             rejected,
+                            first_user_message,
                         }
                     })
                     .collect();
@@ -465,6 +482,7 @@ mod tests {
                 intent: None,
                 accepted: 0,
                 rejected: 0,
+                first_user_message: None,
             });
         }
 
@@ -552,6 +570,7 @@ mod tests {
             intent: Some("Fix the null pointer bug in parser".into()),
             accepted: 0,
             rejected: 0,
+            first_user_message: None,
         };
         assert_eq!(entry.display_title(), "Fix the null pointer bug in parser");
 
@@ -586,6 +605,7 @@ mod tests {
                 intent: None,
                 accepted: 0,
                 rejected: 0,
+                first_user_message: None,
             },
             ConversationEntry {
                 id: "2".into(),
@@ -599,6 +619,7 @@ mod tests {
                 intent: None,
                 accepted: 0,
                 rejected: 0,
+                first_user_message: None,
             },
             ConversationEntry {
                 id: "3".into(),
@@ -612,6 +633,7 @@ mod tests {
                 intent: None,
                 accepted: 0,
                 rejected: 0,
+                first_user_message: None,
             },
         ];
 
