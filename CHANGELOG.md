@@ -5,6 +5,14 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.63] - 2026-04-01
+
+### Added
+
+- **.env file syntax highlighting** — Comments (gray italic), keys (cyan bold), quoted values (green), unquoted values (yellow), `$VAR`/`${VAR}` references (orange bold), inline comments
+- **Filename-based language detection** — `.env.*` variants, `Dockerfile`, `Makefile` now get highlighting
+- **Ctrl+G shortcut** for AI commit message generation in the git panel
+
 ## [0.1.62] - 2026-04-01
 
 ### Added
