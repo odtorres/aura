@@ -42,7 +42,8 @@ impl SemanticIndexer {
             | Language::Yaml
             | Language::Markdown
             | Language::Elixir
-            | Language::HEEx => return None,
+            | Language::HEEx
+            | Language::Dotenv => return None,
         };
 
         let mut parser = Parser::new();

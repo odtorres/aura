@@ -222,6 +222,8 @@ pub enum Language {
     Elixir,
     /// HEEx (HTML+EEx) templates — Phoenix LiveView.
     HEEx,
+    /// Dotenv (.env) files.
+    Dotenv,
 }
 
 impl Language {
@@ -248,6 +250,18 @@ impl Language {
             "md" | "markdown" => Some(Self::Markdown),
             "ex" | "exs" => Some(Self::Elixir),
             "heex" | "eex" | "leex" => Some(Self::HEEx),
+            "env" => Some(Self::Dotenv),
+            _ => None,
+        }
+    }
+
+    /// Detect language from a filename (for dotfiles like `.env`).
+    pub fn from_filename(name: &str) -> Option<Self> {
+        match name {
+            ".env" | ".env.local" | ".env.development" | ".env.production"
+            | ".env.test" | ".env.staging" | ".env.example" => Some(Self::Dotenv),
+            "Dockerfile" => Some(Self::Bash), // Close enough for highlighting
+            "Makefile" | "makefile" => Some(Self::Bash),
             _ => None,
         }
     }
@@ -279,7 +293,8 @@ impl SyntaxHighlighter {
     pub fn new(language: Language) -> Option<Self> {
         // Markdown uses a pure regex-based highlighter — tree-sitter-md's block
         // grammar doesn't work with HighlightConfiguration for inline syntax.
-        if language == Language::Markdown {
+        // Markdown and Dotenv use pure regex-based highlighting (no tree-sitter).
+        if language == Language::Markdown || language == Language::Dotenv {
             return Some(Self {
                 language,
                 config: None,
@@ -353,7 +368,7 @@ impl SyntaxHighlighter {
                 tree_sitter_yaml::LANGUAGE.into(),
                 tree_sitter_yaml::HIGHLIGHTS_QUERY,
             ),
-            Language::Markdown => unreachable!("handled above"),
+            Language::Markdown | Language::Dotenv => unreachable!("handled above"),
             Language::Elixir => (
                 tree_sitter_elixir::LANGUAGE.into(),
                 tree_sitter_elixir::HIGHLIGHTS_QUERY,
@@ -395,8 +410,10 @@ impl SyntaxHighlighter {
             Some(c) => c,
             None => {
                 let mut result = self.empty_lines(source);
-                if self.language == Language::Markdown {
-                    highlight_markdown_inline(&mut result, source);
+                match self.language {
+                    Language::Markdown => highlight_markdown_inline(&mut result, source),
+                    Language::Dotenv => highlight_dotenv(&mut result, source),
+                    _ => {}
                 }
                 return result;
             }
@@ -865,6 +882,127 @@ fn find_closing_marker(chars: &[char], start: usize, marker: &[char]) -> Option<
     }
     (start..=chars.len().saturating_sub(mlen))
         .find(|&i| &chars[i..i + mlen] == marker && (i == start || !chars[i - 1].is_whitespace()))
+}
+
+// ---------------------------------------------------------------------------
+// Dotenv (.env) highlighting (regex-based)
+// ---------------------------------------------------------------------------
+
+/// Highlight `.env` files: comments (#), keys (KEY=), values, quoted strings.
+fn highlight_dotenv(lines: &mut [HighlightedLine], source: &str) {
+    for (line_idx, line_text) in source.lines().enumerate() {
+        let hl = match lines.get_mut(line_idx) {
+            Some(h) => h,
+            None => continue,
+        };
+        while hl.modifiers.len() < hl.colors.len() {
+            hl.modifiers.push(Modifier::empty());
+        }
+
+        let chars: Vec<char> = line_text.chars().collect();
+        let len = chars.len().min(hl.colors.len());
+        let trimmed = line_text.trim();
+
+        // Empty lines — skip.
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Comments: lines starting with #
+        if trimmed.starts_with('#') {
+            let offset = line_text.len() - trimmed.len();
+            for i in offset..len {
+                hl.colors[i] = Color::Rgb(100, 100, 100);
+                hl.modifiers[i] = Modifier::ITALIC;
+            }
+            continue;
+        }
+
+        // KEY=VALUE pattern.
+        if let Some(eq_pos) = chars.iter().position(|c| *c == '=') {
+            // KEY part — cyan bold.
+            for i in 0..eq_pos.min(len) {
+                hl.colors[i] = Color::Cyan;
+                hl.modifiers[i] = Modifier::BOLD;
+            }
+
+            // = sign — dim gray.
+            if eq_pos < len {
+                hl.colors[eq_pos] = Color::Rgb(120, 120, 120);
+            }
+
+            // VALUE part.
+            let val_start = eq_pos + 1;
+            if val_start < len {
+                // Check for quoted values.
+                let first_val_char = chars.get(val_start).copied().unwrap_or(' ');
+                if first_val_char == '"' || first_val_char == '\'' {
+                    // Quoted string — green.
+                    for i in val_start..len {
+                        hl.colors[i] = Color::Green;
+                    }
+                    // Dim the quote characters.
+                    if val_start < len {
+                        hl.colors[val_start] = Color::Rgb(80, 130, 80);
+                    }
+                    // Find and dim the closing quote.
+                    if let Some(close) = chars[val_start + 1..].iter().position(|c| *c == first_val_char) {
+                        let close_idx = val_start + 1 + close;
+                        if close_idx < len {
+                            hl.colors[close_idx] = Color::Rgb(80, 130, 80);
+                        }
+                    }
+                } else {
+                    // Unquoted value — yellow.
+                    for i in val_start..len {
+                        hl.colors[i] = Color::Yellow;
+                    }
+                    // Inline comments after value.
+                    if let Some(hash) = chars[val_start..].iter().position(|c| *c == '#') {
+                        let hash_idx = val_start + hash;
+                        // Only if preceded by whitespace.
+                        if hash_idx > 0 && chars[hash_idx - 1].is_whitespace() {
+                            for i in hash_idx..len {
+                                hl.colors[i] = Color::Rgb(100, 100, 100);
+                                hl.modifiers[i] = Modifier::ITALIC;
+                            }
+                        }
+                    }
+                }
+
+                // Highlight ${VAR} and $VAR references within values.
+                let mut i = val_start;
+                while i < len {
+                    if chars[i] == '$' {
+                        if i + 1 < len && chars[i + 1] == '{' {
+                            // ${VAR} — orange.
+                            let end = chars[i + 2..].iter().position(|c| *c == '}')
+                                .map(|p| i + 2 + p)
+                                .unwrap_or(len - 1);
+                            for j in i..=end.min(len - 1) {
+                                hl.colors[j] = Color::Rgb(220, 160, 80);
+                                hl.modifiers[j] = Modifier::BOLD;
+                            }
+                            i = end + 1;
+                        } else {
+                            // $VAR — orange.
+                            let end = chars[i + 1..].iter()
+                                .position(|c| !c.is_alphanumeric() && *c != '_')
+                                .map(|p| i + 1 + p)
+                                .unwrap_or(len);
+                            for j in i..end.min(len) {
+                                hl.colors[j] = Color::Rgb(220, 160, 80);
+                                hl.modifiers[j] = Modifier::BOLD;
+                            }
+                            i = end;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

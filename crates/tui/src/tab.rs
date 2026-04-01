@@ -153,7 +153,14 @@ impl EditorTab {
             .file_path()
             .and_then(|p| p.extension())
             .and_then(|ext| ext.to_str())
-            .and_then(Language::from_extension);
+            .and_then(Language::from_extension)
+            .or_else(|| {
+                buffer
+                    .file_path()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .and_then(Language::from_filename)
+            });
         let mut highlighter = language.and_then(SyntaxHighlighter::new);
         let semantic_indexer = language.and_then(SemanticIndexer::new);
 
