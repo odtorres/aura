@@ -710,8 +710,105 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    // Draw hint line in the command bar area (handled by command bar already).
-    // The status message shows resolution hints.
+    // Draw conflict action bar above the active conflict in all visible panels.
+    let view = match &app.merge_view {
+        Some(v) => v,
+        None => return,
+    };
+    let active = view.active_conflict;
+    let is_unresolved = view
+        .conflict_resolution(active)
+        == crate::merge_view::Resolution::Unresolved;
+
+    if is_unresolved {
+        let action_text = " [1]Current  [2]Incoming  [3]Both(C+I)  [4]Both(I+C)  [n]Next ";
+        let action_style = Style::default()
+            .fg(Color::Black)
+            .bg(Color::Rgb(200, 180, 80))
+            .add_modifier(Modifier::BOLD);
+
+        // Find the screen row of the active conflict's first line in each panel.
+        // Result panel:
+        let result_inner = Block::default()
+            .borders(Borders::ALL)
+            .inner(bottom_area);
+        for (i, (_line, conflict_idx)) in result_lines.iter().skip(view.scroll_result).enumerate() {
+            if i as u16 >= result_inner.height {
+                break;
+            }
+            if let Some(idx) = conflict_idx {
+                if *idx == active {
+                    let row_y = result_inner.y + i as u16;
+                    // Draw action bar one row above the conflict (or on top row if at top).
+                    let bar_y = if row_y > result_inner.y {
+                        row_y - 1
+                    } else {
+                        row_y
+                    };
+                    let bar_width = (action_text.len() as u16).min(result_inner.width);
+                    frame.render_widget(
+                        Paragraph::new(action_text).style(action_style),
+                        Rect::new(result_inner.x, bar_y, bar_width, 1),
+                    );
+                    break;
+                }
+            }
+        }
+
+        // Incoming panel:
+        let incoming_inner = Block::default()
+            .borders(Borders::ALL)
+            .inner(incoming_area);
+        for (i, (_line, conflict_idx)) in incoming_lines.iter().skip(view.scroll_incoming).enumerate()
+        {
+            if i as u16 >= incoming_inner.height {
+                break;
+            }
+            if let Some(idx) = conflict_idx {
+                if *idx == active {
+                    let row_y = incoming_inner.y + i as u16;
+                    let bar_y = if row_y > incoming_inner.y {
+                        row_y - 1
+                    } else {
+                        row_y
+                    };
+                    let bar_width = (action_text.len() as u16).min(incoming_inner.width);
+                    frame.render_widget(
+                        Paragraph::new(action_text).style(action_style),
+                        Rect::new(incoming_inner.x, bar_y, bar_width, 1),
+                    );
+                    break;
+                }
+            }
+        }
+
+        // Current panel:
+        let current_inner = Block::default()
+            .borders(Borders::ALL)
+            .inner(current_area);
+        for (i, (_line, conflict_idx)) in current_lines.iter().skip(view.scroll_current).enumerate()
+        {
+            if i as u16 >= current_inner.height {
+                break;
+            }
+            if let Some(idx) = conflict_idx {
+                if *idx == active {
+                    let row_y = current_inner.y + i as u16;
+                    let bar_y = if row_y > current_inner.y {
+                        row_y - 1
+                    } else {
+                        row_y
+                    };
+                    let bar_width = (action_text.len() as u16).min(current_inner.width);
+                    frame.render_widget(
+                        Paragraph::new(action_text).style(action_style),
+                        Rect::new(current_inner.x, bar_y, bar_width, 1),
+                    );
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /// Render lines for a merge panel (incoming or current) with conflict highlighting.

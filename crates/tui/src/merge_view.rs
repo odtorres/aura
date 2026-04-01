@@ -120,32 +120,17 @@ impl MergeConflictView {
 
     /// Scroll the focused panel up.
     pub fn scroll_up(&mut self, n: usize) {
-        match self.focus {
-            MergeFocus::Incoming => {
-                self.scroll_incoming = self.scroll_incoming.saturating_sub(n);
-            }
-            MergeFocus::Current => {
-                self.scroll_current = self.scroll_current.saturating_sub(n);
-            }
-            MergeFocus::Result => {
-                self.scroll_result = self.scroll_result.saturating_sub(n);
-            }
-        }
+        // Synchronized scrolling: all panels scroll together.
+        self.scroll_incoming = self.scroll_incoming.saturating_sub(n);
+        self.scroll_current = self.scroll_current.saturating_sub(n);
+        self.scroll_result = self.scroll_result.saturating_sub(n);
     }
 
-    /// Scroll the focused panel down.
+    /// Scroll all panels down together.
     pub fn scroll_down(&mut self, n: usize, _viewport_height: usize) {
-        match self.focus {
-            MergeFocus::Incoming => {
-                self.scroll_incoming += n;
-            }
-            MergeFocus::Current => {
-                self.scroll_current += n;
-            }
-            MergeFocus::Result => {
-                self.scroll_result += n;
-            }
-        }
+        self.scroll_incoming += n;
+        self.scroll_current += n;
+        self.scroll_result += n;
     }
 
     /// Jump to the next unresolved conflict.
