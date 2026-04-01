@@ -525,6 +525,29 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         None => return,
     };
 
+    // Build syntax highlighter from the merge file's extension.
+    let ext = view.file_path.rsplit('.').next().unwrap_or("");
+    let mut highlighter = crate::highlight::Language::from_extension(ext)
+        .and_then(crate::highlight::SyntaxHighlighter::new);
+
+    // Pre-highlight all three panels.
+    let incoming_lines = view.incoming_lines();
+    let current_lines = view.current_lines();
+    let result_lines = view.result_lines();
+
+    let hl_incoming = highlighter.as_mut().map(|h| {
+        let text: String = incoming_lines.iter().map(|(l, _)| format!("{l}\n")).collect();
+        h.highlight(&text, Some(&app.theme))
+    });
+    let hl_current = highlighter.as_mut().map(|h| {
+        let text: String = current_lines.iter().map(|(l, _)| format!("{l}\n")).collect();
+        h.highlight(&text, Some(&app.theme))
+    });
+    let hl_result = highlighter.as_mut().map(|h| {
+        let text: String = result_lines.iter().map(|(l, _)| format!("{l}\n")).collect();
+        h.highlight(&text, Some(&app.theme))
+    });
+
     // Layout: 55% top (two panels side by side), 45% bottom (result).
     let vsplit = Layout::default()
         .direction(Direction::Vertical)
@@ -560,9 +583,11 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         let inner = block.inner(incoming_area);
         frame.render_widget(block, incoming_area);
 
-        let lines = view.incoming_lines();
         let scroll = view.scroll_incoming;
-        draw_merge_panel_lines(frame, inner, &lines, scroll, active_conflict, Color::Green);
+        draw_merge_panel_lines(
+            frame, inner, &incoming_lines, scroll, active_conflict, Color::Green,
+            hl_incoming.as_deref(),
+        );
     }
 
     // --- Current (ours) panel ---
@@ -579,9 +604,11 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         let inner = block.inner(current_area);
         frame.render_widget(block, current_area);
 
-        let lines = view.current_lines();
         let scroll = view.scroll_current;
-        draw_merge_panel_lines(frame, inner, &lines, scroll, active_conflict, Color::Blue);
+        draw_merge_panel_lines(
+            frame, inner, &current_lines, scroll, active_conflict, Color::Blue,
+            hl_current.as_deref(),
+        );
     }
 
     // --- Result panel ---
@@ -610,34 +637,74 @@ fn draw_merge_view(frame: &mut Frame, app: &mut App, area: Rect) {
         let inner = block.inner(bottom_area);
         frame.render_widget(block, bottom_area);
 
-        let lines = view.result_lines();
         let scroll = view.scroll_result;
 
-        for (i, (line, conflict_idx)) in lines.iter().skip(scroll).enumerate() {
+        for (i, (line, conflict_idx)) in result_lines.iter().skip(scroll).enumerate() {
             if i as u16 >= inner.height {
                 break;
             }
             let row_y = inner.y + i as u16;
-            let style = if let Some(idx) = conflict_idx {
+            let line_idx = scroll + i;
+
+            // Determine conflict background.
+            let conflict_bg = if let Some(idx) = conflict_idx {
                 let res = view.conflict_resolution(*idx);
                 if res == Resolution::Unresolved {
-                    // Unresolved — yellow background.
-                    Style::default().fg(Color::White).bg(Color::Rgb(60, 60, 20))
+                    Some(Color::Rgb(60, 60, 20))
                 } else {
-                    // Resolved — green background.
-                    Style::default().fg(Color::White).bg(Color::Rgb(20, 50, 20))
+                    Some(Color::Rgb(20, 50, 20))
                 }
             } else {
-                Style::default().fg(Color::White)
+                None
             };
 
-            let display = if line.len() > inner.width as usize {
-                &line[..inner.width as usize]
-            } else {
-                line.as_str()
-            };
+            // Build styled spans with syntax highlighting.
+            let hl = hl_result.as_ref().and_then(|hls| hls.get(line_idx));
+            let chars: Vec<char> = line.chars().collect();
+            let max_col = (inner.width as usize).min(chars.len());
+            let mut spans: Vec<Span> = Vec::new();
+            let mut col = 0;
+
+            while col < max_col {
+                let fg = hl
+                    .and_then(|h| h.colors.get(col).copied())
+                    .unwrap_or(Color::Reset);
+                let mods = hl
+                    .and_then(|h| h.modifiers.get(col).copied())
+                    .unwrap_or(Modifier::empty());
+
+                let mut text = String::new();
+                text.push(chars[col]);
+                let mut next = col + 1;
+                while next < max_col {
+                    let nfg = hl.and_then(|h| h.colors.get(next).copied()).unwrap_or(Color::Reset);
+                    let nmods = hl.and_then(|h| h.modifiers.get(next).copied()).unwrap_or(Modifier::empty());
+                    if nfg == fg && nmods == mods {
+                        text.push(chars[next]);
+                        next += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                let mut style = if fg == Color::Reset {
+                    Style::default().fg(Color::White)
+                } else {
+                    Style::default().fg(fg)
+                };
+                if !mods.is_empty() {
+                    style = style.add_modifier(mods);
+                }
+                if let Some(bg) = conflict_bg {
+                    style = style.bg(bg);
+                }
+                spans.push(Span::styled(text, style));
+                col = next;
+            }
+
+            let styled_line = ratatui::text::Line::from(spans);
             frame.render_widget(
-                Paragraph::new(display).style(style),
+                Paragraph::new(styled_line),
                 Rect::new(inner.x, row_y, inner.width, 1),
             );
         }
@@ -655,40 +722,87 @@ fn draw_merge_panel_lines(
     scroll: usize,
     active_conflict: usize,
     conflict_color: Color,
+    highlight_lines: Option<&[crate::highlight::HighlightedLine]>,
 ) {
     for (i, (line, conflict_idx)) in lines.iter().skip(scroll).enumerate() {
         if i as u16 >= area.height {
             break;
         }
         let row_y = area.y + i as u16;
+        let line_idx = scroll + i;
 
-        let style = if let Some(idx) = conflict_idx {
+        // Determine conflict background (if any).
+        let conflict_bg = if let Some(idx) = conflict_idx {
             if *idx == active_conflict {
-                // Active conflict — bright highlight.
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Rgb(60, 60, 20))
-                    .add_modifier(Modifier::BOLD)
+                Some((Color::Rgb(60, 60, 20), true)) // bg, bold
             } else {
-                // Other conflict — dim tint.
                 let (r, g, b) = match conflict_color {
                     Color::Green => (20, 50, 20),
                     Color::Blue => (20, 20, 60),
                     _ => (40, 40, 40),
                 };
-                Style::default().fg(Color::White).bg(Color::Rgb(r, g, b))
+                Some((Color::Rgb(r, g, b), false))
             }
         } else {
-            Style::default().fg(Color::White)
+            None
         };
 
-        let display = if line.len() > area.width as usize {
-            &line[..area.width as usize]
-        } else {
-            line.as_str()
-        };
+        // Get highlight data for this line.
+        let hl = highlight_lines.and_then(|hls| hls.get(line_idx));
+
+        // Build styled spans with syntax highlighting + conflict background.
+        let chars: Vec<char> = line.chars().collect();
+        let max_col = (area.width as usize).min(chars.len());
+        let mut spans: Vec<Span> = Vec::new();
+        let mut col = 0;
+
+        while col < max_col {
+            let fg = hl
+                .and_then(|h| h.colors.get(col).copied())
+                .unwrap_or(Color::Reset);
+            let mods = hl
+                .and_then(|h| h.modifiers.get(col).copied())
+                .unwrap_or(Modifier::empty());
+
+            let mut text = String::new();
+            text.push(chars[col]);
+            let mut next = col + 1;
+            while next < max_col {
+                let nfg = hl
+                    .and_then(|h| h.colors.get(next).copied())
+                    .unwrap_or(Color::Reset);
+                let nmods = hl
+                    .and_then(|h| h.modifiers.get(next).copied())
+                    .unwrap_or(Modifier::empty());
+                if nfg == fg && nmods == mods {
+                    text.push(chars[next]);
+                    next += 1;
+                } else {
+                    break;
+                }
+            }
+
+            let mut style = if fg == Color::Reset {
+                Style::default().fg(Color::White)
+            } else {
+                Style::default().fg(fg)
+            };
+            if !mods.is_empty() {
+                style = style.add_modifier(mods);
+            }
+            if let Some((bg, bold)) = conflict_bg {
+                style = style.bg(bg);
+                if bold {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+            }
+            spans.push(Span::styled(text, style));
+            col = next;
+        }
+
+        let styled_line = ratatui::text::Line::from(spans);
         frame.render_widget(
-            Paragraph::new(display).style(style),
+            Paragraph::new(styled_line),
             Rect::new(area.x, row_y, area.width, 1),
         );
     }
