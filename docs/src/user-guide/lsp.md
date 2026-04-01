@@ -18,6 +18,19 @@ Diagnostics are also automatically fed into AI context, so when you use `<Space>
 
 Press `gd` to jump to the definition of the symbol under the cursor.
 
+### Peek Definition
+
+Press `gp` to preview a symbol's definition in an inline popup without leaving the current file:
+
+- Syntax-highlighted code with line numbers
+- Target line highlighted with a distinct background
+- `j`/`k` to scroll within the popup
+- `Enter` to navigate to the definition (same as `gd`)
+- `Esc` or `q` to close the popup
+- Any other key closes the popup and is processed normally
+
+Peek works for both same-file and cross-file definitions. A scroll indicator appears when the definition exceeds the popup height.
+
 ### Hover Information
 
 Press `K` in Normal mode to show hover info (type signatures, documentation) in a floating popup.

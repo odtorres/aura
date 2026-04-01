@@ -5,6 +5,20 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.56] - 2026-03-31
+
+### Improved
+
+- **Comprehensive documentation update** for all recent features:
+  - Terminal: tabs, shell integration (OSC 133), inline AI suggestions, shared terminal
+  - LSP: peek definition (`gp`) with navigation controls
+  - AI: next-edit prediction with navigation and heuristic patterns
+  - Collaboration: follow mode workflow, shared terminal host/client guide
+  - Registers & macro editing how-to guide
+- **Command palette**: Added 16 missing commands (follow, share-term, outline, visor, search, agent, registers, marks, etc.)
+- **Error handling**: Silent failures now logged via `tracing::warn!` for file writes, conversation storage, and git operations
+- **Benchmarks**: Fixed broken render benchmarks referencing old API
+
 ## [0.1.55] - 2026-03-31
 
 ### Added

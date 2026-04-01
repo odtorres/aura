@@ -83,6 +83,33 @@ AURA's speculative engine analyzes code in the background and offers ghost text 
 - **Moderate** (default): Bug fixes + simplifications + error handling
 - **Proactive**: All of the above + performance improvements + refactoring suggestions
 
+## Next-Edit Prediction
+
+AURA predicts where you'll edit next and shows ghost cursors at those locations. This uses fast local heuristics (no API calls) based on your recent edit history and LSP diagnostics.
+
+### How It Works
+
+- After 500ms idle, AURA analyzes your recent edits to predict the next location
+- Up to 3 predictions are shown as gutter markers (`›` for top prediction, `·` for others) with faint line highlights
+- Predictions are purely heuristic — no API latency
+
+### Prediction Patterns
+
+| Pattern | Confidence | Example |
+|---------|-----------|---------|
+| **Diagnostic** | High | Next LSP error/warning you haven't fixed yet |
+| **Sequential** | Medium | Edited lines 10, 11, 12 → predicts line 13 |
+| **Recent return** | Low | Line you edited recently but moved away from |
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+]` | Jump to next edit prediction |
+| `Ctrl+[` | Jump to previous edit prediction |
+
+Predictions respect the speculative aggressiveness setting — disabled in Minimal mode.
+
 ### Multi-File Awareness
 
 When you accept a change, the speculative engine checks related files via the semantic graph. Cross-file changes are proposed as atomic changesets that can be accepted or rejected per-file.
@@ -357,3 +384,28 @@ Edit at multiple positions simultaneously.
 5. Press `Esc` — clears all secondary cursors
 
 Secondary cursors are rendered as yellow blocks. The primary cursor remains the terminal cursor.
+
+## Registers & Macro Editing
+
+### Registers Modal
+
+Open with `:registers` or `:reg` to view all yank and macro registers:
+
+- The **yank register** (`"`) shows the last yanked/deleted text
+- **Macro registers** (`@a`–`@z`) show recorded key sequences in green
+
+| Key | Action |
+|-----|--------|
+| `j`/`k` | Navigate register list |
+| `e` / `Enter` | Edit the selected macro |
+| `q` / `Esc` | Close the modal |
+
+### Editing Macros
+
+Select a macro register and press `e` to open the macro editor:
+
+- Each keystroke in the macro is displayed with a human-readable name (e.g., `C-s`, `Esc`, `Enter`, `j`, `d`, `w`)
+- `d`/`x`/`Delete` removes the selected keystroke from the sequence
+- `Esc` returns to the register list
+
+This lets you fix mistakes in recorded macros without re-recording them.

@@ -172,6 +172,62 @@ When TLS is enabled:
 
 Both host and client must have `use_tls = true` in their `aura.toml` (or the connection will fail due to protocol mismatch).
 
+## Follow Mode
+
+Follow a peer's viewport in real-time — when they scroll or switch files, your view updates automatically.
+
+### Starting
+
+```
+:follow alice
+```
+
+The peer name is case-insensitive. If the name isn't found, AURA shows the available peer names.
+
+### Behavior
+
+- Your viewport syncs to the followed peer's scroll position
+- If the peer switches to a different file, you switch too (if you have that file open)
+- **Any local navigation breaks follow mode** — scrolling, cursor movement, mouse wheel, or search all end it
+- Status bar shows `FOLLOWING <name>` while active
+
+### Stopping
+
+```
+:unfollow
+```
+
+Follow mode also ends automatically when:
+- The followed peer disconnects
+- The collab session ends
+- You navigate locally (scroll, cursor move, etc.)
+
+## Shared Terminal
+
+The host can share their terminal screen with all connected peers in real-time (read-only).
+
+### Host Side
+
+```
+:share-term
+```
+
+Toggles terminal sharing on/off. The status bar shows `[sharing term]` when active. The host's active terminal tab is broadcast to peers as screen snapshots (~7 Hz when content changes).
+
+### Client Side
+
+```
+:view-term
+```
+
+Toggles between the local terminal and the shared terminal view. The shared terminal is rendered with a cyan border and "Host Terminal (read-only)" title. Clients cannot interact with the shared terminal — it's view-only.
+
+### Notes
+
+- Only the host can share (clients get "Only the host can share their terminal")
+- The host shares whichever terminal tab is active; switching tabs automatically updates the shared view
+- Sharing stops when the collab session ends
+
 ## Limitations
 
 - **Scratch buffers excluded**: Unsaved buffers without a file path are not shared in multi-file sessions.
