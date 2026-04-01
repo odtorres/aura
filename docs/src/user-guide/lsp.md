@@ -81,9 +81,9 @@ LSP data enriches AI context:
 
 ### Syntax Highlighting (Tree-sitter)
 
-AURA ships with tree-sitter grammars for **17 languages**:
+AURA ships with tree-sitter grammars for **19 languages**:
 
-Rust, Python, TypeScript, TSX, Go, JavaScript, JSX, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown
+Rust, Python, TypeScript, TSX, Go, JavaScript, JSX, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown, Elixir, HEEx
 
 **React/Next.js**: `.jsx` uses the TSX grammar for proper JSX highlighting. `.mjs`, `.cjs`, `.mts` supported for ES modules and CommonJS.
 
@@ -101,5 +101,6 @@ AURA auto-detects these language servers when they're installed:
 | C/C++ | `clangd` | LLVM/Clang toolchain |
 | Ruby | `solargraph` | `gem install solargraph` |
 | Bash/Shell | `bash-language-server` | `npm install -g bash-language-server` |
+| Elixir/HEEx | `elixir-ls` | [ElixirLS releases](https://github.com/elixir-lsp/elixir-ls/releases) |
 
 The LSP client works with any language server that implements the Language Server Protocol.

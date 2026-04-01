@@ -222,6 +222,7 @@ pub fn detect_server(extension: &str) -> Option<LspServerConfig> {
             vec!["start".to_string()],
             "shellscript",
         ),
+        "ex" | "exs" | "heex" | "eex" | "leex" => ("elixir-ls", vec![], "elixir"),
         _ => return None,
     };
 

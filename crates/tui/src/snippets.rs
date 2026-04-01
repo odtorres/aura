@@ -350,6 +350,99 @@ impl SnippetEngine {
             "Switch",
         );
 
+        // Elixir
+        self.add(
+            Some("elixir"),
+            "defmodule",
+            "defmodule ${1:ModuleName} do\n  $0\nend",
+            "Module",
+        );
+        self.add(
+            Some("elixir"),
+            "def",
+            "def ${1:function_name}(${2:args}) do\n  $0\nend",
+            "Public function",
+        );
+        self.add(
+            Some("elixir"),
+            "defp",
+            "defp ${1:function_name}(${2:args}) do\n  $0\nend",
+            "Private function",
+        );
+        self.add(
+            Some("elixir"),
+            "if",
+            "if ${1:condition} do\n  $0\nend",
+            "If",
+        );
+        self.add(
+            Some("elixir"),
+            "case",
+            "case ${1:expr} do\n  ${2:pattern} ->\n    $0\nend",
+            "Case",
+        );
+        self.add(
+            Some("elixir"),
+            "cond",
+            "cond do\n  ${1:condition} ->\n    $0\nend",
+            "Cond",
+        );
+        self.add(
+            Some("elixir"),
+            "pipe",
+            "${1:value}\n|> ${2:function}()\n|> $0",
+            "Pipe chain",
+        );
+        self.add(
+            Some("elixir"),
+            "test",
+            "test \"${1:description}\" do\n  $0\nend",
+            "ExUnit test",
+        );
+        self.add(
+            Some("elixir"),
+            "describe",
+            "describe \"${1:context}\" do\n  $0\nend",
+            "ExUnit describe",
+        );
+        self.add(
+            Some("elixir"),
+            "genserver",
+            "defmodule ${1:Name} do\n  use GenServer\n\n  def start_link(opts) do\n    GenServer.start_link(__MODULE__, opts, name: __MODULE__)\n  end\n\n  @impl true\n  def init(${2:state}) do\n    {:ok, ${2:state}}\n  end\n\n  @impl true\n  def handle_call(${3:msg}, _from, state) do\n    {:reply, :ok, state}\n  end\n\n  @impl true\n  def handle_cast(${4:msg}, state) do\n    {:noreply, state}\n  end\nend",
+            "GenServer module",
+        );
+        // Phoenix LiveView
+        self.add(
+            Some("elixir"),
+            "live",
+            "defmodule ${1:AppWeb}.${2:Name}Live do\n  use ${1:AppWeb}, :live_view\n\n  @impl true\n  def mount(_params, _session, socket) do\n    {:ok, socket}\n  end\n\n  @impl true\n  def render(assigns) do\n    ~H\"\"\"\n    <div>\n      $0\n    </div>\n    \"\"\"\n  end\nend",
+            "LiveView module",
+        );
+        self.add(
+            Some("elixir"),
+            "mount",
+            "@impl true\ndef mount(${1:_params}, ${2:_session}, socket) do\n  {:ok, assign(socket, $0)}\nend",
+            "LiveView mount",
+        );
+        self.add(
+            Some("elixir"),
+            "handle_event",
+            "@impl true\ndef handle_event(\"${1:event}\", ${2:params}, socket) do\n  $0\n  {:noreply, socket}\nend",
+            "LiveView handle_event",
+        );
+        self.add(
+            Some("elixir"),
+            "handle_info",
+            "@impl true\ndef handle_info(${1:msg}, socket) do\n  $0\n  {:noreply, socket}\nend",
+            "LiveView handle_info",
+        );
+        self.add(
+            Some("elixir"),
+            "assign",
+            "assign(socket, ${1:key}: ${2:value})",
+            "Assign to socket",
+        );
+
         // Generic (all languages)
         self.add(None, "todo", "// TODO: $0", "TODO comment");
         self.add(None, "fixme", "// FIXME: $0", "FIXME comment");

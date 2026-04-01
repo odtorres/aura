@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.57] - 2026-03-31
+
+### Added
+
+- **Elixir & Phoenix LiveView support** — First-class support for the Elixir ecosystem:
+  - **Syntax highlighting**: Tree-sitter grammars for Elixir (`.ex`, `.exs`) and HEEx templates (`.heex`, `.eex`, `.leex`)
+  - **LSP integration**: Auto-detection of `elixir-ls` language server for diagnostics, go-to-definition, hover, and more
+  - **16 code snippets**: Elixir (`defmodule`, `def`, `defp`, `case`, `cond`, `pipe`, `test`, `describe`, `genserver`) and Phoenix LiveView (`live`, `mount`, `handle_event`, `handle_info`, `render`, `assign`)
+  - **Mix task runner**: Auto-detects `mix.exs` projects with tasks: compile, test, format, deps.get, phx.server
+  - **Terminal AI suggestions**: Elixir project type detection for context-aware shell command suggestions
+
 ## [0.1.56] - 2026-03-31
 
 ### Improved

@@ -40,7 +40,9 @@ impl SemanticIndexer {
             | Language::Bash
             | Language::Toml
             | Language::Yaml
-            | Language::Markdown => return None,
+            | Language::Markdown
+            | Language::Elixir
+            | Language::HEEx => return None,
         };
 
         let mut parser = Parser::new();

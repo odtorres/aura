@@ -216,6 +216,10 @@ pub enum Language {
     Yaml,
     /// Markdown language.
     Markdown,
+    /// Elixir language.
+    Elixir,
+    /// HEEx (HTML+EEx) templates — Phoenix LiveView.
+    HEEx,
 }
 
 impl Language {
@@ -240,6 +244,8 @@ impl Language {
             "toml" => Some(Self::Toml),
             "yaml" | "yml" => Some(Self::Yaml),
             "md" | "markdown" => Some(Self::Markdown),
+            "ex" | "exs" => Some(Self::Elixir),
+            "heex" | "eex" | "leex" => Some(Self::HEEx),
             _ => None,
         }
     }
@@ -332,6 +338,14 @@ impl SyntaxHighlighter {
             Language::Markdown => (
                 tree_sitter_md::LANGUAGE.into(),
                 tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
+            ),
+            Language::Elixir => (
+                tree_sitter_elixir::LANGUAGE.into(),
+                tree_sitter_elixir::HIGHLIGHTS_QUERY,
+            ),
+            Language::HEEx => (
+                tree_sitter_heex::LANGUAGE.into(),
+                tree_sitter_heex::HIGHLIGHTS_QUERY,
             ),
         };
 

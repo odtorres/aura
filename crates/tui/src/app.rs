@@ -2294,6 +2294,42 @@ impl App {
                     description: "Format code".into(),
                 },
             );
+        } else if root.join("mix.exs").exists() {
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "mix compile".into(),
+                    description: "Compile the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "mix test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "fmt".into(),
+                TaskConfig {
+                    command: "mix format".into(),
+                    description: "Format code".into(),
+                },
+            );
+            tasks.insert(
+                "deps".into(),
+                TaskConfig {
+                    command: "mix deps.get".into(),
+                    description: "Fetch dependencies".into(),
+                },
+            );
+            tasks.insert(
+                "server".into(),
+                TaskConfig {
+                    command: "mix phx.server".into(),
+                    description: "Start Phoenix server".into(),
+                },
+            );
         } else if root.join("requirements.txt").exists() || root.join("pyproject.toml").exists() {
             tasks.insert(
                 "test".into(),
@@ -4950,6 +4986,8 @@ impl App {
                     "Node.js"
                 } else if dir.join("go.mod").exists() {
                     "Go"
+                } else if dir.join("mix.exs").exists() {
+                    "Elixir"
                 } else if dir.join("pyproject.toml").exists() || dir.join("setup.py").exists() {
                     "Python"
                 } else {
