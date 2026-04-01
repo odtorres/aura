@@ -5,6 +5,21 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.60] - 2026-04-01
+
+### Added
+
+- **Claude Code conversations in AI History** — Messages from Claude Code sessions are now persisted and appear in the AI History panel with "CC: ..." titles
+- **Ctrl+Shift+G** shortcut for git graph modal
+
+### Fixed
+
+- **Markdown syntax highlighting** — `.md` files now render with colors and modifiers (headings, bold, italic, code, links, blockquotes, lists)
+- **Ctrl+P opens file picker** — Swapped to match VS Code: `Ctrl+P` = fuzzy file search, `Ctrl+Shift+P` = command palette
+- **Ctrl+H toggles AI History** — Fixed for terminals that send Backspace for Ctrl+H
+- **Esc closes AI History panel** — Was only removing focus, now closes entirely
+- **Tab close button click** — Fixed Unicode display-width mismatch on × character
+
 ## [0.1.59] - 2026-04-01
 
 ### Added
