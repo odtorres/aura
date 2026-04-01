@@ -732,6 +732,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         app.source_control.commit_message.push_str(text);
                     }
                 }
+                // Ctrl+G — generate AI commit message.
+                KeyCode::Char('g') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.generate_commit_message();
+                }
                 KeyCode::Char(c) => {
                     app.source_control.commit_message.push(c);
                 }
