@@ -2594,6 +2594,15 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.mark_highlights_dirty();
             }
         }
+        KeyCode::Delete => {
+            // Forward delete: remove the character at (not before) the cursor.
+            let tab = app.tab_mut();
+            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+            if pos < tab.buffer.len_chars() {
+                tab.buffer.delete(pos, pos + 1, AuthorId::human());
+                app.mark_highlights_dirty();
+            }
+        }
         KeyCode::Left => {
             let tab = app.tab_mut();
             tab.cursor.col = tab.cursor.col.saturating_sub(1);
