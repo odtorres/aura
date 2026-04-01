@@ -5014,11 +5014,17 @@ fn draw_editor(
                 } else if let Some(hl) = hl_line {
                     let char_idx = visible_start + col;
                     if let Some(&color) = hl.colors.get(char_idx) {
-                        if color == Color::Reset {
+                        let mut s = if color == Color::Reset {
                             Style::default()
                         } else {
                             Style::default().fg(color)
+                        };
+                        if let Some(&mods) = hl.modifiers.get(char_idx) {
+                            if !mods.is_empty() {
+                                s = s.add_modifier(mods);
+                            }
                         }
+                        s
                     } else {
                         Style::default()
                     }

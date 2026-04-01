@@ -5,7 +5,7 @@
 //! re-parses incrementally on each edit.
 
 use crate::config::Theme;
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 use tree_sitter::Parser;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -79,35 +79,36 @@ const HIGHLIGHT_NAMES: &[&str] = &[
     "variable.parameter",
 ];
 
-/// Map a highlight group index to a terminal colour, consulting the theme when
-/// available and falling back to built-in defaults otherwise.
-fn highlight_color(idx: usize, theme: Option<&Theme>) -> Color {
+/// Map a highlight group index to a (colour, modifier) pair.
+fn highlight_style(idx: usize, theme: Option<&Theme>) -> (Color, Modifier) {
+    let m = Modifier::empty();
     match HIGHLIGHT_NAMES.get(idx) {
-        // Comments — subtle gray.
-        Some(&"comment") => theme
-            .map(|t| t.comment)
-            .unwrap_or(Color::Rgb(100, 100, 100)),
+        // Comments — subtle gray + italic.
+        Some(&"comment") => (
+            theme.map(|t| t.comment).unwrap_or(Color::Rgb(100, 100, 100)),
+            Modifier::ITALIC,
+        ),
 
         // Keywords — magenta/purple family.
         Some(
             &"keyword" | &"keyword.function" | &"keyword.operator" | &"keyword.return"
             | &"conditional" | &"repeat" | &"exception" | &"include" | &"define" | &"preproc"
             | &"storageclass",
-        ) => theme.map(|t| t.keyword).unwrap_or(Color::Magenta),
+        ) => (theme.map(|t| t.keyword).unwrap_or(Color::Magenta), m),
 
         // Strings — green family.
-        Some(&"string" | &"string.special" | &"string.regex" | &"text.literal") => {
-            theme.map(|t| t.string).unwrap_or(Color::Green)
+        Some(&"string" | &"string.special" | &"string.regex") => {
+            (theme.map(|t| t.string).unwrap_or(Color::Green), m)
         }
 
         // Escape sequences inside strings — orange/yellow.
-        Some(&"string.escape" | &"escape") => Color::Rgb(220, 150, 50),
+        Some(&"string.escape" | &"escape") => (Color::Rgb(220, 150, 50), m),
 
         // Numbers and constants — yellow/orange.
         Some(
             &"number" | &"float" | &"boolean" | &"constant" | &"constant.builtin"
             | &"constant.macro",
-        ) => theme.map(|t| t.number).unwrap_or(Color::Yellow),
+        ) => (theme.map(|t| t.number).unwrap_or(Color::Yellow), m),
 
         // Functions — blue family.
         Some(
@@ -119,63 +120,64 @@ fn highlight_color(idx: usize, theme: Option<&Theme>) -> Color {
             | &"function.method.call"
             | &"method"
             | &"method.call",
-        ) => theme.map(|t| t.function).unwrap_or(Color::Blue),
+        ) => (theme.map(|t| t.function).unwrap_or(Color::Blue), m),
 
         // Types — cyan family.
         Some(&"type" | &"type.builtin" | &"type.definition" | &"type.qualifier") => {
-            theme.map(|t| t.type_name).unwrap_or(Color::Cyan)
+            (theme.map(|t| t.type_name).unwrap_or(Color::Cyan), m)
         }
 
         // Operators — light red.
-        Some(&"operator") => Color::LightRed,
+        Some(&"operator") => (Color::LightRed, m),
 
         // Variables — warm white / light foreground.
-        Some(&"variable") => Color::Rgb(200, 200, 220),
+        Some(&"variable") => (Color::Rgb(200, 200, 220), m),
 
         // Built-in variables (self, this, etc.) — light yellow.
-        Some(&"variable.builtin") => Color::LightYellow,
+        Some(&"variable.builtin") => (Color::LightYellow, m),
 
         // Parameters — soft orange.
-        Some(&"variable.parameter" | &"parameter") => Color::Rgb(220, 180, 120),
+        Some(&"variable.parameter" | &"parameter") => (Color::Rgb(220, 180, 120), m),
 
         // Properties / fields — light green.
-        Some(&"property" | &"field") => Color::LightGreen,
+        Some(&"property" | &"field") => (Color::LightGreen, m),
 
         // Constructors — light blue.
-        Some(&"constructor") => Color::LightBlue,
+        Some(&"constructor") => (Color::LightBlue, m),
 
         // Attributes / decorators — light cyan.
-        Some(&"attribute" | &"tag.attribute") => Color::LightCyan,
+        Some(&"attribute" | &"tag.attribute") => (Color::LightCyan, m),
 
         // Tags (HTML/XML) — red/orange.
-        Some(&"tag") => Color::Rgb(230, 100, 100),
+        Some(&"tag") => (Color::Rgb(230, 100, 100), m),
 
         // Tag delimiters (<, >, </>) — dimmer red.
-        Some(&"tag.delimiter") => Color::Rgb(150, 80, 80),
+        Some(&"tag.delimiter") => (Color::Rgb(150, 80, 80), m),
 
         // Namespace / module — light magenta.
-        Some(&"namespace") => Color::Rgb(180, 140, 220),
+        Some(&"namespace") => (Color::Rgb(180, 140, 220), m),
 
         // Labels — yellow.
-        Some(&"label" | &"symbol") => Color::Yellow,
+        Some(&"label" | &"symbol") => (Color::Yellow, m),
 
-        // Punctuation — subtle gray (not invisible white).
+        // Punctuation — subtle gray.
         Some(
             &"punctuation"
             | &"punctuation.bracket"
             | &"punctuation.delimiter"
             | &"punctuation.special",
-        ) => Color::Rgb(150, 150, 150),
+        ) => (Color::Rgb(150, 150, 150), m),
 
-        // Text / documentation.
-        Some(&"text") => Color::Reset,
-        Some(&"text.emphasis") => Color::Rgb(200, 200, 150),
-        Some(&"text.strong") => Color::Rgb(230, 230, 200),
-        Some(&"text.title") => Color::Rgb(100, 180, 255),
-        Some(&"text.uri" | &"text.underline") => Color::Rgb(100, 150, 255),
-        Some(&"text.reference") => Color::Cyan,
+        // Markdown / documentation text.
+        Some(&"text") => (Color::Reset, m),
+        Some(&"text.literal") => (Color::Rgb(180, 220, 170), m), // Code spans — green-ish
+        Some(&"text.emphasis") => (Color::Rgb(220, 200, 170), Modifier::ITALIC),
+        Some(&"text.strong") => (Color::Rgb(255, 230, 180), Modifier::BOLD),
+        Some(&"text.title") => (Color::Rgb(100, 180, 255), Modifier::BOLD),
+        Some(&"text.uri" | &"text.underline") => (Color::Rgb(100, 150, 255), Modifier::UNDERLINED),
+        Some(&"text.reference") => (Color::Cyan, m),
 
-        _ => Color::Reset,
+        _ => (Color::Reset, m),
     }
 }
 
@@ -251,11 +253,14 @@ impl Language {
     }
 }
 
-/// Per-character colour information for a line of text.
+/// Per-character colour and modifier information for a line of text.
 #[derive(Debug, Clone, Default)]
 pub struct HighlightedLine {
     /// One colour per character in the line.
     pub colors: Vec<Color>,
+    /// Optional per-character modifier (bold, italic, underline, etc.).
+    /// Same length as `colors`; `Modifier::empty()` means no modifier.
+    pub modifiers: Vec<ratatui::style::Modifier>,
 }
 
 /// Syntax highlighter that wraps tree-sitter.
@@ -384,6 +389,7 @@ impl SyntaxHighlighter {
         let mut result: Vec<HighlightedLine> = Vec::new();
         let mut current_line = HighlightedLine::default();
         let mut current_color = Color::Reset;
+        let mut current_modifier = Modifier::empty();
 
         let source_bytes = source.as_bytes();
         let mut byte_offset = 0;
@@ -391,25 +397,25 @@ impl SyntaxHighlighter {
         for event in events {
             match event {
                 Ok(HighlightEvent::Source { start, end }) => {
-                    // Walk through the source bytes in this range.
                     let slice = &source_bytes[start..end];
                     for &b in slice {
                         if b == b'\n' {
                             result.push(std::mem::take(&mut current_line));
-                        } else {
-                            // Only push colour for non-continuation bytes (start of a UTF-8 char).
-                            if (b & 0xC0) != 0x80 {
-                                current_line.colors.push(current_color);
-                            }
+                        } else if (b & 0xC0) != 0x80 {
+                            current_line.colors.push(current_color);
+                            current_line.modifiers.push(current_modifier);
                         }
                     }
                     byte_offset = end;
                 }
                 Ok(HighlightEvent::HighlightStart(highlight)) => {
-                    current_color = highlight_color(highlight.0, theme);
+                    let (color, modifier) = highlight_style(highlight.0, theme);
+                    current_color = color;
+                    current_modifier = modifier;
                 }
                 Ok(HighlightEvent::HighlightEnd) => {
                     current_color = Color::Reset;
+                    current_modifier = Modifier::empty();
                 }
                 Err(_) => break,
             }
@@ -422,13 +428,19 @@ impl SyntaxHighlighter {
                     result.push(std::mem::take(&mut current_line));
                 } else if (b & 0xC0) != 0x80 {
                     current_line.colors.push(current_color);
+                    current_line.modifiers.push(current_modifier);
                 }
             }
         }
 
-        // Push the last line if non-empty.
         if !current_line.colors.is_empty() {
             result.push(current_line);
+        }
+
+        // For Markdown, enhance with regex-based inline highlighting since
+        // tree-sitter-md block grammar doesn't capture inline elements.
+        if self.language == Language::Markdown {
+            highlight_markdown_inline(&mut result, source);
         }
 
         result
@@ -450,8 +462,12 @@ impl SyntaxHighlighter {
     fn empty_lines(&self, source: &str) -> Vec<HighlightedLine> {
         source
             .lines()
-            .map(|line| HighlightedLine {
-                colors: vec![Color::Reset; line.chars().count()],
+            .map(|line| {
+                let len = line.chars().count();
+                HighlightedLine {
+                    colors: vec![Color::Reset; len],
+                    modifiers: vec![Modifier::empty(); len],
+                }
             })
             .collect()
     }
@@ -593,4 +609,236 @@ impl SyntaxHighlighter {
     pub fn language(&self) -> Language {
         self.language
     }
+}
+
+// ---------------------------------------------------------------------------
+// Markdown inline highlighting (regex-based post-processing)
+// ---------------------------------------------------------------------------
+
+/// Enhance Markdown highlighting with inline syntax that tree-sitter-md's
+/// block grammar doesn't capture (bold, italic, code spans, links, etc.).
+fn highlight_markdown_inline(lines: &mut [HighlightedLine], source: &str) {
+    for (line_idx, line_text) in source.lines().enumerate() {
+        let hl = match lines.get_mut(line_idx) {
+            Some(h) => h,
+            None => continue,
+        };
+
+        // Ensure modifiers vec is the same length as colors.
+        while hl.modifiers.len() < hl.colors.len() {
+            hl.modifiers.push(Modifier::empty());
+        }
+
+        let chars: Vec<char> = line_text.chars().collect();
+        let len = chars.len().min(hl.colors.len());
+
+        // --- Headings: lines starting with # ---
+        if line_text.starts_with('#') {
+            let level = line_text.chars().take_while(|c| *c == '#').count();
+            let heading_color = match level {
+                1 => Color::Rgb(100, 180, 255), // Bright blue
+                2 => Color::Rgb(130, 200, 255), // Lighter blue
+                3 => Color::Rgb(160, 210, 230), // Even lighter
+                _ => Color::Rgb(180, 200, 220), // Subtle blue
+            };
+            // Color the # markers as punctuation, rest as heading.
+            for i in 0..len {
+                if i < level {
+                    hl.colors[i] = Color::Rgb(100, 130, 180);
+                    hl.modifiers[i] = Modifier::BOLD;
+                } else {
+                    hl.colors[i] = heading_color;
+                    hl.modifiers[i] = Modifier::BOLD;
+                }
+            }
+            continue; // Done with this line.
+        }
+
+        // --- Horizontal rules: --- or *** or ___ ---
+        let trimmed = line_text.trim();
+        if trimmed.len() >= 3
+            && (trimmed.chars().all(|c| c == '-' || c == ' ')
+                || trimmed.chars().all(|c| c == '*' || c == ' ')
+                || trimmed.chars().all(|c| c == '_' || c == ' '))
+            && trimmed.chars().filter(|c| !c.is_whitespace()).count() >= 3
+        {
+            for i in 0..len {
+                hl.colors[i] = Color::Rgb(80, 80, 80);
+            }
+            continue;
+        }
+
+        // --- List markers: -, *, +, or 1. at start ---
+        if trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+        {
+            let offset = line_text.len() - trimmed.len();
+            if offset < len {
+                hl.colors[offset] = Color::Rgb(200, 160, 80); // Orange marker
+                hl.modifiers[offset] = Modifier::BOLD;
+            }
+        }
+
+        // --- Blockquote: > at start ---
+        if trimmed.starts_with('>') {
+            let offset = line_text.len() - trimmed.len();
+            for i in 0..len {
+                if i == offset {
+                    hl.colors[i] = Color::Rgb(100, 160, 100); // Green >
+                    hl.modifiers[i] = Modifier::BOLD;
+                } else if i > offset {
+                    hl.colors[i] = Color::Rgb(160, 180, 160); // Dimmed green text
+                    hl.modifiers[i] = Modifier::ITALIC;
+                }
+            }
+            continue;
+        }
+
+        // --- Inline patterns (processed left-to-right) ---
+        let mut i = 0;
+        while i < len {
+            // Bold+Italic: ***text*** or ___text___
+            if i + 2 < len
+                && ((chars[i] == '*' && chars[i + 1] == '*' && chars[i + 2] == '*')
+                    || (chars[i] == '_' && chars[i + 1] == '_' && chars[i + 2] == '_'))
+            {
+                let marker = chars[i];
+                if let Some(end) = find_closing_marker(&chars, i + 3, &[marker, marker, marker]) {
+                    for j in i..=end + 2 {
+                        if j < len {
+                            hl.colors[j] = Color::Rgb(255, 220, 150);
+                            hl.modifiers[j] = Modifier::BOLD | Modifier::ITALIC;
+                        }
+                    }
+                    // Dim the markers.
+                    for j in [i, i + 1, i + 2, end, end + 1, end + 2] {
+                        if j < len {
+                            hl.colors[j] = Color::Rgb(100, 100, 80);
+                        }
+                    }
+                    i = end + 3;
+                    continue;
+                }
+            }
+
+            // Bold: **text** or __text__
+            if i + 1 < len
+                && ((chars[i] == '*' && chars[i + 1] == '*')
+                    || (chars[i] == '_' && chars[i + 1] == '_'))
+            {
+                let marker = chars[i];
+                if let Some(end) = find_closing_marker(&chars, i + 2, &[marker, marker]) {
+                    for j in i..=end + 1 {
+                        if j < len {
+                            hl.colors[j] = Color::Rgb(255, 230, 180);
+                            hl.modifiers[j] = Modifier::BOLD;
+                        }
+                    }
+                    for j in [i, i + 1, end, end + 1] {
+                        if j < len {
+                            hl.colors[j] = Color::Rgb(100, 100, 80);
+                        }
+                    }
+                    i = end + 2;
+                    continue;
+                }
+            }
+
+            // Italic: *text* or _text_
+            if (chars[i] == '*' || chars[i] == '_')
+                && i + 1 < len
+                && !chars[i + 1].is_whitespace()
+            {
+                let marker = chars[i];
+                if let Some(end) = find_closing_marker(&chars, i + 1, &[marker]) {
+                    if end > i + 1 {
+                        for j in i..=end {
+                            if j < len {
+                                hl.colors[j] = Color::Rgb(220, 200, 170);
+                                hl.modifiers[j] = Modifier::ITALIC;
+                            }
+                        }
+                        for j in [i, end] {
+                            if j < len {
+                                hl.colors[j] = Color::Rgb(100, 100, 80);
+                            }
+                        }
+                        i = end + 1;
+                        continue;
+                    }
+                }
+            }
+
+            // Inline code: `text`
+            if chars[i] == '`' && i + 1 < len {
+                if let Some(end) = chars[i + 1..].iter().position(|c| *c == '`') {
+                    let end = i + 1 + end;
+                    for j in i..=end {
+                        if j < len {
+                            hl.colors[j] = Color::Rgb(180, 220, 170); // Greenish
+                        }
+                    }
+                    // Dim the backticks.
+                    if i < len {
+                        hl.colors[i] = Color::Rgb(100, 130, 100);
+                    }
+                    if end < len {
+                        hl.colors[end] = Color::Rgb(100, 130, 100);
+                    }
+                    i = end + 1;
+                    continue;
+                }
+            }
+
+            // Links: [text](url)
+            if chars[i] == '[' {
+                if let Some(bracket_end) = chars[i + 1..].iter().position(|c| *c == ']') {
+                    let bracket_end = i + 1 + bracket_end;
+                    if bracket_end + 1 < len && chars[bracket_end + 1] == '(' {
+                        if let Some(paren_end) =
+                            chars[bracket_end + 2..].iter().position(|c| *c == ')')
+                        {
+                            let paren_end = bracket_end + 2 + paren_end;
+                            // Link text — cyan.
+                            for j in i + 1..bracket_end {
+                                if j < len {
+                                    hl.colors[j] = Color::Cyan;
+                                    hl.modifiers[j] = Modifier::UNDERLINED;
+                                }
+                            }
+                            // URL — dim blue.
+                            for j in bracket_end + 2..paren_end {
+                                if j < len {
+                                    hl.colors[j] = Color::Rgb(100, 150, 255);
+                                    hl.modifiers[j] = Modifier::UNDERLINED;
+                                }
+                            }
+                            // Brackets/parens — dim.
+                            for j in [i, bracket_end, bracket_end + 1, paren_end] {
+                                if j < len {
+                                    hl.colors[j] = Color::Rgb(100, 100, 100);
+                                    hl.modifiers[j] = Modifier::empty();
+                                }
+                            }
+                            i = paren_end + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            i += 1;
+        }
+    }
+}
+
+/// Find the position of a closing marker sequence in chars starting from `start`.
+fn find_closing_marker(chars: &[char], start: usize, marker: &[char]) -> Option<usize> {
+    let mlen = marker.len();
+    if start + mlen > chars.len() {
+        return None;
+    }
+    (start..=chars.len().saturating_sub(mlen))
+        .find(|&i| &chars[i..i + mlen] == marker && (i == start || !chars[i - 1].is_whitespace()))
 }
