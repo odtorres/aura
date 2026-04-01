@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.61] - 2026-04-01
+
+### Added
+
+- **Cmd+C/V/S** macOS shortcuts — Paste (`Cmd+V`) in Normal + Insert mode, Save (`Cmd+S`) in Normal + Insert mode, Copy (`Cmd+C`) in Visual mode (requires terminal with Super key passthrough)
+- **Delete key** (forward delete) now works in Insert mode
+
+### Fixed
+
+- **Ctrl+P** now opens the fuzzy file picker (was command palette). Command palette moved to `Ctrl+Shift+P` (VS Code convention)
+
 ## [0.1.60] - 2026-04-01
 
 ### Added
