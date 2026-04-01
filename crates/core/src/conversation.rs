@@ -689,7 +689,11 @@ impl ConversationStore {
     ///
     /// Returns the most recent `__chat__` conversation, or creates a new one
     /// if none exists.
-    pub fn find_or_create_chat_conversation(&self, branch: Option<&str>) -> Result<Conversation> {
+    pub fn find_or_create_chat_conversation(
+        &self,
+        git_commit: Option<&str>,
+        branch: Option<&str>,
+    ) -> Result<Conversation> {
         let mut stmt = self.conn.prepare(
             "SELECT id, file_path, start_line, end_line, git_commit, branch, created_at, updated_at, summary
              FROM conversations WHERE file_path = '__chat__'
@@ -702,7 +706,7 @@ impl ConversationStore {
 
         match existing {
             Some(conv) => Ok(conv),
-            None => self.create_conversation("__chat__", 0, 0, None, branch),
+            None => self.create_conversation("__chat__", 0, 0, git_commit, branch),
         }
     }
 
@@ -710,6 +714,7 @@ impl ConversationStore {
     pub fn find_or_create_claude_code_conversation(
         &self,
         session_id: &str,
+        git_commit: Option<&str>,
         branch: Option<&str>,
     ) -> Result<Conversation> {
         let file_path = format!("__claude_code__{session_id}");
@@ -725,7 +730,7 @@ impl ConversationStore {
 
         match existing {
             Some(conv) => Ok(conv),
-            None => self.create_conversation(&file_path, 0, 0, None, branch),
+            None => self.create_conversation(&file_path, 0, 0, git_commit, branch),
         }
     }
 

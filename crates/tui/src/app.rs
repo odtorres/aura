@@ -6755,7 +6755,7 @@ impl App {
             Some(s) => s,
             None => return,
         };
-        let (branch, _) = self.git_context();
+        let (branch, commit) = self.git_context();
 
         let mut needs_refresh = false;
         for event in events {
@@ -6787,7 +6787,7 @@ impl App {
             };
 
             let conv = match store
-                .find_or_create_claude_code_conversation(session_id, branch.as_deref())
+                .find_or_create_claude_code_conversation(session_id, commit.as_deref(), branch.as_deref())
             {
                 Ok(c) => c,
                 Err(e) => {
@@ -6814,9 +6814,9 @@ impl App {
             return;
         }
         self.ensure_conversation_store();
-        let (branch, _) = self.git_context();
+        let (branch, commit) = self.git_context();
         if let Some(store) = &self.conversation_store {
-            match store.find_or_create_chat_conversation(branch.as_deref()) {
+            match store.find_or_create_chat_conversation(commit.as_deref(), branch.as_deref()) {
                 Ok(conv) => {
                     self.chat_panel.conversation_id = Some(conv.id);
                 }
@@ -6830,9 +6830,9 @@ impl App {
     /// Load an existing chat conversation from the database.
     fn load_chat_conversation(&mut self) {
         self.ensure_conversation_store();
-        let (branch, _) = self.git_context();
+        let (branch, commit) = self.git_context();
         if let Some(store) = &self.conversation_store {
-            match store.find_or_create_chat_conversation(branch.as_deref()) {
+            match store.find_or_create_chat_conversation(commit.as_deref(), branch.as_deref()) {
                 Ok(conv) => {
                     self.chat_panel.load_conversation(store, &conv.id);
                 }
