@@ -5671,7 +5671,7 @@ impl App {
             // Otherwise, switch to the clicked tab.
             let click_x = (col - self.tab_bar_rect.x) as usize;
             let max_width = self.tab_bar_rect.width as usize;
-            let close_btn_len = 2; // "× " length
+            let close_btn_len = 2; // "× " display width
             let mut x = 0usize;
             for (i, tab) in self.tabs.tabs().iter().enumerate() {
                 let label = if i < 9 {
@@ -5679,7 +5679,7 @@ impl App {
                 } else {
                     format!(" {} ", tab.title())
                 };
-                let label_len = label.len();
+                let label_len = label.chars().count();
                 let total_len = label_len + close_btn_len;
                 if x + total_len + 1 > max_width {
                     break;

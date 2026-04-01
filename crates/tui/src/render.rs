@@ -1017,10 +1017,10 @@ fn draw_tab_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         } else {
             format!(" {} ", tab.title())
         };
-        // Close button: " × "
+        // Close button: "× " (× is a single-width Unicode char).
         let close_btn = "\u{00d7} ";
-        let label_len = label.len();
-        let close_len = close_btn.len();
+        let label_len = label.chars().count();
+        let close_len = close_btn.chars().count(); // Display width, not byte length.
         let total_len = label_len + close_len;
 
         if used_width + total_len + 1 > max_width {
