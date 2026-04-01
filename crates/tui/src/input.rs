@@ -999,6 +999,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.conversation_history.scroll_messages_down();
             }
             KeyCode::Esc => {
+                app.conversation_history.visible = false;
                 app.conversation_history_focused = false;
             }
             _ => {}
