@@ -276,6 +276,12 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.open_settings();
                 true
             }
+            // Ctrl+Shift+G — open git graph.
+            KeyCode::Char('G') if modifiers.contains(KeyModifiers::SHIFT) => {
+                unfocus_all_panels(app);
+                app.open_git_graph();
+                true
+            }
             _ => false,
         };
         if handled {
