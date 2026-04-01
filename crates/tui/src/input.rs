@@ -30,6 +30,88 @@ fn unfocus_all_panels(app: &mut App) {
     app.ai_visor_focused = false;
 }
 
+/// Execute a named action from the keybinding config. Returns true if handled.
+fn execute_action(app: &mut App, action: &str) -> bool {
+    match action {
+        "toggle_terminal" => {
+            if app.terminal().visible && app.terminal_focused {
+                app.terminal_mut().visible = false;
+                app.terminal_focused = false;
+            } else {
+                app.terminal_mut().visible = true;
+                app.terminal_focused = true;
+            }
+        }
+        "toggle_chat" => app.toggle_chat_panel(),
+        "toggle_history" => app.toggle_conversation_history(),
+        "toggle_file_tree" => {
+            if app.file_tree.visible && app.file_tree_focused {
+                app.file_tree_focused = false;
+                app.file_tree.toggle();
+            } else {
+                if !app.file_tree.visible {
+                    app.file_tree.toggle();
+                }
+                if app.sidebar_view != SidebarView::Files {
+                    app.sidebar_view = SidebarView::Files;
+                }
+                app.file_tree_focused = true;
+            }
+        }
+        "toggle_git" => {
+            if app.source_control_focused && app.sidebar_view == SidebarView::Git {
+                app.source_control_focused = false;
+            } else {
+                if !app.file_tree.visible {
+                    app.file_tree.toggle();
+                }
+                if app.sidebar_view != SidebarView::Git {
+                    app.sidebar_view = SidebarView::Git;
+                    app.refresh_source_control();
+                }
+                app.source_control_focused = true;
+            }
+        }
+        "open_file_picker" => app.open_file_picker(),
+        "open_command_palette" => app.open_command_palette(),
+        "open_git_graph" => app.open_git_graph(),
+        "open_settings" => app.open_settings(),
+        "open_outline" => app.open_outline(),
+        "open_visor" | "toggle_visor" => app.toggle_ai_visor(),
+        "open_branch_picker" => app.open_branch_picker(),
+        "project_search" => app.open_project_search(),
+        "save" => match app.tab_mut().buffer.save() {
+            Ok(_) => app.set_status("Saved"),
+            Err(e) => app.set_status(format!("Save failed: {e}")),
+        },
+        "intent" => {
+            app.mode = Mode::Intent;
+            app.command_input.clear();
+        }
+        "toggle_blame" => app.toggle_blame(),
+        "cycle_aggressiveness" => app.cycle_aggressiveness(),
+        "recent_decisions" => app.show_recent_decisions(),
+        "next_tab" => {
+            if app.tabs.count() > 1 {
+                app.tabs.next();
+            }
+        }
+        "prev_tab" => {
+            if app.tabs.count() > 1 {
+                app.tabs.prev();
+            }
+        }
+        "close_tab" => {
+            let idx = app.tabs.active_index();
+            if app.close_tab_by_index(idx) {
+                app.should_quit = true;
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
 /// Handle keys in Normal mode.
 pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Global: if a tool call is pending approval, intercept Y/N regardless of focus.
@@ -190,6 +272,14 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // These work from ANY focused panel (terminal, git, chat, file tree, etc.)
     // so users never have to Esc back to the editor first.
     if modifiers.contains(KeyModifiers::CONTROL) {
+        // Check custom global keybindings from aura.toml first.
+        if let Some(action) = app.config.keybindings.global_action(code, modifiers) {
+            let action = action.to_string();
+            unfocus_all_panels(app);
+            if execute_action(app, &action) {
+                return;
+            }
+        }
         let handled = match code {
             // Ctrl+T / Ctrl+` — toggle terminal.
             KeyCode::Char('t') | KeyCode::Char('`') => {
@@ -1782,8 +1872,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     let count = app.count_prefix.take().unwrap_or(1);
 
     match code {
-        // Leader key (Space)
-        KeyCode::Char(' ') => {
+        // Leader key (configurable, default: Space)
+        _ if app.config.keybindings.is_leader_key(code) => {
             app.leader_pending = true;
         }
 
@@ -2895,6 +2985,16 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
 /// Handle leader key sequences (<Space> + key).
 fn handle_leader(app: &mut App, code: KeyCode) {
+    // Check custom leader mappings from aura.toml first.
+    if let KeyCode::Char(c) = code {
+        if let Some(action) = app.config.keybindings.leader_action(c) {
+            let action = action.to_string();
+            if execute_action(app, &action) {
+                return;
+            }
+        }
+    }
+
     match code {
         // <leader>u — undo AI edits
         KeyCode::Char('u') => {

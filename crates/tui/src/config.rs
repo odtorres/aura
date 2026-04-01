@@ -231,14 +231,83 @@ impl Default for AiSettings {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct KeybindingConfig {
-    /// Leader key (default: Space).
+    /// Leader key (default: "Space"). Options: "Space", "Backslash", "Comma".
     pub leader: Option<String>,
-    /// Custom leader key mappings: action_name → key.
+    /// Custom leader key mappings: key → action (e.g., "e" = "explain").
     #[serde(default)]
     pub leader_map: HashMap<String, String>,
     /// Custom normal mode mappings: key → action.
     #[serde(default)]
     pub normal_map: HashMap<String, String>,
+    /// Custom global shortcut mappings: key → action (e.g., "ctrl+j" = "toggle_chat").
+    #[serde(default)]
+    pub global_map: HashMap<String, String>,
+}
+
+impl KeybindingConfig {
+    /// Look up a global shortcut action by key code and modifiers.
+    pub fn global_action(
+        &self,
+        code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> Option<&str> {
+        let key_str = format_key(code, modifiers);
+        self.global_map.get(&key_str).map(|s| s.as_str())
+    }
+
+    /// Look up a leader key action by the character pressed after leader.
+    pub fn leader_action(&self, c: char) -> Option<&str> {
+        self.leader_map.get(&c.to_string()).map(|s| s.as_str())
+    }
+
+    /// Check if a key code matches the configured leader key.
+    pub fn is_leader_key(&self, code: crossterm::event::KeyCode) -> bool {
+        let leader = self.leader.as_deref().unwrap_or("Space");
+        match leader {
+            "Space" => code == crossterm::event::KeyCode::Char(' '),
+            "Backslash" => code == crossterm::event::KeyCode::Char('\\'),
+            "Comma" => code == crossterm::event::KeyCode::Char(','),
+            _ => code == crossterm::event::KeyCode::Char(' '),
+        }
+    }
+}
+
+/// Format a key code + modifiers into a human-readable string for config matching.
+fn format_key(
+    code: crossterm::event::KeyCode,
+    modifiers: crossterm::event::KeyModifiers,
+) -> String {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut parts = Vec::new();
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        parts.push("ctrl".to_string());
+    }
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        parts.push("shift".to_string());
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        parts.push("alt".to_string());
+    }
+    let key = match code {
+        KeyCode::Char(c) => c.to_lowercase().to_string(),
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Tab => "tab".to_string(),
+        KeyCode::Esc => "esc".to_string(),
+        KeyCode::F(n) => format!("f{n}"),
+        KeyCode::Up => "up".to_string(),
+        KeyCode::Down => "down".to_string(),
+        KeyCode::Left => "left".to_string(),
+        KeyCode::Right => "right".to_string(),
+        KeyCode::Delete => "delete".to_string(),
+        KeyCode::Home => "home".to_string(),
+        KeyCode::End => "end".to_string(),
+        KeyCode::PageUp => "pageup".to_string(),
+        KeyCode::PageDown => "pagedown".to_string(),
+        _ => return String::new(),
+    };
+    parts.push(key);
+    parts.join("+")
 }
 
 /// A color theme definition.

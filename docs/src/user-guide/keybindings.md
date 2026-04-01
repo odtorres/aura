@@ -2,6 +2,56 @@
 
 This is a comprehensive reference of all keybindings in AURA. For a conceptual overview, see [Modes](modes.md).
 
+## Customization
+
+You can remap global shortcuts and leader key sequences in `aura.toml`:
+
+```toml
+[keybindings]
+leader = "Space"  # Default. Options: "Space", "Backslash", "Comma"
+
+# Remap global Ctrl+ shortcuts
+[keybindings.global_map]
+"ctrl+j" = "toggle_chat"
+"ctrl+h" = "toggle_history"
+"ctrl+shift+g" = "open_git_graph"
+"ctrl+k" = "open_command_palette"
+
+# Remap leader key sequences (Space + key)
+[keybindings.leader_map]
+e = "explain"
+f = "fix"
+x = "open_git_graph"
+```
+
+### Available Actions
+
+| Action | Description |
+|--------|-------------|
+| `toggle_terminal` | Toggle terminal pane |
+| `toggle_chat` | Toggle chat panel |
+| `toggle_history` | Toggle AI History panel |
+| `toggle_file_tree` | Toggle file tree sidebar |
+| `toggle_git` | Toggle git/source control panel |
+| `toggle_visor` | Toggle AI Visor panel |
+| `toggle_blame` | Toggle inline git blame |
+| `open_file_picker` | Open fuzzy file picker |
+| `open_command_palette` | Open command palette |
+| `open_git_graph` | Open git graph modal |
+| `open_settings` | Open settings modal |
+| `open_outline` | Open document outline |
+| `open_branch_picker` | Open branch picker |
+| `project_search` | Open project-wide search |
+| `save` | Save current file |
+| `intent` | Enter AI Intent mode |
+| `cycle_aggressiveness` | Cycle ghost suggestion level |
+| `recent_decisions` | Show recent AI decisions |
+| `next_tab` | Switch to next tab |
+| `prev_tab` | Switch to previous tab |
+| `close_tab` | Close current tab |
+
+Custom mappings take priority over built-in defaults. Vim core motions (`hjkl`, `w`, `b`, operators, text objects) are not configurable.
+
 ## Normal Mode
 
 ### Navigation
