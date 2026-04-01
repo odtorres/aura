@@ -715,8 +715,11 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 KeyCode::Backspace => {
                     app.source_control.commit_message.pop();
                 }
-                // Ctrl+V — paste from system clipboard.
-                KeyCode::Char('v') if modifiers.contains(KeyModifiers::CONTROL) => {
+                // Ctrl+V / Cmd+V — paste from system clipboard.
+                KeyCode::Char('v')
+                    if modifiers.contains(KeyModifiers::CONTROL)
+                        || modifiers.contains(KeyModifiers::SUPER) =>
+                {
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         if let Ok(text) = clipboard.get_text() {
                             app.source_control.commit_message.push_str(&text);
@@ -1797,6 +1800,27 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.mode = Mode::Command;
             app.command_input.clear();
         }
+        // Cmd+V — paste from system clipboard (macOS).
+        KeyCode::Char('v') if modifiers.contains(KeyModifiers::SUPER) => {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Ok(text) = clipboard.get_text() {
+                    let tab = app.tab_mut();
+                    let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                    tab.buffer.insert(pos, &text, AuthorId::human());
+                    let new_pos = pos + text.chars().count();
+                    tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+                    app.mark_highlights_dirty();
+                    app.set_status("Pasted from clipboard");
+                }
+            }
+        }
+        // Cmd+S — save (macOS).
+        KeyCode::Char('s') if modifiers.contains(KeyModifiers::SUPER) => {
+            match app.tab_mut().buffer.save() {
+                Ok(_) => app.set_status("Saved"),
+                Err(e) => app.set_status(format!("Save failed: {e}")),
+            }
+        }
         KeyCode::Char('v') if modifiers.contains(KeyModifiers::CONTROL) => {
             app.mode = Mode::VisualBlock;
             let cursor = app.tab().cursor;
@@ -2603,6 +2627,19 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.mark_highlights_dirty();
             }
         }
+        // Cmd+V — paste from system clipboard in Insert mode (macOS).
+        KeyCode::Char('v') if modifiers.contains(KeyModifiers::SUPER) => {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Ok(text) = clipboard.get_text() {
+                    let tab = app.tab_mut();
+                    let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                    tab.buffer.insert(pos, &text, AuthorId::human());
+                    let new_pos = pos + text.chars().count();
+                    tab.cursor = tab.buffer.char_idx_to_cursor(new_pos);
+                    app.mark_highlights_dirty();
+                }
+            }
+        }
         KeyCode::Left => {
             let tab = app.tab_mut();
             tab.cursor.col = tab.cursor.col.saturating_sub(1);
@@ -2620,8 +2657,11 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.tab_mut().cursor.row += 1;
             app.clamp_cursor();
         }
-        // Ctrl+S to save even in insert mode.
-        KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
+        // Ctrl+S / Cmd+S to save even in insert mode.
+        KeyCode::Char('s')
+            if modifiers.contains(KeyModifiers::CONTROL)
+                || modifiers.contains(KeyModifiers::SUPER) =>
+        {
             match app.tab_mut().buffer.save() {
                 Ok(_) => app.set_status("Saved"),
                 Err(e) => app.set_status(format!("Error saving: {}", e)),
