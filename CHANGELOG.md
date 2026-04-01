@@ -5,6 +5,23 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.58] - 2026-04-01
+
+### Added
+
+- **Rich Markdown highlighting** — Full inline syntax highlighting with text modifiers:
+  - Headings: bold + level-aware blue tinting (`#` through `####`)
+  - Bold (`**text**`): warm white + bold modifier
+  - Italic (`*text*`): warm tone + italic modifier
+  - Bold+Italic (`***text***`): gold + bold+italic
+  - Inline code (`` `text` ``): greenish with dimmed backticks
+  - Links (`[text](url)`): cyan underlined text + blue underlined URL
+  - Blockquotes (`>`): green marker + italic dimmed text
+  - List markers: orange bold
+  - Horizontal rules: dark gray
+- **Per-character text modifiers** — `HighlightedLine` now carries bold/italic/underline modifiers alongside colors, applied during rendering
+- **Italic comments** — Code comments now render in italic across all languages
+
 ## [0.1.57] - 2026-03-31
 
 ### Added
