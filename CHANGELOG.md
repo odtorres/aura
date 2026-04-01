@@ -5,6 +5,12 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.62] - 2026-04-01
+
+### Added
+
+- **Git graph ↔ AI History link** — Commits with linked AI conversations show a cyan `[c]AI` badge in the git graph. Press `c` to jump directly to the conversation in the AI History panel.
+
 ## [0.1.61] - 2026-04-01
 
 ### Added
