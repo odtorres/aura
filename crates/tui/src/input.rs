@@ -1184,8 +1184,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
-    // Ctrl+P — open command palette from any mode.
-    if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
+    // Ctrl+P — open fuzzy file picker (VS Code convention).
+    if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::SHIFT) {
+        app.open_file_picker();
+        return;
+    }
+    // Ctrl+Shift+P — open command palette.
+    if code == KeyCode::Char('P') && modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) {
         app.open_command_palette();
         return;
     }
