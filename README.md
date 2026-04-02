@@ -77,6 +77,32 @@ cargo run -p aura -- path/to/file.rs
 
 <!-- ANCHOR: quickstart-end -->
 
+## Language Server Setup
+
+AURA auto-detects LSP servers when you open a file. Install a server for your language to get **inline error underlines**, diagnostics, go-to-definition, hover info, and more.
+
+| Language | Install command |
+|----------|---------------|
+| Rust | `rustup component add rust-analyzer` |
+| TypeScript/JS | `npm install -g typescript-language-server typescript` |
+| Python | `npm install -g pyright` |
+| Go | `go install golang.org/x/tools/gopls@latest` |
+| PHP | `npm install -g intelephense` |
+| C/C++ | Install `clangd` (LLVM/Clang toolchain) |
+| Ruby | `gem install solargraph` |
+| Bash/Shell | `npm install -g bash-language-server` |
+| Elixir | [ElixirLS releases](https://github.com/elixir-lsp/elixir-ls/releases) |
+| Lua | [LuaLS releases](https://github.com/LuaLS/lua-language-server/releases) |
+| Dart | Included with Dart SDK |
+| Swift | Included with Xcode |
+| Kotlin | [KotlinLS releases](https://github.com/fwcd/kotlin-language-server/releases) |
+| Zig | [ZLS releases](https://github.com/zigtools/zls/releases) |
+| Scala | [Metals](https://scalameta.org/metals/) |
+| Haskell | [HLS releases](https://github.com/haskell/haskell-language-server/releases) |
+| Dockerfile | `npm install -g dockerfile-language-server-nodejs` |
+
+Once installed and on your `$PATH`, open a file and AURA connects automatically. You'll see `LSP` in the status bar. Errors appear as **red underlines**, warnings as **yellow underlines** — in real-time as you type.
+
 <!-- ANCHOR: keybindings-start -->
 
 ## Keybindings

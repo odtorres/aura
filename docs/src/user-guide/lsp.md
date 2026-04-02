@@ -113,3 +113,26 @@ AURA auto-detects these language servers when they're installed:
 | Dockerfile | `docker-langserver` | `npm install -g dockerfile-language-server-nodejs` |
 
 The LSP client works with any language server that implements the Language Server Protocol.
+
+### Quick Setup
+
+You need an LSP server installed for the language you're editing. AURA auto-detects them when you open a file.
+
+1. Install the LSP server for your language (see table above)
+2. Make sure the binary is on your `$PATH`
+3. Open a file in AURA — the LSP starts automatically
+4. Errors/warnings appear as **red/yellow underlines** in real-time as you type
+5. The gutter shows `E`/`W` markers, and the status bar shows error/warning counts
+6. Press `]` to jump to the next diagnostic, `[` for previous
+
+You should see `LSP` in the status bar when it's connected. If you don't, the server binary might not be on your PATH.
+
+### Inline Diagnostics
+
+AURA renders LSP diagnostics as colored underlines directly under the problematic code (like VS Code):
+
+- **Red underline** — errors
+- **Yellow underline** — warnings
+- **Cyan underline** — info/hints
+
+Diagnostics update in real-time as you edit. They also feed into AI context, so when you use `<Space>f` (fix errors), the AI sees the exact error messages.
