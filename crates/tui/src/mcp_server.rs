@@ -314,7 +314,7 @@ impl McpServer {
                     .incoming()
                     .try_for_each(|stream_result| -> std::io::Result<()> {
                         // Check shutdown flag.
-                        if *shutdown_clone.lock().unwrap() {
+                        if *shutdown_clone.lock().expect("MCP shutdown lock") {
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::Interrupted,
                                 "shutdown",
@@ -356,7 +356,7 @@ impl McpServer {
 
     /// Shut down the server.
     pub fn shutdown(&self) {
-        *self.shutdown.lock().unwrap() = true;
+        *self.shutdown.lock().expect("MCP shutdown lock") = true;
         // Connect to ourselves to unblock the accept loop.
         let _ = TcpStream::connect(format!("127.0.0.1:{}", self.port));
     }
@@ -389,7 +389,10 @@ fn handle_connection(stream: TcpStream, request_tx: mpsc::Sender<McpAppRequest>)
                         message: format!("Parse error: {e}"),
                     }),
                 };
-                let _ = write_message(&mut writer, &serde_json::to_string(&resp).unwrap());
+                let _ = write_message(
+                    &mut writer,
+                    &serde_json::to_string(&resp).expect("JSON response serialization"),
+                );
                 continue;
             }
         };
@@ -423,7 +426,10 @@ fn handle_connection(stream: TcpStream, request_tx: mpsc::Sender<McpAppRequest>)
                     result: Some(serde_json::Value::Null),
                     error: None,
                 };
-                let _ = write_message(&mut writer, &serde_json::to_string(&resp).unwrap());
+                let _ = write_message(
+                    &mut writer,
+                    &serde_json::to_string(&resp).expect("JSON response serialization"),
+                );
                 break;
             }
             _ => JsonRpcResponse {
@@ -437,7 +443,7 @@ fn handle_connection(stream: TcpStream, request_tx: mpsc::Sender<McpAppRequest>)
             },
         };
 
-        let resp_str = serde_json::to_string(&response).unwrap();
+        let resp_str = serde_json::to_string(&response).expect("JSON response serialization");
         if write_message(&mut writer, &resp_str).is_err() {
             break;
         }

@@ -2571,8 +2571,7 @@ impl App {
     pub fn edit_selected_macro(&mut self) {
         let entries = self.register_entries();
         if let Some((name, _)) = entries.get(self.registers_selected) {
-            if name.len() == 1 {
-                let ch = name.chars().next().unwrap();
+            if let Some(ch) = name.chars().next() {
                 // Only macro registers (a-z) are editable.
                 if ch.is_ascii_lowercase() && self.macro_registers.contains_key(&ch) {
                     self.macro_editing = Some(ch);
@@ -3250,11 +3249,9 @@ impl App {
         let has_lsp = self.tab().lsp_client.is_some();
         if has_lsp {
             self.peek_definition_pending = true;
-            self.tab_mut()
-                .lsp_client
-                .as_mut()
-                .unwrap()
-                .goto_definition(row, col);
+            if let Some(lsp) = self.tab_mut().lsp_client.as_mut() {
+                lsp.goto_definition(row, col);
+            }
             self.set_status("Peeking definition...");
         } else {
             self.set_status("No LSP server");
@@ -6425,7 +6422,13 @@ impl App {
         }
         let messages = self.chat_panel.build_messages();
 
-        let client = self.ai_client.as_ref().unwrap();
+        let client = match self.ai_client.as_ref() {
+            Some(c) => c,
+            None => {
+                self.set_status("No AI client configured (set ANTHROPIC_API_KEY)");
+                return;
+            }
+        };
 
         // Use tools if the backend supports them.
         if client.supports_tools() {
@@ -8088,8 +8091,11 @@ impl App {
                         if !session.peers.contains_key(&peer_id) {
                             session.add_peer(peer_id, format!("peer-{peer_id}"));
                         }
-                        let peer = session.peers.get_mut(&peer_id).unwrap();
-                        std::mem::take(peer.sync_states.entry(file_id).or_default())
+                        if let Some(peer) = session.peers.get_mut(&peer_id) {
+                            std::mem::take(peer.sync_states.entry(file_id).or_default())
+                        } else {
+                            aura_core::sync::SyncState::new()
+                        }
                     } else {
                         continue;
                     };
@@ -8177,12 +8183,9 @@ impl App {
                             if !session.peers.contains_key(&0) {
                                 session.add_peer(0, "host".to_string());
                             }
-                            session
-                                .peers
-                                .get_mut(&0)
-                                .unwrap()
-                                .sync_states
-                                .insert(actual_fid, state);
+                            if let Some(peer) = session.peers.get_mut(&0) {
+                                peer.sync_states.insert(actual_fid, state);
+                            }
                             if let Some(m) = msg {
                                 session.broadcast_sync(actual_fid, m.encode());
                             }

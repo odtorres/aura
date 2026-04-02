@@ -188,8 +188,11 @@ fn spawn_tls_relay<S: IoRead + IoWrite + Send + 'static>(
                 // Parse complete messages from the buffer.
                 while pending_read.len() >= 5 {
                     // Need at least 4 (length) + 1 (type) bytes.
-                    let total_len =
-                        u32::from_be_bytes(pending_read[..4].try_into().unwrap()) as usize;
+                    let len_bytes: [u8; 4] = match pending_read[..4].try_into() {
+                        Ok(b) => b,
+                        Err(_) => break,
+                    };
+                    let total_len = u32::from_be_bytes(len_bytes) as usize;
                     if total_len == 0 || pending_read.len() < 4 + total_len {
                         break; // Incomplete message.
                     }
@@ -335,7 +338,10 @@ fn prepend_file_id(file_id: u64, payload: &[u8]) -> Vec<u8> {
 /// Returns (file_id, remaining_payload). Falls back to file_id=0 for short payloads.
 fn extract_file_id(payload: &[u8]) -> (u64, Vec<u8>) {
     if payload.len() >= 8 {
-        let file_id = u64::from_be_bytes(payload[..8].try_into().unwrap());
+        let file_id = match payload[..8].try_into() {
+            Ok(b) => u64::from_be_bytes(b),
+            Err(_) => return (0, payload.to_vec()),
+        };
         (file_id, payload[8..].to_vec())
     } else {
         (0, payload.to_vec())
@@ -738,7 +744,7 @@ impl CollabSession {
                             // Remove from snapshots.
                             file_snaps_for_cmd
                                 .lock()
-                                .unwrap()
+                                .expect("file snapshots lock")
                                 .retain(|(id, _, _)| *id != file_id);
                             let payload = file_id.to_be_bytes().to_vec();
                             broadcast(&clients_for_cmd, MSG_FILE_CLOSED, &payload);
@@ -827,7 +833,7 @@ impl CollabSession {
             "peer_id": local_peer_id,
             "name": name,
         }))
-        .unwrap();
+        .expect("JSON serialization of peer join");
         writer.write_message(MSG_PEER_JOINED, &join_payload)?;
 
         let writer = Arc::new(Mutex::new(writer));
@@ -1267,7 +1273,7 @@ fn client_reader_loop(
                         "peer_id": peer_id,
                         "name": name,
                     }))
-                    .unwrap();
+                    .expect("JSON serialization of peer rejoin");
 
                     if new_writer
                         .write_message(MSG_PEER_JOINED, &join_payload)
@@ -1349,7 +1355,13 @@ fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
         }
         MSG_FILE_CLOSED => {
             if payload.len() >= 8 {
-                let file_id = u64::from_be_bytes(payload[..8].try_into().unwrap());
+                let bytes: [u8; 8] = match payload[..8].try_into() {
+                    Ok(b) => b,
+                    Err(_) => {
+                        return CollabEvent::Error("malformed file-closed message".to_string())
+                    }
+                };
+                let file_id = u64::from_be_bytes(bytes);
                 CollabEvent::FileClosed { file_id }
             } else {
                 CollabEvent::Error("malformed file-closed message".to_string())

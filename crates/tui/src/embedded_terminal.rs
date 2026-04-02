@@ -366,7 +366,7 @@ impl Performer {
 
 impl vte::Perform for Performer {
     fn print(&mut self, c: char) {
-        let mut scr = self.screen.lock().unwrap();
+        let mut scr = self.screen.lock().expect("terminal screen lock");
 
         // If a wrap is pending (cursor was at the last column), wrap now.
         if scr.wrap_pending {
@@ -402,7 +402,7 @@ impl vte::Perform for Performer {
     }
 
     fn execute(&mut self, byte: u8) {
-        let mut scr = self.screen.lock().unwrap();
+        let mut scr = self.screen.lock().expect("terminal screen lock");
         match byte {
             // Newline (LF).
             b'\n' => {
@@ -443,7 +443,7 @@ impl vte::Perform for Performer {
         if let Some(first) = params.first() {
             let s = String::from_utf8_lossy(first);
             if let Some(marker) = s.strip_prefix("133;") {
-                let mut scr = self.screen.lock().unwrap();
+                let mut scr = self.screen.lock().expect("terminal screen lock");
                 if marker == "A" {
                     // Prompt start — record the row.
                     scr.prompt_start_row = Some(scr.cursor_row);
@@ -495,7 +495,7 @@ impl vte::Perform for Performer {
         _ignore: bool,
         action: char,
     ) {
-        let mut scr = self.screen.lock().unwrap();
+        let mut scr = self.screen.lock().expect("terminal screen lock");
 
         // Helper: extract params as a Vec<u16> for easy access.
         let pv: Vec<u16> = params.iter().map(|sub| sub[0]).collect();
@@ -756,7 +756,7 @@ impl vte::Perform for Performer {
     }
 
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
-        let mut scr = self.screen.lock().unwrap();
+        let mut scr = self.screen.lock().expect("terminal screen lock");
         match byte {
             // RI (Reverse Index) = ESC M.
             b'M' => {
@@ -1144,7 +1144,7 @@ impl EmbeddedTerminal {
     /// the active content sits at the bottom of the pane (like VS Code).
     /// Also returns the adjusted cursor row for rendering.
     pub fn snapshot(&self) -> (Vec<Vec<TerminalCell>>, usize, usize) {
-        let scr = self.screen.lock().unwrap();
+        let scr = self.screen.lock().expect("terminal screen lock");
         let offset = scr.scroll_offset;
 
         if offset > 0 {
@@ -1225,7 +1225,7 @@ impl EmbeddedTerminal {
     /// Create a serializable snapshot of the terminal screen for network sharing.
     pub fn terminal_snapshot(&self) -> TerminalSnapshot {
         let (cells, cursor_row, cursor_col) = self.snapshot();
-        let scr = self.screen.lock().unwrap();
+        let scr = self.screen.lock().expect("terminal screen lock");
         TerminalSnapshot {
             cells,
             cursor_row,
@@ -1240,23 +1240,30 @@ impl EmbeddedTerminal {
     /// Note: prefer the cursor position returned by `snapshot()` as it
     /// accounts for bottom-anchoring.
     pub fn cursor_position(&self) -> (usize, usize) {
-        let scr = self.screen.lock().unwrap();
+        let scr = self.screen.lock().expect("terminal screen lock");
         (scr.cursor_row, scr.cursor_col)
     }
 
     /// Get the current scroll offset.
     pub fn scroll_offset(&self) -> usize {
-        self.screen.lock().unwrap().scroll_offset
+        self.screen
+            .lock()
+            .expect("terminal screen lock")
+            .scroll_offset
     }
 
     /// Get completed command records (for shell integration).
     pub fn commands(&self) -> Vec<CommandRecord> {
-        self.screen.lock().unwrap().commands.clone()
+        self.screen
+            .lock()
+            .expect("terminal screen lock")
+            .commands
+            .clone()
     }
 
     /// Get the last failed command, if any.
     pub fn last_failed_command(&self) -> Option<CommandRecord> {
-        let scr = self.screen.lock().unwrap();
+        let scr = self.screen.lock().expect("terminal screen lock");
         scr.commands
             .iter()
             .rev()
@@ -1266,7 +1273,10 @@ impl EmbeddedTerminal {
 
     /// Whether a command is currently running.
     pub fn command_running(&self) -> bool {
-        self.screen.lock().unwrap().command_running
+        self.screen
+            .lock()
+            .expect("terminal screen lock")
+            .command_running
     }
 
     // Keep these stubs for compatibility — old code called them.
