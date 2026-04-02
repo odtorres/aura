@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.68] - 2026-04-01
+
+### Added
+
+- **Comprehensive session persistence** — Now saves and restores across restarts:
+  - Vim marks (`ma`–`mz`) per tab
+  - Code folding state per tab
+  - Panel sizes (sidebar, chat, terminal, conversation history)
+  - Additional panel visibility (conversation history, AI visor, debug panel)
+  - Split pane layout (direction + secondary tab)
+  - Macro registers (`@a`–`@z`) with full key sequence serialization
+  - Backward compatible with existing session.json files
+
 ## [0.1.67] - 2026-04-01
 
 ### Fixed
