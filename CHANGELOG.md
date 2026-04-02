@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.71] - 2026-04-02
+
+### Added
+
+- **Test coverage** — 8 new tests across config, highlighting, and session:
+  - `format_key()` key-to-string conversion
+  - `KeybindingConfig` leader key detection, global/leader action lookup
+  - All 30 languages create highlighters successfully
+  - Extension and filename language detection
+  - Dotenv highlighting produces colors
+
 ## [0.1.70] - 2026-04-02
 
 ### Added

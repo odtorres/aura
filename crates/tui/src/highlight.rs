@@ -337,6 +337,12 @@ impl SyntaxHighlighter {
                 | Language::Dockerfile
                 | Language::Nginx
                 | Language::Kotlin
+                | Language::Php
+                | Language::Lua
+                | Language::Dart
+                | Language::Swift
+                | Language::Scala
+                | Language::Haskell
         ) {
             return Some(Self {
                 language,
@@ -416,7 +422,13 @@ impl SyntaxHighlighter {
             | Language::Sql
             | Language::Dockerfile
             | Language::Nginx
-            | Language::Kotlin => unreachable!("handled above"),
+            | Language::Kotlin
+            | Language::Php
+            | Language::Lua
+            | Language::Dart
+            | Language::Swift
+            | Language::Scala
+            | Language::Haskell => unreachable!("handled above"),
             Language::Elixir => (
                 tree_sitter_elixir::LANGUAGE.into(),
                 tree_sitter_elixir::HIGHLIGHTS_QUERY,
@@ -425,33 +437,9 @@ impl SyntaxHighlighter {
                 tree_sitter_heex::LANGUAGE.into(),
                 tree_sitter_heex::HIGHLIGHTS_QUERY,
             ),
-            Language::Php => (
-                tree_sitter_php::LANGUAGE_PHP.into(),
-                tree_sitter_php::HIGHLIGHTS_QUERY,
-            ),
-            Language::Lua => (
-                tree_sitter_lua::LANGUAGE.into(),
-                tree_sitter_lua::HIGHLIGHTS_QUERY,
-            ),
-            Language::Dart => (
-                tree_sitter_dart::LANGUAGE.into(),
-                tree_sitter_dart::HIGHLIGHTS_QUERY,
-            ),
-            Language::Swift => (
-                tree_sitter_swift::LANGUAGE.into(),
-                tree_sitter_swift::HIGHLIGHTS_QUERY,
-            ),
             Language::Zig => (
                 tree_sitter_zig::LANGUAGE.into(),
                 tree_sitter_zig::HIGHLIGHTS_QUERY,
-            ),
-            Language::Scala => (
-                tree_sitter_scala::LANGUAGE.into(),
-                tree_sitter_scala::HIGHLIGHTS_QUERY,
-            ),
-            Language::Haskell => (
-                tree_sitter_haskell::LANGUAGE.into(),
-                tree_sitter_haskell::HIGHLIGHTS_QUERY,
             ),
         };
 
@@ -1113,5 +1101,96 @@ mod tests {
         let line = &lines[0];
         let has_bold = line.modifiers.iter().any(|m| m.contains(Modifier::BOLD));
         assert!(has_bold, "Bold text should have BOLD modifier");
+    }
+
+    #[test]
+    fn test_all_languages_create_highlighter() {
+        // Every Language variant should create a SyntaxHighlighter successfully.
+        let languages = vec![
+            Language::Rust,
+            Language::Python,
+            Language::TypeScript,
+            Language::Tsx,
+            Language::Go,
+            Language::JavaScript,
+            Language::Java,
+            Language::C,
+            Language::Cpp,
+            Language::Ruby,
+            Language::Html,
+            Language::Css,
+            Language::Json,
+            Language::Bash,
+            Language::Toml,
+            Language::Yaml,
+            Language::Markdown,
+            Language::Elixir,
+            Language::HEEx,
+            Language::Dotenv,
+            Language::Php,
+            Language::Sql,
+            Language::Dockerfile,
+            Language::Nginx,
+            Language::Lua,
+            Language::Dart,
+            Language::Swift,
+            Language::Kotlin,
+            Language::Zig,
+            Language::Scala,
+            Language::Haskell,
+        ];
+        for lang in languages {
+            let hl = SyntaxHighlighter::new(lang);
+            assert!(hl.is_some(), "{lang:?} should create a highlighter");
+        }
+    }
+
+    #[test]
+    fn test_extension_detection() {
+        assert_eq!(Language::from_extension("rs"), Some(Language::Rust));
+        assert_eq!(Language::from_extension("py"), Some(Language::Python));
+        assert_eq!(Language::from_extension("tsx"), Some(Language::Tsx));
+        assert_eq!(Language::from_extension("php"), Some(Language::Php));
+        assert_eq!(Language::from_extension("dart"), Some(Language::Dart));
+        assert_eq!(Language::from_extension("zig"), Some(Language::Zig));
+        assert_eq!(Language::from_extension("hs"), Some(Language::Haskell));
+        assert_eq!(Language::from_extension("kt"), Some(Language::Kotlin));
+        assert_eq!(Language::from_extension("scala"), Some(Language::Scala));
+        assert_eq!(Language::from_extension("swift"), Some(Language::Swift));
+        assert_eq!(Language::from_extension("lua"), Some(Language::Lua));
+        assert_eq!(Language::from_extension("sql"), Some(Language::Sql));
+        assert_eq!(Language::from_extension("conf"), Some(Language::Nginx));
+        assert_eq!(Language::from_extension("unknown"), None);
+    }
+
+    #[test]
+    fn test_filename_detection() {
+        assert_eq!(
+            Language::from_filename("Dockerfile"),
+            Some(Language::Dockerfile)
+        );
+        assert_eq!(
+            Language::from_filename("Dockerfile.dev"),
+            Some(Language::Dockerfile)
+        );
+        assert_eq!(Language::from_filename(".env"), Some(Language::Dotenv));
+        assert_eq!(
+            Language::from_filename(".env.local"),
+            Some(Language::Dotenv)
+        );
+        assert_eq!(Language::from_filename("Makefile"), Some(Language::Bash));
+        assert_eq!(Language::from_filename("random.txt"), None);
+    }
+
+    #[test]
+    fn test_dotenv_highlighting() {
+        let mut hl = SyntaxHighlighter::new(Language::Dotenv).unwrap();
+        let source = "# comment\nKEY=value\nDB_URL=\"postgres://localhost\"\n";
+        let lines = hl.highlight(source, None);
+        assert_eq!(lines.len(), 3);
+        // Comment line should have non-Reset colors.
+        assert!(lines[0].colors.iter().any(|c| *c != Color::Reset));
+        // KEY=value line should have colors.
+        assert!(lines[1].colors.iter().any(|c| *c != Color::Reset));
     }
 }

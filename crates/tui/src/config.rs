@@ -699,4 +699,67 @@ f = "fix"
         let config = load_config(Path::new("/nonexistent/aura.toml"));
         assert_eq!(config.theme, "dark"); // default
     }
+
+    #[test]
+    fn test_format_key_simple() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        assert_eq!(
+            format_key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            "ctrl+j"
+        );
+        assert_eq!(
+            format_key(
+                KeyCode::Char('g'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            ),
+            "ctrl+shift+g"
+        );
+        assert_eq!(format_key(KeyCode::F(5), KeyModifiers::empty()), "f5");
+        assert_eq!(format_key(KeyCode::Esc, KeyModifiers::empty()), "esc");
+        assert_eq!(format_key(KeyCode::Char('a'), KeyModifiers::ALT), "alt+a");
+    }
+
+    #[test]
+    fn test_keybinding_is_leader_key() {
+        use crossterm::event::KeyCode;
+        let default_config = KeybindingConfig::default();
+        assert!(default_config.is_leader_key(KeyCode::Char(' ')));
+        assert!(!default_config.is_leader_key(KeyCode::Char('a')));
+
+        let backslash_config = KeybindingConfig {
+            leader: Some("Backslash".into()),
+            ..Default::default()
+        };
+        assert!(backslash_config.is_leader_key(KeyCode::Char('\\')));
+        assert!(!backslash_config.is_leader_key(KeyCode::Char(' ')));
+    }
+
+    #[test]
+    fn test_keybinding_global_action() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let mut config = KeybindingConfig::default();
+        config
+            .global_map
+            .insert("ctrl+k".into(), "open_command_palette".into());
+
+        assert_eq!(
+            config.global_action(KeyCode::Char('k'), KeyModifiers::CONTROL),
+            Some("open_command_palette")
+        );
+        assert_eq!(
+            config.global_action(KeyCode::Char('z'), KeyModifiers::CONTROL),
+            None
+        );
+    }
+
+    #[test]
+    fn test_keybinding_leader_action() {
+        let mut config = KeybindingConfig::default();
+        config
+            .leader_map
+            .insert("x".into(), "open_git_graph".into());
+
+        assert_eq!(config.leader_action('x'), Some("open_git_graph"));
+        assert_eq!(config.leader_action('y'), None);
+    }
 }
