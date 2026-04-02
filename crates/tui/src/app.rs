@@ -6914,6 +6914,10 @@ impl App {
             if let Err(e) = store.add_message(&conv.id, role, content, model) {
                 tracing::warn!("Failed to persist Claude Code message: {e}");
             } else {
+                // Update git_commit to current HEAD so the graph links to the latest commit.
+                if let Some(ref c) = commit {
+                    let _ = store.update_git_commit(&conv.id, c);
+                }
                 needs_refresh = true;
             }
         }

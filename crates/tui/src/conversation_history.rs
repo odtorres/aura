@@ -162,15 +162,16 @@ impl ConversationHistoryPanel {
                             .map(|i| i.intent_text);
                         // Load decision stats.
                         let (accepted, rejected) = store.decision_stats(&conv.id).unwrap_or((0, 0));
-                        // For chat/Claude Code conversations, load first user message as title.
-                        let first_user_message = if intent.is_none()
-                            && (conv.file_path == "__chat__"
-                                || conv.file_path.starts_with("__claude_code__"))
-                        {
-                            store.first_user_message(&conv.id).ok().flatten()
-                        } else {
-                            None
-                        };
+                        // For chat/Claude Code conversations, load user message as title.
+                        let first_user_message =
+                            if intent.is_none() && conv.file_path.starts_with("__claude_code__") {
+                                // For Claude Code: show the latest user message (more relevant).
+                                store.latest_user_message(&conv.id).ok().flatten()
+                            } else if intent.is_none() && conv.file_path == "__chat__" {
+                                store.first_user_message(&conv.id).ok().flatten()
+                            } else {
+                                None
+                            };
                         ConversationEntry {
                             id: conv.id,
                             summary: conv.summary,
