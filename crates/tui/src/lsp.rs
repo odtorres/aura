@@ -223,6 +223,23 @@ pub fn detect_server(extension: &str) -> Option<LspServerConfig> {
             "shellscript",
         ),
         "ex" | "exs" | "heex" | "eex" | "leex" => ("elixir-ls", vec![], "elixir"),
+        "php" => ("intelephense", vec!["--stdio".to_string()], "php"),
+        "lua" => ("lua-language-server", vec![], "lua"),
+        "dart" => ("dart", vec!["language-server".to_string()], "dart"),
+        "swift" => ("sourcekit-lsp", vec![], "swift"),
+        "kt" | "kts" => ("kotlin-language-server", vec![], "kotlin"),
+        "zig" => ("zls", vec![], "zig"),
+        "scala" | "sc" => ("metals", vec![], "scala"),
+        "hs" => (
+            "haskell-language-server-wrapper",
+            vec!["--lsp".to_string()],
+            "haskell",
+        ),
+        "dockerfile" => (
+            "docker-langserver",
+            vec!["--stdio".to_string()],
+            "dockerfile",
+        ),
         _ => return None,
     };
 

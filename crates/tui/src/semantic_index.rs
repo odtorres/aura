@@ -43,7 +43,18 @@ impl SemanticIndexer {
             | Language::Markdown
             | Language::Elixir
             | Language::HEEx
-            | Language::Dotenv => return None,
+            | Language::Dotenv
+            | Language::Php
+            | Language::Sql
+            | Language::Dockerfile
+            | Language::Nginx
+            | Language::Lua
+            | Language::Dart
+            | Language::Swift
+            | Language::Kotlin
+            | Language::Zig
+            | Language::Scala
+            | Language::Haskell => return None,
         };
 
         let mut parser = Parser::new();

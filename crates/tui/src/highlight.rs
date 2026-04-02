@@ -226,6 +226,28 @@ pub enum Language {
     HEEx,
     /// Dotenv (.env) files.
     Dotenv,
+    /// PHP language.
+    Php,
+    /// SQL language.
+    Sql,
+    /// Dockerfile.
+    Dockerfile,
+    /// Nginx config.
+    Nginx,
+    /// Lua language.
+    Lua,
+    /// Dart language.
+    Dart,
+    /// Swift language.
+    Swift,
+    /// Kotlin language.
+    Kotlin,
+    /// Zig language.
+    Zig,
+    /// Scala language.
+    Scala,
+    /// Haskell language.
+    Haskell,
 }
 
 impl Language {
@@ -253,6 +275,17 @@ impl Language {
             "ex" | "exs" => Some(Self::Elixir),
             "heex" | "eex" | "leex" => Some(Self::HEEx),
             "env" => Some(Self::Dotenv),
+            "php" => Some(Self::Php),
+            "sql" => Some(Self::Sql),
+            "dockerfile" => Some(Self::Dockerfile),
+            "lua" => Some(Self::Lua),
+            "dart" => Some(Self::Dart),
+            "swift" => Some(Self::Swift),
+            "kt" | "kts" => Some(Self::Kotlin),
+            "zig" => Some(Self::Zig),
+            "scala" | "sc" => Some(Self::Scala),
+            "hs" => Some(Self::Haskell),
+            "conf" => Some(Self::Nginx),
             _ => None,
         }
     }
@@ -262,7 +295,7 @@ impl Language {
         match name {
             ".env" | ".env.local" | ".env.development" | ".env.production" | ".env.test"
             | ".env.staging" | ".env.example" => Some(Self::Dotenv),
-            "Dockerfile" => Some(Self::Bash), // Close enough for highlighting
+            "Dockerfile" | "Dockerfile.dev" | "Dockerfile.prod" => Some(Self::Dockerfile),
             "Makefile" | "makefile" => Some(Self::Bash),
             _ => None,
         }
@@ -295,8 +328,16 @@ impl SyntaxHighlighter {
     pub fn new(language: Language) -> Option<Self> {
         // Markdown uses a pure regex-based highlighter — tree-sitter-md's block
         // grammar doesn't work with HighlightConfiguration for inline syntax.
-        // Markdown and Dotenv use pure regex-based highlighting (no tree-sitter).
-        if language == Language::Markdown || language == Language::Dotenv {
+        // These languages use pure regex-based or no highlighting (no compatible tree-sitter grammar).
+        if matches!(
+            language,
+            Language::Markdown
+                | Language::Dotenv
+                | Language::Sql
+                | Language::Dockerfile
+                | Language::Nginx
+                | Language::Kotlin
+        ) {
             return Some(Self {
                 language,
                 config: None,
@@ -370,7 +411,12 @@ impl SyntaxHighlighter {
                 tree_sitter_yaml::LANGUAGE.into(),
                 tree_sitter_yaml::HIGHLIGHTS_QUERY,
             ),
-            Language::Markdown | Language::Dotenv => unreachable!("handled above"),
+            Language::Markdown
+            | Language::Dotenv
+            | Language::Sql
+            | Language::Dockerfile
+            | Language::Nginx
+            | Language::Kotlin => unreachable!("handled above"),
             Language::Elixir => (
                 tree_sitter_elixir::LANGUAGE.into(),
                 tree_sitter_elixir::HIGHLIGHTS_QUERY,
@@ -378,6 +424,34 @@ impl SyntaxHighlighter {
             Language::HEEx => (
                 tree_sitter_heex::LANGUAGE.into(),
                 tree_sitter_heex::HIGHLIGHTS_QUERY,
+            ),
+            Language::Php => (
+                tree_sitter_php::LANGUAGE_PHP.into(),
+                tree_sitter_php::HIGHLIGHTS_QUERY,
+            ),
+            Language::Lua => (
+                tree_sitter_lua::LANGUAGE.into(),
+                tree_sitter_lua::HIGHLIGHTS_QUERY,
+            ),
+            Language::Dart => (
+                tree_sitter_dart::LANGUAGE.into(),
+                tree_sitter_dart::HIGHLIGHTS_QUERY,
+            ),
+            Language::Swift => (
+                tree_sitter_swift::LANGUAGE.into(),
+                tree_sitter_swift::HIGHLIGHTS_QUERY,
+            ),
+            Language::Zig => (
+                tree_sitter_zig::LANGUAGE.into(),
+                tree_sitter_zig::HIGHLIGHTS_QUERY,
+            ),
+            Language::Scala => (
+                tree_sitter_scala::LANGUAGE.into(),
+                tree_sitter_scala::HIGHLIGHTS_QUERY,
+            ),
+            Language::Haskell => (
+                tree_sitter_haskell::LANGUAGE.into(),
+                tree_sitter_haskell::HIGHLIGHTS_QUERY,
             ),
         };
 

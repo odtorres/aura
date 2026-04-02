@@ -3,7 +3,7 @@ members = ["crates/core", "crates/tui", "crates/ai", "crates/editor", "crates/br
 resolver = "2"
 
 [workspace.package]
-version = "0.1.69"
+version = "0.1.70"
 edition = "2021"
 license = "MIT"
 rust-version = "1.75"
@@ -56,6 +56,17 @@ tree-sitter-yaml = "0.7"
 tree-sitter-md = "0.5"
 tree-sitter-elixir = "0.3"
 tree-sitter-heex = "0.8"
+tree-sitter-php = "0.24"
+tree-sitter-sql = "0.0.2"
+tree-sitter-dockerfile = "0.2"
+tree-sitter-nginx = "1.0"
+tree-sitter-lua = "0.5"
+tree-sitter-dart = "0.1"
+tree-sitter-swift = "0.7"
+tree-sitter-kotlin = "0.3"
+tree-sitter-zig = "1.1"
+tree-sitter-scala = "0.25"
+tree-sitter-haskell = "0.23"
 
 # Plugin runtime
 mlua = { version = "0.10", features = ["lua54", "vendored", "send"] }

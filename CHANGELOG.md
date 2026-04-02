@@ -5,6 +5,25 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.70] - 2026-04-02
+
+### Added
+
+- **11 new languages** — Syntax highlighting, LSP auto-detection, and code snippets for:
+  - **PHP** — tree-sitter + intelephense LSP + 5 snippets
+  - **SQL** — extension detection + 5 snippets (select, insert, update, create table, join)
+  - **Dockerfile** — tree-sitter + docker-langserver LSP + filename detection
+  - **Nginx** — tree-sitter for .conf files
+  - **Lua** — tree-sitter + lua-language-server LSP + 5 snippets
+  - **Dart/Flutter** — tree-sitter + dart LSP + 5 snippets (StatelessWidget, StatefulWidget)
+  - **Swift** — tree-sitter + sourcekit-lsp LSP + 5 snippets (guard, struct)
+  - **Kotlin** — extension detection + kotlin-language-server LSP + 5 snippets (data class, when)
+  - **Zig** — tree-sitter + zls LSP + 5 snippets
+  - **Scala** — tree-sitter + metals LSP + 6 snippets (case class, trait, object, match)
+  - **Haskell** — tree-sitter + haskell-language-server LSP + 5 snippets (data, class, instance)
+- **Task runner** for Dart (pub), Zig (zig build), Scala (sbt), Haskell (cabal/stack)
+- Total language count: **30** (up from 19)
+
 ## [0.1.69] - 2026-04-02
 
 ### Fixed

@@ -443,6 +443,265 @@ impl SnippetEngine {
             "Assign to socket",
         );
 
+        // PHP
+        self.add(
+            Some("php"),
+            "fn",
+            "function ${1:name}(${2}) {\n    $0\n}",
+            "Function",
+        );
+        self.add(
+            Some("php"),
+            "class",
+            "class ${1:Name} {\n    $0\n}",
+            "Class",
+        );
+        self.add(Some("php"), "if", "if (${1:condition}) {\n    $0\n}", "If");
+        self.add(
+            Some("php"),
+            "for",
+            "foreach (${1:\\$items} as ${2:\\$item}) {\n    $0\n}",
+            "Foreach",
+        );
+        self.add(
+            Some("php"),
+            "try",
+            "try {\n    $0\n} catch (\\Exception \\$e) {\n    \n}",
+            "Try/catch",
+        );
+
+        // Lua
+        self.add(
+            Some("lua"),
+            "fn",
+            "function ${1:name}(${2})\n    $0\nend",
+            "Function",
+        );
+        self.add(
+            Some("lua"),
+            "lfn",
+            "local function ${1:name}(${2})\n    $0\nend",
+            "Local function",
+        );
+        self.add(
+            Some("lua"),
+            "if",
+            "if ${1:condition} then\n    $0\nend",
+            "If",
+        );
+        self.add(
+            Some("lua"),
+            "for",
+            "for ${1:i} = 1, ${2:n} do\n    $0\nend",
+            "For",
+        );
+        self.add(
+            Some("lua"),
+            "while",
+            "while ${1:condition} do\n    $0\nend",
+            "While",
+        );
+
+        // Dart
+        self.add(
+            Some("dart"),
+            "fn",
+            "void ${1:name}(${2}) {\n  $0\n}",
+            "Function",
+        );
+        self.add(Some("dart"), "class", "class ${1:Name} {\n  $0\n}", "Class");
+        self.add(Some("dart"), "stw", "class ${1:Name} extends StatelessWidget {\n  const ${1:Name}({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return $0;\n  }\n}", "StatelessWidget");
+        self.add(Some("dart"), "stfw", "class ${1:Name} extends StatefulWidget {\n  const ${1:Name}({super.key});\n\n  @override\n  State<${1:Name}> createState() => _${1:Name}State();\n}\n\nclass _${1:Name}State extends State<${1:Name}> {\n  @override\n  Widget build(BuildContext context) {\n    return $0;\n  }\n}", "StatefulWidget");
+        self.add(Some("dart"), "if", "if (${1:condition}) {\n  $0\n}", "If");
+
+        // Swift
+        self.add(
+            Some("swift"),
+            "fn",
+            "func ${1:name}(${2}) -> ${3:Void} {\n    $0\n}",
+            "Function",
+        );
+        self.add(
+            Some("swift"),
+            "struct",
+            "struct ${1:Name} {\n    $0\n}",
+            "Struct",
+        );
+        self.add(
+            Some("swift"),
+            "class",
+            "class ${1:Name} {\n    $0\n}",
+            "Class",
+        );
+        self.add(
+            Some("swift"),
+            "guard",
+            "guard ${1:condition} else {\n    $0\n    return\n}",
+            "Guard",
+        );
+        self.add(
+            Some("swift"),
+            "if",
+            "if ${1:condition} {\n    $0\n}",
+            "If let",
+        );
+
+        // Kotlin
+        self.add(
+            Some("kotlin"),
+            "fn",
+            "fun ${1:name}(${2}): ${3:Unit} {\n    $0\n}",
+            "Function",
+        );
+        self.add(
+            Some("kotlin"),
+            "class",
+            "class ${1:Name} {\n    $0\n}",
+            "Class",
+        );
+        self.add(
+            Some("kotlin"),
+            "data",
+            "data class ${1:Name}(\n    val ${2:field}: ${3:Type}\n)",
+            "Data class",
+        );
+        self.add(
+            Some("kotlin"),
+            "if",
+            "if (${1:condition}) {\n    $0\n}",
+            "If",
+        );
+        self.add(
+            Some("kotlin"),
+            "when",
+            "when (${1:expr}) {\n    ${2:value} -> $0\n}",
+            "When",
+        );
+
+        // Zig
+        self.add(
+            Some("zig"),
+            "fn",
+            "fn ${1:name}(${2}) ${3:void} {\n    $0\n}",
+            "Function",
+        );
+        self.add(
+            Some("zig"),
+            "pub",
+            "pub fn ${1:name}(${2}) ${3:void} {\n    $0\n}",
+            "Public function",
+        );
+        self.add(
+            Some("zig"),
+            "test",
+            "test \"${1:description}\" {\n    $0\n}",
+            "Test",
+        );
+        self.add(
+            Some("zig"),
+            "struct",
+            "const ${1:Name} = struct {\n    $0\n};",
+            "Struct",
+        );
+        self.add(Some("zig"), "if", "if (${1:condition}) {\n    $0\n}", "If");
+
+        // Scala
+        self.add(
+            Some("scala"),
+            "def",
+            "def ${1:name}(${2}): ${3:Unit} = {\n  $0\n}",
+            "Method",
+        );
+        self.add(
+            Some("scala"),
+            "class",
+            "class ${1:Name}(${2}) {\n  $0\n}",
+            "Class",
+        );
+        self.add(
+            Some("scala"),
+            "case",
+            "case class ${1:Name}(${2:field}: ${3:Type})",
+            "Case class",
+        );
+        self.add(
+            Some("scala"),
+            "object",
+            "object ${1:Name} {\n  $0\n}",
+            "Object",
+        );
+        self.add(
+            Some("scala"),
+            "trait",
+            "trait ${1:Name} {\n  $0\n}",
+            "Trait",
+        );
+        self.add(
+            Some("scala"),
+            "match",
+            "match ${1:expr} {\n  case ${2:pattern} => $0\n}",
+            "Match",
+        );
+
+        // Haskell
+        self.add(
+            Some("haskell"),
+            "fn",
+            "${1:name} :: ${2:Type}\n${1:name} ${3} = $0",
+            "Function",
+        );
+        self.add(
+            Some("haskell"),
+            "data",
+            "data ${1:Name} = ${2:Constructor} $0",
+            "Data type",
+        );
+        self.add(
+            Some("haskell"),
+            "class",
+            "class ${1:Name} a where\n  $0",
+            "Type class",
+        );
+        self.add(
+            Some("haskell"),
+            "instance",
+            "instance ${1:Class} ${2:Type} where\n  $0",
+            "Instance",
+        );
+        self.add(
+            Some("haskell"),
+            "module",
+            "module ${1:Name} where\n\n$0",
+            "Module",
+        );
+
+        // SQL
+        self.add(
+            Some("sql"),
+            "sel",
+            "SELECT ${1:*}\nFROM ${2:table}\nWHERE ${3:condition};",
+            "Select",
+        );
+        self.add(
+            Some("sql"),
+            "ins",
+            "INSERT INTO ${1:table} (${2:columns})\nVALUES (${3:values});",
+            "Insert",
+        );
+        self.add(
+            Some("sql"),
+            "upd",
+            "UPDATE ${1:table}\nSET ${2:column} = ${3:value}\nWHERE ${4:condition};",
+            "Update",
+        );
+        self.add(
+            Some("sql"),
+            "crt",
+            "CREATE TABLE ${1:name} (\n  ${2:id} SERIAL PRIMARY KEY,\n  $0\n);",
+            "Create table",
+        );
+        self.add(Some("sql"), "join", "SELECT ${1:*}\nFROM ${2:table1} t1\nJOIN ${3:table2} t2 ON t1.${4:id} = t2.${5:id}\nWHERE $0;", "Join");
+
         // Generic (all languages)
         self.add(None, "todo", "// TODO: $0", "TODO comment");
         self.add(None, "fixme", "// FIXME: $0", "FIXME comment");

@@ -2457,6 +2457,112 @@ impl App {
                     description: "Start Phoenix server".into(),
                 },
             );
+        } else if root.join("pubspec.yaml").exists() {
+            // Dart / Flutter
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "dart compile exe lib/main.dart".into(),
+                    description: "Compile Dart".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "dart test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "fmt".into(),
+                TaskConfig {
+                    command: "dart format .".into(),
+                    description: "Format code".into(),
+                },
+            );
+            tasks.insert(
+                "deps".into(),
+                TaskConfig {
+                    command: "dart pub get".into(),
+                    description: "Fetch dependencies".into(),
+                },
+            );
+            if root.join("lib").join("main.dart").exists() {
+                tasks.insert(
+                    "run".into(),
+                    TaskConfig {
+                        command: "flutter run".into(),
+                        description: "Run Flutter app".into(),
+                    },
+                );
+            }
+        } else if root.join("build.zig").exists() {
+            // Zig
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "zig build".into(),
+                    description: "Build the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "zig build test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+        } else if root.join("build.sbt").exists() {
+            // Scala / sbt
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: "sbt compile".into(),
+                    description: "Compile the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: "sbt test".into(),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "run".into(),
+                TaskConfig {
+                    command: "sbt run".into(),
+                    description: "Run the project".into(),
+                },
+            );
+        } else if root.join("stack.yaml").exists() || root.join("cabal.project").exists() {
+            // Haskell
+            let tool = if root.join("stack.yaml").exists() {
+                "stack"
+            } else {
+                "cabal"
+            };
+            tasks.insert(
+                "build".into(),
+                TaskConfig {
+                    command: format!("{tool} build"),
+                    description: "Build the project".into(),
+                },
+            );
+            tasks.insert(
+                "test".into(),
+                TaskConfig {
+                    command: format!("{tool} test"),
+                    description: "Run tests".into(),
+                },
+            );
+            tasks.insert(
+                "run".into(),
+                TaskConfig {
+                    command: format!("{tool} run"),
+                    description: "Run the project".into(),
+                },
+            );
         } else if root.join("requirements.txt").exists() || root.join("pyproject.toml").exists() {
             tasks.insert(
                 "test".into(),
@@ -5114,6 +5220,16 @@ impl App {
                     "Go"
                 } else if dir.join("mix.exs").exists() {
                     "Elixir"
+                } else if dir.join("pubspec.yaml").exists() {
+                    "Dart/Flutter"
+                } else if dir.join("build.zig").exists() {
+                    "Zig"
+                } else if dir.join("build.sbt").exists() {
+                    "Scala"
+                } else if dir.join("stack.yaml").exists() || dir.join("cabal.project").exists() {
+                    "Haskell"
+                } else if dir.join("composer.json").exists() {
+                    "PHP"
                 } else if dir.join("pyproject.toml").exists() || dir.join("setup.py").exists() {
                     "Python"
                 } else {

@@ -81,9 +81,9 @@ LSP data enriches AI context:
 
 ### Syntax Highlighting (Tree-sitter)
 
-AURA ships with tree-sitter grammars for **19 languages**:
+AURA ships with tree-sitter grammars for **30 languages**:
 
-Rust, Python, TypeScript, TSX, Go, JavaScript, JSX, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown, Elixir, HEEx
+Rust, Python, TypeScript, TSX, Go, JavaScript, JSX, Java, C, C++, Ruby, HTML, CSS, JSON, Bash/Shell, TOML, YAML, Markdown, Elixir, HEEx, PHP, SQL, Dockerfile, Nginx, Lua, Dart, Swift, Kotlin, Zig, Scala, Haskell
 
 **React/Next.js**: `.jsx` uses the TSX grammar for proper JSX highlighting. `.mjs`, `.cjs`, `.mts` supported for ES modules and CommonJS.
 
@@ -102,5 +102,14 @@ AURA auto-detects these language servers when they're installed:
 | Ruby | `solargraph` | `gem install solargraph` |
 | Bash/Shell | `bash-language-server` | `npm install -g bash-language-server` |
 | Elixir/HEEx | `elixir-ls` | [ElixirLS releases](https://github.com/elixir-lsp/elixir-ls/releases) |
+| PHP | `intelephense` | `npm install -g intelephense` |
+| Lua | `lua-language-server` | [LuaLS releases](https://github.com/LuaLS/lua-language-server/releases) |
+| Dart | `dart language-server` | Included with Dart SDK |
+| Swift | `sourcekit-lsp` | Included with Xcode / Swift toolchain |
+| Kotlin | `kotlin-language-server` | [KotlinLS releases](https://github.com/fwcd/kotlin-language-server/releases) |
+| Zig | `zls` | [ZLS releases](https://github.com/zigtools/zls/releases) |
+| Scala | `metals` | [Metals](https://scalameta.org/metals/) |
+| Haskell | `haskell-language-server` | [HLS releases](https://github.com/haskell/haskell-language-server/releases) |
+| Dockerfile | `docker-langserver` | `npm install -g dockerfile-language-server-nodejs` |
 
 The LSP client works with any language server that implements the Language Server Protocol.
