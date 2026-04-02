@@ -1327,12 +1327,26 @@ impl App {
             .tabs
             .tabs()
             .iter()
-            .map(|tab| TabState {
-                file_path: tab.buffer.file_path().map(|p| p.to_path_buf()),
-                cursor_row: tab.cursor.row,
-                cursor_col: tab.cursor.col,
-                scroll_row: tab.scroll_row,
-                scroll_col: tab.scroll_col,
+            .map(|tab| {
+                let marks = tab
+                    .marks
+                    .iter()
+                    .map(|(&c, cur)| (c, (cur.row, cur.col)))
+                    .collect();
+                let folded_ranges = tab
+                    .folded_ranges
+                    .iter()
+                    .map(|(&start, &end)| (start, end))
+                    .collect();
+                TabState {
+                    file_path: tab.buffer.file_path().map(|p| p.to_path_buf()),
+                    cursor_row: tab.cursor.row,
+                    cursor_col: tab.cursor.col,
+                    scroll_row: tab.scroll_row,
+                    scroll_col: tab.scroll_col,
+                    marks,
+                    folded_ranges,
+                }
             })
             .collect();
 
@@ -1340,6 +1354,16 @@ impl App {
             SidebarView::Files => "files",
             SidebarView::Git => "git",
         };
+
+        // Serialize macro registers.
+        let macro_registers: std::collections::HashMap<char, Vec<String>> = self
+            .macro_registers
+            .iter()
+            .map(|(&c, keys)| {
+                let strs = keys.iter().map(session::format_key_event).collect();
+                (c, strs)
+            })
+            .collect();
 
         let session = Session {
             working_directory: root.clone(),
@@ -1350,6 +1374,31 @@ impl App {
                 chat_panel_visible: self.chat_panel.visible,
                 terminal_visible: self.terminal().visible,
                 sidebar_view: sidebar_view.into(),
+                file_tree_width: Some(self.file_tree.width),
+                chat_panel_width: Some(self.chat_panel.width),
+                terminal_height: Some(self.terminal().height),
+                conversation_history_width: Some(self.conversation_history.width),
+                conversation_history_visible: self.conversation_history.visible,
+                ai_visor_visible: self.ai_visor.visible,
+                debug_panel_visible: self.debug_panel.visible,
+                split_active: self.split_active,
+                split_direction: if self.split_active {
+                    Some(
+                        match self.split_direction {
+                            crate::app::SplitDirection::Vertical => "vertical",
+                            crate::app::SplitDirection::Horizontal => "horizontal",
+                        }
+                        .into(),
+                    )
+                } else {
+                    None
+                },
+                split_tab_idx: if self.split_active {
+                    Some(self.split_tab_idx)
+                } else {
+                    None
+                },
+                macro_registers,
             },
         };
 
@@ -1411,6 +1460,19 @@ impl App {
             tab.scroll_row = tab_state.scroll_row.min(max_row);
             tab.scroll_col = tab_state.scroll_col;
 
+            // Restore marks.
+            for (&c, &(row, col)) in &tab_state.marks {
+                tab.marks
+                    .insert(c, aura_core::Cursor::new(row.min(max_row), col));
+            }
+
+            // Restore folded ranges.
+            for &(start, end) in &tab_state.folded_ranges {
+                if start < tab.buffer.line_count() && end <= tab.buffer.line_count() {
+                    tab.folded_ranges.insert(start, end);
+                }
+            }
+
             if !opened {
                 // Replace the initial scratch tab with the first restored tab.
                 self.tabs = TabManager::new(tab);
@@ -1436,6 +1498,51 @@ impl App {
             "git" => SidebarView::Git,
             _ => SidebarView::Files,
         };
+
+        // Restore panel sizes.
+        if let Some(w) = session.ui.file_tree_width {
+            self.file_tree.width = w.max(15);
+        }
+        if let Some(w) = session.ui.chat_panel_width {
+            self.chat_panel.width = w.max(20);
+        }
+        if let Some(h) = session.ui.terminal_height {
+            self.terminal_mut().height = h.clamp(3, 50);
+        }
+        if let Some(w) = session.ui.conversation_history_width {
+            self.conversation_history.width = w.max(20);
+        }
+
+        // Restore additional panel visibility.
+        self.conversation_history.visible = session.ui.conversation_history_visible;
+        self.ai_visor.visible = session.ui.ai_visor_visible;
+        self.debug_panel.visible = session.ui.debug_panel_visible;
+
+        // Restore split pane layout.
+        if session.ui.split_active {
+            if let Some(idx) = session.ui.split_tab_idx {
+                if idx < self.tabs.count() {
+                    self.split_active = true;
+                    self.split_tab_idx = idx;
+                    self.split_direction =
+                        match session.ui.split_direction.as_deref().unwrap_or("vertical") {
+                            "horizontal" => SplitDirection::Horizontal,
+                            _ => SplitDirection::Vertical,
+                        };
+                }
+            }
+        }
+
+        // Restore macro registers.
+        for (c, key_strs) in &session.ui.macro_registers {
+            let keys: Vec<crossterm::event::KeyEvent> = key_strs
+                .iter()
+                .filter_map(|s| session::parse_key_event(s))
+                .collect();
+            if !keys.is_empty() {
+                self.macro_registers.insert(*c, keys);
+            }
+        }
 
         self.set_status(format!(
             "Session restored ({} tab{})",
