@@ -298,6 +298,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_hover_popup(frame, app, editor_inner_for_popups, &hover_text);
         }
 
+        // Render diagnostic popup when cursor is on a diagnostic line.
+        if app.tab().hover_info.is_none()
+            && app.peek_definition.is_none()
+            && app.current_ghost_suggestion().is_none()
+        {
+            let cursor_row = app.cursor().row;
+            let diag_clone = app.line_diagnostics(cursor_row).cloned();
+            if let Some(ref diag) = diag_clone {
+                draw_diagnostic_popup(frame, app, editor_inner_for_popups, diag);
+            }
+        }
+
         // Render references panel if present.
         if app.references_panel.is_some() {
             draw_references_panel(frame, app, area);
@@ -6213,6 +6225,75 @@ fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str)
     let paragraph = Paragraph::new(hover_lines)
         .block(block)
         .style(Style::default().fg(Color::White).bg(Color::Black));
+    frame.render_widget(paragraph, popup_area);
+}
+
+/// Draw a diagnostic popup showing the error/warning message at the cursor line.
+fn draw_diagnostic_popup(
+    frame: &mut Frame,
+    app: &App,
+    editor_area: Rect,
+    diag: &crate::lsp::Diagnostic,
+) {
+    let severity = if diag.is_error() {
+        "Error"
+    } else if diag.is_warning() {
+        "Warning"
+    } else {
+        "Info"
+    };
+    let source = diag
+        .source
+        .as_deref()
+        .map(|s| format!(" ({s})"))
+        .unwrap_or_default();
+    let title = format!(" {severity}{source} ");
+
+    let lines: Vec<&str> = diag.message.lines().take(8).collect();
+    let height = (lines.len() as u16 + 2).min(editor_area.height / 3);
+    let max_width = lines
+        .iter()
+        .map(|l| l.len() as u16)
+        .max()
+        .unwrap_or(20)
+        .clamp(20, editor_area.width.saturating_sub(10));
+    let width = (max_width + 4).min(editor_area.width);
+
+    // Position below the cursor line.
+    let cursor_y =
+        (app.cursor().row.saturating_sub(app.tab().scroll_row)) as u16 + editor_area.y + 1;
+    let cursor_x =
+        (app.cursor().col.saturating_sub(app.tab().scroll_col)) as u16 + editor_area.x + 6;
+
+    let x = cursor_x.min(editor_area.right().saturating_sub(width));
+    let y = if cursor_y + 1 + height < editor_area.bottom() {
+        cursor_y + 1
+    } else {
+        cursor_y.saturating_sub(height + 1)
+    };
+
+    let popup_area = Rect::new(x, y, width, height);
+    frame.render_widget(Clear, popup_area);
+
+    let border_color = if diag.is_error() {
+        app.theme.error
+    } else if diag.is_warning() {
+        app.theme.warning
+    } else {
+        app.theme.info
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(border_color));
+
+    let diag_lines: Vec<Line> = lines.iter().map(|l| Line::from(l.to_string())).collect();
+
+    let paragraph = Paragraph::new(diag_lines)
+        .block(block)
+        .style(Style::default().fg(Color::White).bg(Color::Black))
+        .wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(paragraph, popup_area);
 }
 
