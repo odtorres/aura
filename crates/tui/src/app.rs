@@ -116,6 +116,17 @@ pub enum FindCharMode {
     BackwardTill,
 }
 
+/// Which panel border is being resized by mouse drag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PanelResizeDrag {
+    /// Left sidebar right border (dragging changes sidebar width).
+    LeftSidebar,
+    /// Right panel left border (dragging changes chat/history/visor width).
+    RightPanel,
+    /// Terminal top border (dragging changes terminal height).
+    Terminal,
+}
+
 /// The editing mode — vim-inspired but simplified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -557,6 +568,10 @@ pub struct App {
     /// Cached debug panel rect from the last render frame.
     pub debug_panel_rect: ratatui::layout::Rect,
 
+    // --- Panel resize drag ---
+    /// Which panel border is being dragged (if any).
+    panel_resize_drag: Option<PanelResizeDrag>,
+
     // --- Bracket matching ---
     /// Position (row, col) of the matching bracket for the char under cursor.
     pub matching_bracket: Option<(usize, usize)>,
@@ -933,6 +948,7 @@ impl App {
             debug_panel: crate::debug_panel::DebugPanel::new(),
             debug_panel_focused: false,
             debug_panel_rect: Rect::default(),
+            panel_resize_drag: None,
             matching_bracket: None,
             search_query: None,
             search_input: String::new(),
@@ -1220,12 +1236,23 @@ impl App {
                     Event::Key(key) => self.handle_key(key.code, key.modifiers),
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left) => {
-                            self.handle_mouse_click(mouse.column, mouse.row);
+                            // Check if click is on a panel border for resizing.
+                            if let Some(drag) = self.detect_panel_border(mouse.column, mouse.row) {
+                                self.panel_resize_drag = Some(drag);
+                            } else {
+                                self.panel_resize_drag = None;
+                                self.handle_mouse_click(mouse.column, mouse.row);
+                            }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            self.handle_mouse_drag(mouse.column, mouse.row);
+                            if let Some(drag) = self.panel_resize_drag {
+                                self.apply_panel_resize(drag, mouse.column, mouse.row);
+                            } else {
+                                self.handle_mouse_drag(mouse.column, mouse.row);
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
+                            self.panel_resize_drag = None;
                             // Clear the drag anchor if no selection was made.
                             if !matches!(
                                 self.mode,
@@ -5924,6 +5951,87 @@ impl App {
         if click == changed_header_y {
             self.source_control.focused_section = GitPanelSection::ChangedFiles;
             self.source_control.selected = 0;
+        }
+    }
+
+    /// Detect if a mouse click is on a panel border (for resize dragging).
+    ///
+    /// Returns the drag type if the click is within 1 pixel of a border.
+    fn detect_panel_border(&self, col: u16, row: u16) -> Option<PanelResizeDrag> {
+        // Left sidebar right border.
+        if self.file_tree.visible && self.file_tree_rect.width > 0 {
+            let border_x = self.file_tree_rect.x + self.file_tree_rect.width;
+            if col == border_x || col == border_x.saturating_sub(1) {
+                return Some(PanelResizeDrag::LeftSidebar);
+            }
+        }
+
+        // Right panel left border (chat, history, visor).
+        let right_rect = if self.chat_panel.visible {
+            self.chat_panel_rect
+        } else if self.conversation_history.visible {
+            self.conv_history_rect
+        } else {
+            Rect::default()
+        };
+        if right_rect.width > 0 {
+            let border_x = right_rect.x;
+            if col == border_x || col == border_x.saturating_add(1) {
+                return Some(PanelResizeDrag::RightPanel);
+            }
+        }
+
+        // Terminal top border.
+        if self.terminal().visible && self.terminal_rect.height > 0 {
+            let border_y = self.terminal_rect.y;
+            if row == border_y || row == border_y.saturating_sub(1) {
+                // Only if within the horizontal range.
+                if col >= self.terminal_rect.x
+                    && col < self.terminal_rect.x + self.terminal_rect.width
+                {
+                    return Some(PanelResizeDrag::Terminal);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Apply a panel resize based on mouse drag position.
+    fn apply_panel_resize(&mut self, drag: PanelResizeDrag, col: u16, _row: u16) {
+        match drag {
+            PanelResizeDrag::LeftSidebar => {
+                // New width = mouse column position (min 15, max half of screen).
+                let max_w = (self.editor_rect.x + self.editor_rect.width) / 2;
+                let new_width = col.max(15).min(max_w.max(15));
+                self.file_tree.width = new_width;
+            }
+            PanelResizeDrag::RightPanel => {
+                // New width = distance from mouse to right edge.
+                let total = self.editor_rect.x + self.editor_rect.width;
+                let right_rect = if self.chat_panel.visible {
+                    self.chat_panel_rect
+                } else if self.conversation_history.visible {
+                    self.conv_history_rect
+                } else {
+                    return;
+                };
+                let right_edge = right_rect.x + right_rect.width;
+                let new_width = right_edge.saturating_sub(col).max(20).min(total / 2);
+                if self.chat_panel.visible {
+                    self.chat_panel.width = new_width;
+                } else if self.conversation_history.visible {
+                    self.conversation_history.width = new_width;
+                } else if self.ai_visor.visible {
+                    self.ai_visor.width = new_width;
+                }
+            }
+            PanelResizeDrag::Terminal => {
+                // New height = distance from mouse to bottom (minus status/command bars).
+                let total_h = self.terminal_rect.y + self.terminal_rect.height;
+                let new_height = total_h.saturating_sub(_row).clamp(3, 50);
+                self.terminal_mut().height = new_height;
+            }
         }
     }
 
