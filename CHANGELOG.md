@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.69] - 2026-04-02
+
+### Fixed
+
+- **Code robustness** — Replaced all 23 production `unwrap()` calls with safe alternatives:
+  - Mutex locks → `.expect()` with descriptive messages (embedded_terminal, collab, mcp_server)
+  - Network byte parsing → proper error handling instead of panic on malformed data (collab)
+  - AI client access → graceful error message when API key not configured
+  - Peer/LSP access → `if-let` guards instead of `.unwrap()`
+  - Float sorting → NaN-safe comparison (speculative engine)
+
 ## [0.1.68] - 2026-04-01
 
 ### Added
