@@ -5,6 +5,19 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.66] - 2026-04-01
+
+### Added
+
+- **Mouse drag panel resizing** — Drag borders between panels to resize: left sidebar, right panel (chat/history/visor), and terminal pane
+- **Configurable keybinding system** — Remap global shortcuts and leader key sequences via `aura.toml` with 24 named actions. Configurable leader key (Space, Backslash, Comma)
+- **Ctrl+G shortcut** for AI commit message generation in the git panel
+
+### Fixed
+
+- **Crash on narrow terminal** — Buffer index out-of-bounds in edit predictions and peer cursors when the editor area was very small
+- **Delete key** (forward delete) now works in Insert mode
+
 ## [0.1.65] - 2026-04-01
 
 ### Fixed
