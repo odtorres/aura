@@ -5,6 +5,17 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.72] - 2026-04-02
+
+### Added
+
+- **More test coverage** — 9 new tests (178 total):
+  - `delimiter_pair()` character pair matching (input.rs)
+  - `execute_action()` dispatcher: all 21 known actions return true, unknown returns false, intent sets mode
+  - `extract_file_id()` with valid, short, and empty payloads (collab.rs)
+  - `file_id_from_path()` determinism test
+  - `prepend_file_id` / `extract_file_id` round-trip
+
 ## [0.1.71] - 2026-04-02
 
 ### Added

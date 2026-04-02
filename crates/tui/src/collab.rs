@@ -1611,4 +1611,52 @@ mod tests {
         client.shutdown();
         session.shutdown();
     }
+
+    #[test]
+    fn test_extract_file_id_valid() {
+        let payload = prepend_file_id(12345, b"hello");
+        let (file_id, data) = extract_file_id(&payload);
+        assert_eq!(file_id, 12345);
+        assert_eq!(data, b"hello");
+    }
+
+    #[test]
+    fn test_extract_file_id_short_payload() {
+        // Payloads shorter than 8 bytes should fall back to file_id=0.
+        let (file_id, data) = extract_file_id(b"short");
+        assert_eq!(file_id, 0);
+        assert_eq!(data, b"short");
+    }
+
+    #[test]
+    fn test_extract_file_id_empty() {
+        let (file_id, data) = extract_file_id(b"");
+        assert_eq!(file_id, 0);
+        assert!(data.is_empty());
+    }
+
+    #[test]
+    fn test_file_id_from_path_deterministic() {
+        let path1 = std::path::Path::new("/home/user/project/src/main.rs");
+        let id1 = file_id_from_path(path1);
+        let id2 = file_id_from_path(path1);
+        assert_eq!(id1, id2, "Same path should produce same file_id");
+
+        let path2 = std::path::Path::new("/home/user/project/src/lib.rs");
+        let id3 = file_id_from_path(path2);
+        assert_ne!(
+            id1, id3,
+            "Different paths should produce different file_ids"
+        );
+    }
+
+    #[test]
+    fn test_prepend_extract_roundtrip() {
+        let original_data = b"test payload data";
+        let file_id: u64 = 9999;
+        let payload = prepend_file_id(file_id, original_data);
+        let (extracted_id, extracted_data) = extract_file_id(&payload);
+        assert_eq!(extracted_id, file_id);
+        assert_eq!(extracted_data, original_data);
+    }
 }

@@ -4194,3 +4194,76 @@ fn execute_find_char(app: &mut App, mode: FindCharMode, ch: char) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_delimiter_pair() {
+        assert_eq!(delimiter_pair('('), ('(', ')'));
+        assert_eq!(delimiter_pair(')'), ('(', ')'));
+        assert_eq!(delimiter_pair('b'), ('(', ')'));
+        assert_eq!(delimiter_pair('{'), ('{', '}'));
+        assert_eq!(delimiter_pair('}'), ('{', '}'));
+        assert_eq!(delimiter_pair('B'), ('{', '}'));
+        assert_eq!(delimiter_pair('['), ('[', ']'));
+        assert_eq!(delimiter_pair(']'), ('[', ']'));
+        assert_eq!(delimiter_pair('<'), ('<', '>'));
+        assert_eq!(delimiter_pair('>'), ('<', '>'));
+        assert_eq!(delimiter_pair('"'), ('"', '"'));
+        assert_eq!(delimiter_pair('\''), ('\'', '\''));
+        assert_eq!(delimiter_pair('`'), ('`', '`'));
+        // Unknown delimiter maps to itself.
+        assert_eq!(delimiter_pair('x'), ('x', 'x'));
+    }
+
+    #[test]
+    fn test_execute_action_known_actions() {
+        // Test that execute_action returns true for all known action names.
+        let mut app = App::new(aura_core::Buffer::new());
+        let known_actions = vec![
+            "toggle_terminal",
+            "toggle_chat",
+            "toggle_history",
+            "toggle_file_tree",
+            "toggle_git",
+            "open_file_picker",
+            "open_command_palette",
+            "open_git_graph",
+            "open_settings",
+            "open_outline",
+            "open_visor",
+            "open_branch_picker",
+            "project_search",
+            "save",
+            "intent",
+            "toggle_blame",
+            "cycle_aggressiveness",
+            "recent_decisions",
+            "next_tab",
+            "prev_tab",
+            "close_tab",
+        ];
+        for action in &known_actions {
+            let result = execute_action(&mut app, action);
+            assert!(result, "Action '{action}' should be handled");
+        }
+    }
+
+    #[test]
+    fn test_execute_action_unknown() {
+        let mut app = App::new(aura_core::Buffer::new());
+        assert!(!execute_action(&mut app, "nonexistent_action"));
+        assert!(!execute_action(&mut app, ""));
+        assert!(!execute_action(&mut app, "foobar"));
+    }
+
+    #[test]
+    fn test_execute_action_intent_sets_mode() {
+        let mut app = App::new(aura_core::Buffer::new());
+        assert_ne!(app.mode, Mode::Intent);
+        execute_action(&mut app, "intent");
+        assert_eq!(app.mode, Mode::Intent);
+    }
+}
