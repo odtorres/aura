@@ -5,6 +5,29 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-02
+
+### Milestone Release
+
+AURA v0.2.0 represents a major milestone — the editor is now a fully-featured, polished terminal IDE with 30 language support, real-time collaboration, AI co-authoring, and VS Code-level features.
+
+### Highlights Since v0.1.52
+
+- **30 languages** with syntax highlighting, LSP, and snippets (Rust, Python, TypeScript, Go, Java, C/C++, Ruby, Elixir/Phoenix, PHP, SQL, Dockerfile, Nginx, Lua, Dart/Flutter, Swift, Kotlin, Zig, Scala, Haskell, and more)
+- **Inline diagnostic underlines** — red/yellow/cyan underlines on errors/warnings from LSP
+- **Rich Markdown highlighting** — bold, italic, headings, links, code blocks with text modifiers
+- **.env file highlighting** — keys, values, comments, variable references
+- **Merge editor** — synchronized scroll, conflict action bar, syntax highlighting in all panels
+- **Follow mode** in collab — sync viewport to a peer in real-time
+- **Shared terminal** in collab — host shares terminal screen to all peers
+- **Next-edit prediction** — ghost cursors at predicted edit locations
+- **Configurable keybindings** via `aura.toml` (24 named actions)
+- **Mouse drag panel resizing** — drag borders to resize sidebar, chat, terminal
+- **Comprehensive session persistence** — marks, macros, folds, splits, panel sizes
+- **Claude Code conversations** saved to AI History with git graph linking
+- **macOS Cmd+C/V/S** shortcuts
+- **178 tests**, 23 unwrap() safety fixes, cargo fmt enforcement
+
 ## [0.1.73] - 2026-04-02
 
 ### Added
