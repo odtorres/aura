@@ -5,6 +5,13 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-02
+
+### Added
+
+- **Diagnostic popup** — When the cursor is on a line with an LSP error/warning, a floating popup shows the full diagnostic message below the cursor. Red border for errors, yellow for warnings, cyan for info. Shows source (e.g., "Error (typescript)").
+- **LSP setup guide** added to README.md and docs with install commands for all 17 language servers
+
 ## [0.2.0] - 2026-04-02
 
 ### Milestone Release
