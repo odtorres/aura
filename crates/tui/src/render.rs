@@ -5323,6 +5323,38 @@ fn draw_editor(
                     style
                 };
 
+                // Overlay diagnostic underlines (errors = red, warnings = yellow).
+                let style = {
+                    let actual_col = visible_start + col;
+                    let diag = tab.diagnostics.iter().find(|d| {
+                        let dl = d.range.start.line as usize;
+                        let el = d.range.end.line as usize;
+                        let sc = d.range.start.character as usize;
+                        let ec = d.range.end.character as usize;
+                        if line_idx == dl && line_idx == el {
+                            actual_col >= sc && actual_col < ec
+                        } else if line_idx == dl {
+                            actual_col >= sc
+                        } else if line_idx == el {
+                            actual_col < ec
+                        } else {
+                            line_idx > dl && line_idx < el
+                        }
+                    });
+                    if let Some(d) = diag {
+                        let color = if d.is_error() {
+                            app.theme.error
+                        } else if d.is_warning() {
+                            app.theme.warning
+                        } else {
+                            app.theme.info
+                        };
+                        style.add_modifier(Modifier::UNDERLINED).fg(color)
+                    } else {
+                        style
+                    }
+                };
+
                 if current_style != Some(style) {
                     if !current_span.is_empty() {
                         spans.push(Span::styled(
