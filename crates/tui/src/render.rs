@@ -5468,7 +5468,7 @@ fn draw_editor_pane(
 /// Draw remote peer cursors and selections as overlays on the editor.
 fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
     let peers = app.collab_peer_awareness();
-    if peers.is_empty() {
+    if peers.is_empty() || area.width < 8 || area.height == 0 {
         return;
     }
 
@@ -5477,6 +5477,7 @@ fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
     let scroll_row = tab.scroll_row;
     let scroll_col = tab.scroll_col;
     let visible_rows = area.height as usize;
+    let buf_area = frame.area();
     let text_area_x = area.x + gutter_width;
     let text_area_width = area.width.saturating_sub(gutter_width) as usize;
 
@@ -5510,7 +5511,7 @@ fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
 
                 for col in col_start..col_end.min(text_area_width) {
                     let screen_x = text_area_x + col as u16;
-                    if screen_x < area.x + area.width {
+                    if screen_x < buf_area.width && screen_y < buf_area.height {
                         let cell = &mut frame.buffer_mut()[(screen_x, screen_y)];
                         cell.set_bg(color);
                         cell.set_fg(Color::Black);
@@ -5529,7 +5530,7 @@ fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
                 let screen_y = area.y + (row - scroll_row) as u16;
                 let screen_x = text_area_x + (col - scroll_col) as u16;
 
-                if screen_x < area.x + area.width {
+                if screen_x < buf_area.width && screen_y < buf_area.height {
                     let cell = &mut frame.buffer_mut()[(screen_x, screen_y)];
                     cell.set_bg(color);
                     cell.set_fg(Color::Black);
@@ -5543,7 +5544,7 @@ fn draw_peer_cursors(frame: &mut Frame, app: &App, area: Rect) {
 
                         for (i, ch) in label.chars().take(label_len).enumerate() {
                             let lx = label_start + i as u16;
-                            if lx < area.x + area.width {
+                            if lx < buf_area.width && label_y < buf_area.height {
                                 let cell = &mut frame.buffer_mut()[(lx, label_y)];
                                 cell.set_char(ch);
                                 cell.set_bg(color);
@@ -6312,7 +6313,7 @@ fn draw_conflict_actions(frame: &mut Frame, app: &App, editor_area: Rect) {
 /// Draw next-edit prediction markers (gutter arrows + faint line highlight).
 fn draw_edit_predictions(frame: &mut Frame, app: &App, editor_area: Rect) {
     let predictions = app.edit_predictions();
-    if predictions.is_empty() {
+    if predictions.is_empty() || editor_area.width < 8 || editor_area.height == 0 {
         return;
     }
 
@@ -6321,6 +6322,7 @@ fn draw_edit_predictions(frame: &mut Frame, app: &App, editor_area: Rect) {
     let visible_rows = editor_area.height as usize;
     let gutter_width = 6u16;
     let pred_color = Color::Indexed(75); // Muted blue
+    let buf_area = frame.area();
 
     for (i, pred) in predictions.iter().enumerate() {
         if pred.line < scroll_row || pred.line >= scroll_row + visible_rows {
@@ -6335,7 +6337,7 @@ fn draw_edit_predictions(frame: &mut Frame, app: &App, editor_area: Rect) {
         // Gutter marker: '›' for top prediction, '·' for others.
         let marker = if i == 0 { "›" } else { "·" };
         let marker_x = editor_area.x + gutter_width.saturating_sub(2);
-        if marker_x < editor_area.right() && screen_y < editor_area.bottom() {
+        if marker_x < buf_area.width && screen_y < buf_area.height {
             let cell = &mut frame.buffer_mut()[(marker_x, screen_y)];
             cell.set_char(marker.chars().next().unwrap());
             cell.set_fg(pred_color);
@@ -6346,7 +6348,7 @@ fn draw_edit_predictions(frame: &mut Frame, app: &App, editor_area: Rect) {
         let line_width = editor_area.width.saturating_sub(gutter_width);
         for col in 0..line_width {
             let x = line_start + col;
-            if x < editor_area.right() && screen_y < editor_area.bottom() {
+            if x < buf_area.width && screen_y < buf_area.height {
                 let cell = &mut frame.buffer_mut()[(x, screen_y)];
                 cell.set_bg(Color::Indexed(236)); // Very dark gray tint
             }
