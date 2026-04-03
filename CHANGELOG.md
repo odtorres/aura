@@ -5,6 +5,14 @@ All notable changes to AURA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-04-03
+
+### Changed
+
+- **Distribution** — Crate names updated to `aura-editor-*` for uniqueness. All sub-crates marked `publish = false`. Install via shell installer, GitHub releases, or `cargo install --git`.
+- **Documentation** — Installation guide, README, and TODO updated to reflect distribution via GitHub releases instead of crates.io. Homebrew formula template added.
+- **PKGBUILD** — Fixed GitHub URL to `odtorres/aura`
+
 ## [0.2.2] - 2026-04-03
 
 ### Added
