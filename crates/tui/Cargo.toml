@@ -1,14 +1,17 @@
 [package]
-name = "aura-tui"
+name = "aura-editor-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "TUI rendering, input handling, and editor features for the AURA editor"
 
+[lib]
+name = "aura_tui"
+
 [dependencies]
-aura-core = { path = "../core" }
-aura-ai = { path = "../ai" }
+aura-editor-core = { path = "../core" }
+aura-editor-ai = { path = "../ai" }
 ratatui.workspace = true
 crossterm.workspace = true
 anyhow.workspace = true

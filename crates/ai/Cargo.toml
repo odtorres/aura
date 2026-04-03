@@ -1,13 +1,16 @@
 [package]
-name = "aura-ai"
+name = "aura-editor-ai"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Anthropic API client and AI context assembly for the AURA editor"
 
+[lib]
+name = "aura_ai"
+
 [dependencies]
-aura-core = { path = "../core" }
+aura-editor-core = { path = "../core" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

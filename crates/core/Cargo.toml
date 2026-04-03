@@ -1,10 +1,13 @@
 [package]
-name = "aura-core"
+name = "aura-editor-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core text buffer, CRDT, and cursor logic for the AURA editor"
+
+[lib]
+name = "aura_core"
 
 [dependencies]
 ropey.workspace = true
