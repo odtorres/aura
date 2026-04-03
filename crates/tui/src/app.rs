@@ -6093,6 +6093,29 @@ impl App {
             self.conversation_history_focused = false;
             self.chat_panel_focused = false;
 
+            // Check if click is on the gutter fold indicator.
+            let content_x = self.editor_rect.x + 1; // border
+            let content_y = self.editor_rect.y + 1; // border
+            let gutter_width: u16 = 6;
+            let in_gutter = col >= content_x && col < content_x + gutter_width && row >= content_y;
+            if in_gutter {
+                let clicked_row = (row - content_y) as usize;
+                let target_line = self.tab().scroll_row + clicked_row;
+                let is_folded = self.tab().folded_ranges.contains_key(&target_line);
+                let is_foldable = self.tab().foldable_ranges.contains_key(&target_line);
+                if is_folded {
+                    // Unfold.
+                    self.tab_mut().folded_ranges.remove(&target_line);
+                    return;
+                } else if is_foldable {
+                    // Fold.
+                    if let Some(&end) = self.tab().foldable_ranges.get(&target_line) {
+                        self.tab_mut().folded_ranges.insert(target_line, end);
+                    }
+                    return;
+                }
+            }
+
             // Move cursor and set visual anchor for potential drag selection.
             if self.screen_to_cursor(col, row) {
                 // Clear any existing selection and record anchor for drag.
