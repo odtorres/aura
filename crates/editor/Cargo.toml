@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "AI-native terminal text editor for human + AI co-authoring"
+publish = false
 repository.workspace = true
 homepage = "https://odtorres.github.io/aura/"
 keywords = ["editor", "terminal", "ai", "tui", "vim"]

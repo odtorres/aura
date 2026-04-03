@@ -43,10 +43,10 @@ See [TODO.md](TODO.md) for the full roadmap and phase history.
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh
 ```
 
-### Cargo
+### Cargo (from source)
 
 ```bash
-cargo install aura
+cargo install --git https://github.com/odtorres/aura.git aura
 ```
 
 ### Download binaries
