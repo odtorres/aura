@@ -15,9 +15,9 @@ name = "aura"
 path = "src/main.rs"
 
 [dependencies]
-aura-editor-core = { path = "../core", version = "0.2.2" }
-aura-editor-tui = { path = "../tui", version = "0.2.2" }
-aura-editor-ai = { path = "../ai", version = "0.2.2" }
+aura-editor-core = { path = "../core" }
+aura-editor-tui = { path = "../tui" }
+aura-editor-ai = { path = "../ai" }
 crossterm.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

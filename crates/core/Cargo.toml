@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core text buffer, CRDT, and cursor logic for the AURA editor"
+publish = false
 
 [lib]
 name = "aura_core"
