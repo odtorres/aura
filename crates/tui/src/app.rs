@@ -3680,10 +3680,11 @@ impl App {
 
     /// Get diagnostics for a specific line.
     pub fn line_diagnostics(&self, line: usize) -> Option<&Diagnostic> {
-        self.tab()
-            .diagnostics
-            .iter()
-            .find(|d| d.range.start.line as usize == line)
+        self.tab().diagnostics.iter().find(|d| {
+            let start = d.range.start.line as usize;
+            let end = d.range.end.line as usize;
+            line >= start && line <= end
+        })
     }
 
     /// Count errors and warnings.

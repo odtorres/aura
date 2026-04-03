@@ -2501,13 +2501,22 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
             // 2. Check if word before cursor matches a snippet trigger.
             let lang_name = app.tab().language.map(|l| {
+                use crate::highlight::Language;
                 match l {
-                    crate::highlight::Language::Rust => "rust",
-                    crate::highlight::Language::Python => "python",
-                    crate::highlight::Language::TypeScript
-                    | crate::highlight::Language::Tsx
-                    | crate::highlight::Language::JavaScript => "typescript",
-                    crate::highlight::Language::Go => "go",
+                    Language::Rust => "rust",
+                    Language::Python => "python",
+                    Language::TypeScript | Language::Tsx | Language::JavaScript => "typescript",
+                    Language::Go => "go",
+                    Language::Elixir | Language::HEEx => "elixir",
+                    Language::Php => "php",
+                    Language::Lua => "lua",
+                    Language::Dart => "dart",
+                    Language::Swift => "swift",
+                    Language::Kotlin => "kotlin",
+                    Language::Zig => "zig",
+                    Language::Scala => "scala",
+                    Language::Haskell => "haskell",
+                    Language::Sql => "sql",
                     _ => "",
                 }
                 .to_string()
