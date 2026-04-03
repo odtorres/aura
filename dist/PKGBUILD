@@ -6,13 +6,13 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="AI-native terminal text editor with CRDT-based co-authoring"
 arch=('x86_64' 'aarch64')
-url="https://github.com/aura-editor/aura"
+url="https://github.com/odtorres/aura"
 license=('MIT')
 depends=()
 makedepends=('rust' 'cargo')
 provides=('aura')
 conflicts=('aura')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/aura-editor/aura/archive/v${pkgver}.tar.gz")
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/odtorres/aura/archive/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {

@@ -2,6 +2,9 @@
 name = "aura-ai"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Anthropic API client and AI context assembly for the AURA editor"
 
 [dependencies]
 aura-core = { path = "../core" }
