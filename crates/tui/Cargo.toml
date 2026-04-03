@@ -10,8 +10,8 @@ description = "TUI rendering, input handling, and editor features for the AURA e
 name = "aura_tui"
 
 [dependencies]
-aura-editor-core = { path = "../core" }
-aura-editor-ai = { path = "../ai" }
+aura-editor-core = { path = "../core", version = "0.2.2" }
+aura-editor-ai = { path = "../ai", version = "0.2.2" }
 ratatui.workspace = true
 crossterm.workspace = true
 anyhow.workspace = true

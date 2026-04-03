@@ -10,7 +10,7 @@ description = "Anthropic API client and AI context assembly for the AURA editor"
 name = "aura_ai"
 
 [dependencies]
-aura-editor-core = { path = "../core" }
+aura-editor-core = { path = "../core", version = "0.2.2" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
