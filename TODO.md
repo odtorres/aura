@@ -294,22 +294,19 @@ The AI thinks ahead. The human reviews when ready.
 - [x] Ship with core plugins: file picker (fuzzy finder), file tree, terminal
 
 ### 8.4 Distribution
-- [x] `cargo install aura-editor`
-- [x] Homebrew formula
+- [x] `cargo install --git` from GitHub
+- [x] Shell installer (curl | sh)
+- [x] Homebrew formula (template ready)
 - [x] AUR package
 - [x] AppImage for Linux
 - [x] Release automation with `cargo-dist`
+- [x] detect in the app a new version and show there is a new version available
 
 ### 8.5 Distribution — Remaining Manual Steps
-- [ ] Create `aura-editor/homebrew-tap` repo on GitHub (needed for `brew install aura-editor/tap/aura`)
-- [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo (GitHub Settings > Secrets) — a PAT with write access to the tap repo
-- [ ] Cut a test release to verify the full pipeline: `git tag v0.1.0-rc.1 && git push --tags`
-  - [ ] Verify GitHub Release is created with binaries for all 5 targets
-  - [ ] Verify shell installer works: `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh`
-  - [ ] Verify `brew install aura-editor/tap/aura` works after tap repo is set up
-- [ ] Publish to crates.io: `cargo publish -p aura`
-- [ ] Verify `cargo install aura` works after crates.io publish
-- [x] detect in the app a new version and show there is a new version available
+- [ ] Create `odtorres/homebrew-aura` repo on GitHub
+- [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
+- [ ] Verify GitHub Release pipeline works on tag push
+- ~~Publish to crates.io~~ — Not viable (include_str! paths outside crate dirs). Use `cargo install --git` instead.
 
 
 ## Phase 9: UX Improvements & Claude Code Integration (Post-launch)
@@ -511,6 +508,5 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 ### 11.8 Distribution
 - [ ] Create `aura-editor/homebrew-tap` repo on GitHub
 - [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
-- [ ] Cut a test release to verify the full pipeline
-- [ ] Publish to crates.io: `cargo publish -p aura`
-- [ ] Verify `cargo install aura` works after crates.io publish
+- [ ] Verify GitHub Release pipeline works on tag push
+- ~~Publish to crates.io~~ — Not viable. Use `cargo install --git` instead.

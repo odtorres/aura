@@ -1,14 +1,14 @@
 # Installation
 
-## From crates.io
+## Shell Installer (Recommended)
 
-The simplest way to install AURA:
+The quickest way to install AURA on macOS or Linux:
 
 ```bash
-cargo install aura-editor
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh
 ```
 
-This downloads, compiles, and installs the `aura` binary into `~/.cargo/bin/`.
+This downloads the latest pre-built binary for your platform and installs it.
 
 ## Pre-built Binaries
 
@@ -18,28 +18,27 @@ Pre-built binaries are available from [GitHub Releases](https://github.com/odtor
 - **Linux**: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`
 - **Windows**: `x86_64-pc-windows-msvc`
 
-### Shell installer
+Download the appropriate archive, extract, and place the `aura` binary in your `$PATH`.
+
+## Cargo (from source)
+
+Install directly from the GitHub repository:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh
+cargo install --git https://github.com/odtorres/aura.git aura
 ```
+
+This clones, compiles, and installs the `aura` binary into `~/.cargo/bin/`.
+
+**Requirements:** Rust 1.75+ and a C compiler (for tree-sitter grammars and SQLite).
 
 ## Homebrew (coming soon)
 
 ```bash
-# brew install aura-editor/tap/aura
+# brew install odtorres/aura/aura
 ```
 
-Homebrew support is planned. For now, use the shell installer or cargo install.
-
 ## Building from Source
-
-### Prerequisites
-
-- **Rust 1.75+** — install via [rustup](https://rustup.rs/)
-- A C compiler (for tree-sitter grammar compilation and SQLite)
-
-### Build
 
 ```bash
 git clone https://github.com/odtorres/aura.git
@@ -47,9 +46,7 @@ cd aura
 cargo build --release
 ```
 
-The binary is at `target/release/aura`.
-
-### Install locally
+The binary is at `target/release/aura`. To install locally:
 
 ```bash
 cargo install --path crates/editor
