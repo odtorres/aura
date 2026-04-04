@@ -480,6 +480,12 @@ pub struct App {
     pub show_blame: bool,
     /// Loaded configuration from aura.toml.
     pub config: AuraConfig,
+    /// Path to the config file for hot-reload.
+    config_path: std::path::PathBuf,
+    /// Last known modification time of the config file.
+    config_mtime: Option<std::time::SystemTime>,
+    /// Last time we checked the config file for changes.
+    config_check_last: std::time::Instant,
     /// Resolved color theme.
     pub theme: Theme,
     /// When true, the intent_input is editing an existing proposal rather than
@@ -733,6 +739,9 @@ impl App {
         let config = crate::config::load_config(&config_path);
         let config_table = crate::config::load_config_table(&config_path);
         let theme = crate::config::resolve_theme(&config.theme, config_table.as_ref());
+        let config_mtime = std::fs::metadata(&config_path)
+            .and_then(|m| m.modified())
+            .ok();
         tracing::info!("Loaded config, theme: {}", theme.name);
 
         let ai_client = AiBackend::auto_detect();
@@ -948,6 +957,9 @@ impl App {
             git_repo,
             show_blame: false,
             config: config.clone(),
+            config_path,
+            config_mtime,
+            config_check_last: std::time::Instant::now(),
             theme,
             editing_proposal: false,
             revising_proposal: false,
@@ -998,7 +1010,11 @@ impl App {
             auto_save_last: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
-            chat_panel: ChatPanel::new(40),
+            chat_panel: {
+                let mut cp = ChatPanel::new(40);
+                cp.max_context_messages = config.ai.max_context_messages;
+                cp
+            },
             chat_panel_focused: false,
             chat_receiver: None,
             chat_panel_rect: Rect::default(),
@@ -1310,6 +1326,24 @@ impl App {
                 }
                 if self.tab().semantic_dirty {
                     self.refresh_semantic_index();
+                }
+            }
+
+            // Hot-reload config: check aura.toml every 2 seconds.
+            if self.config_check_last.elapsed() > Duration::from_secs(2) {
+                self.config_check_last = std::time::Instant::now();
+                let new_mtime = std::fs::metadata(&self.config_path)
+                    .and_then(|m| m.modified())
+                    .ok();
+                if new_mtime != self.config_mtime && new_mtime.is_some() {
+                    self.config_mtime = new_mtime;
+                    let new_config = crate::config::load_config(&self.config_path);
+                    let config_table = crate::config::load_config_table(&self.config_path);
+                    let new_theme =
+                        crate::config::resolve_theme(&new_config.theme, config_table.as_ref());
+                    self.config = new_config;
+                    self.theme = new_theme;
+                    self.set_status("Config reloaded from aura.toml");
                 }
             }
 
@@ -3851,9 +3885,14 @@ impl App {
                 self.tab_mut().mark_highlights_dirty();
                 files_changed += 1;
             } else {
-                // For other files, read-modify-write on disk.
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+                // Check if file is open in another tab — apply in-memory if so.
+                let open_tab_idx = self.tabs.tabs().iter().position(|t| {
+                    t.buffer.file_path().and_then(|p| p.canonicalize().ok())
+                        == path.canonicalize().ok()
+                });
+
+                if let Some(tab_idx) = open_tab_idx {
+                    // Apply edits to the open tab's buffer (in reverse order).
                     let mut sorted_edits = file_edits.clone();
                     sorted_edits.sort_by(|a, b| {
                         b.range
@@ -3862,31 +3901,63 @@ impl App {
                             .cmp(&a.range.start.line)
                             .then(b.range.start.character.cmp(&a.range.start.character))
                     });
-
                     for edit in &sorted_edits {
-                        let sl = edit.range.start.line as usize;
-                        let sc = edit.range.start.character as usize;
-                        let el = edit.range.end.line as usize;
-                        let ec = edit.range.end.character as usize;
-
-                        if sl < lines.len() && el < lines.len() {
-                            // Single-line edit.
-                            if sl == el {
-                                let line = &lines[sl];
-                                let before = &line[..sc.min(line.len())];
-                                let after = &line[ec.min(line.len())..];
-                                lines[sl] = format!("{before}{}{after}", edit.new_text);
+                        let start_line = edit.range.start.line as usize;
+                        let start_col = edit.range.start.character as usize;
+                        let end_line = edit.range.end.line as usize;
+                        let end_col = edit.range.end.character as usize;
+                        let rope = self.tabs.tabs()[tab_idx].buffer.rope();
+                        if start_line < rope.len_lines() && end_line < rope.len_lines() {
+                            let start_byte = rope.line_to_byte(start_line) + start_col;
+                            let end_byte = rope.line_to_byte(end_line) + end_col;
+                            if end_byte <= rope.len_bytes() && start_byte <= end_byte {
+                                self.tabs.tabs_mut()[tab_idx].buffer.replace_range(
+                                    start_byte,
+                                    end_byte,
+                                    &edit.new_text,
+                                );
+                                total_edits += 1;
                             }
-                            // Multi-line edits are rare for renames; skip for now.
-                            total_edits += 1;
                         }
                     }
-
-                    let new_content = lines.join("\n");
-                    if let Err(e) = std::fs::write(&path, &new_content) {
-                        tracing::warn!("Failed to write {}: {e}", path.display());
-                    }
+                    self.tabs.tabs_mut()[tab_idx].mark_highlights_dirty();
                     files_changed += 1;
+                } else {
+                    // File not open — read-modify-write on disk.
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let mut lines: Vec<String> = content.lines().map(String::from).collect();
+                        let mut sorted_edits = file_edits.clone();
+                        sorted_edits.sort_by(|a, b| {
+                            b.range
+                                .start
+                                .line
+                                .cmp(&a.range.start.line)
+                                .then(b.range.start.character.cmp(&a.range.start.character))
+                        });
+
+                        for edit in &sorted_edits {
+                            let sl = edit.range.start.line as usize;
+                            let sc = edit.range.start.character as usize;
+                            let el = edit.range.end.line as usize;
+                            let ec = edit.range.end.character as usize;
+
+                            if sl < lines.len() && el < lines.len() {
+                                if sl == el {
+                                    let line = &lines[sl];
+                                    let before = &line[..sc.min(line.len())];
+                                    let after = &line[ec.min(line.len())..];
+                                    lines[sl] = format!("{before}{}{after}", edit.new_text);
+                                }
+                                total_edits += 1;
+                            }
+                        }
+
+                        let new_content = lines.join("\n");
+                        if let Err(e) = std::fs::write(&path, &new_content) {
+                            tracing::warn!("Failed to write {}: {e}", path.display());
+                        }
+                        files_changed += 1;
+                    }
                 }
             }
         }

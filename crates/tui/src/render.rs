@@ -5636,6 +5636,8 @@ fn draw_editor_pane(
     };
 
     draw_editor(frame, app, content_area, &git_status);
+    // Rainbow indent guides (drawn before search highlights so they don't obscure matches).
+    draw_indent_guides(frame, app, content_area);
     // Search match highlights (drawn as overlay on top of text).
     if !app.search_matches.is_empty() {
         draw_search_highlights(frame, app, content_area);
@@ -5693,6 +5695,66 @@ fn draw_editor_pane(
             viewport_h,
             &buffer_lines,
         );
+    }
+}
+
+/// Rainbow colors for indent guide levels (6 colors, cycling).
+const INDENT_COLORS: [Color; 6] = [
+    Color::Rgb(80, 80, 120),  // blue-grey
+    Color::Rgb(80, 120, 80),  // green-grey
+    Color::Rgb(120, 100, 60), // amber-grey
+    Color::Rgb(120, 70, 100), // pink-grey
+    Color::Rgb(60, 110, 120), // cyan-grey
+    Color::Rgb(110, 80, 60),  // brown-grey
+];
+
+/// Draw rainbow indent guides as thin vertical lines at indent boundaries.
+fn draw_indent_guides(frame: &mut Frame, app: &App, area: Rect) {
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_x = area.x + gutter_width;
+    let text_w = area.width.saturating_sub(gutter_width) as usize;
+    let tab_w = app.config.editor.tab_width;
+
+    if tab_w == 0 || text_w == 0 {
+        return;
+    }
+
+    for vis_row in 0..visible_rows {
+        let line_idx = scroll_row + vis_row;
+        if line_idx >= tab.buffer.line_count() {
+            break;
+        }
+
+        let line = tab.buffer.rope().line(line_idx);
+        let line_str: String = line.chars().collect();
+
+        // Count leading whitespace.
+        let indent_chars = line_str
+            .chars()
+            .take_while(|c| c.is_whitespace() && *c != '\n')
+            .count();
+
+        // Draw a guide at each tab-stop within the indent region.
+        let screen_y = area.y + vis_row as u16;
+        let mut col = tab_w;
+        let mut level = 0usize;
+        while col < indent_chars {
+            let screen_col = col.saturating_sub(scroll_col);
+            if screen_col < text_w {
+                let color = INDENT_COLORS[level % INDENT_COLORS.len()];
+                let cell = Rect::new(text_x + screen_col as u16, screen_y, 1, 1);
+                frame.render_widget(
+                    Paragraph::new(Span::styled("│", Style::default().fg(color))),
+                    cell,
+                );
+            }
+            col += tab_w;
+            level += 1;
+        }
     }
 }
 

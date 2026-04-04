@@ -207,6 +207,11 @@ impl ChatPanel {
 
     /// Trim context_messages to the configured maximum, preserving the
     /// first message (often system/setup context) and the most recent ones.
+    /// Trim context messages to the configured maximum using a sliding window.
+    ///
+    /// Keeps the first message (system context), inserts a summary note about
+    /// dropped messages, then retains the most recent messages. This gives the
+    /// AI awareness that earlier context was removed.
     fn trim_context(&mut self) {
         if self.max_context_messages == 0
             || self.context_messages.len() <= self.max_context_messages
@@ -219,12 +224,25 @@ impl ChatPanel {
         }
         let keep = self.max_context_messages;
         if self.context_messages.len() > keep {
-            // Keep the first message + the last (keep - 1) messages.
-            let tail_start = self.context_messages.len() - (keep - 1);
+            let total = self.context_messages.len();
+            let dropped = total - keep;
+            let tail_start = total - (keep - 2); // -2: first msg + summary note
+
             let first = self.context_messages[0].clone();
             let tail: Vec<_> = self.context_messages[tail_start..].to_vec();
+
+            // Build a summary note so the AI knows context was truncated.
+            let summary = aura_ai::Message {
+                role: "user".to_string(),
+                content: aura_ai::MessageContent::Text(format!(
+                    "[Note: {dropped} earlier messages were removed from context to stay \
+                     within limits. The conversation continues from the most recent messages.]"
+                )),
+            };
+
             self.context_messages.clear();
             self.context_messages.push(first);
+            self.context_messages.push(summary);
             self.context_messages.extend(tail);
         }
     }

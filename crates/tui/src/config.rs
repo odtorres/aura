@@ -217,6 +217,8 @@ pub struct AiSettings {
     pub aggressiveness: String,
     /// Idle time (ms) before triggering speculative analysis.
     pub idle_threshold_ms: u64,
+    /// Maximum context messages to keep in the chat panel (0 = no limit).
+    pub max_context_messages: usize,
 }
 
 impl Default for AiSettings {
@@ -226,6 +228,7 @@ impl Default for AiSettings {
             max_tokens: 4096,
             aggressiveness: "moderate".to_string(),
             idle_threshold_ms: 3000,
+            max_context_messages: 40,
         }
     }
 }
