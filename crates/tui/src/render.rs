@@ -6018,7 +6018,7 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 // Build command input with inline ghost completion.
                 let base = format!(":{}", app.command_input);
                 if let Some(idx) = app.command_completion_idx {
-                    if let Some((cmd, _)) = app.command_completions.get(idx) {
+                    if let Some((cmd, _, _)) = app.command_completions.get(idx) {
                         if let Some(suffix) = cmd.strip_prefix(app.command_input.trim()) {
                             format!("{base}{suffix}")
                         } else {
@@ -6078,7 +6078,14 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
             .command_completions
             .iter()
             .take(max_items)
-            .map(|(cmd, desc)| cmd.len() + desc.len() + 5) // " :cmd  desc "
+            .map(|(cmd, desc, shortcut)| {
+                let shortcut_len = if shortcut.is_empty() {
+                    0
+                } else {
+                    shortcut.len() + 3 // "  (Ctrl+T)"
+                };
+                cmd.len() + desc.len() + 5 + shortcut_len
+            })
             .max()
             .unwrap_or(20)
             .min(area.width as usize);
@@ -6092,7 +6099,7 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .take(max_items)
             .enumerate()
-            .map(|(i, (cmd, desc))| {
+            .map(|(i, (cmd, desc, shortcut))| {
                 let is_selected = app.command_completion_idx == Some(i);
                 let style = if is_selected {
                     Style::default().fg(Color::Black).bg(app.theme.mode_command)
@@ -6106,10 +6113,22 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                ratatui::text::Line::from(vec![
+                let shortcut_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .bg(app.theme.mode_command)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                };
+                let mut spans = vec![
                     Span::styled(format!(" :{cmd}"), style),
-                    Span::styled(format!("  {desc} "), desc_style),
-                ])
+                    Span::styled(format!("  {desc}"), desc_style),
+                ];
+                if !shortcut.is_empty() {
+                    spans.push(Span::styled(format!("  ({shortcut})"), shortcut_style));
+                }
+                spans.push(Span::styled(" ", desc_style));
+                ratatui::text::Line::from(spans)
             })
             .collect();
 
@@ -6126,7 +6145,7 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
     if app.mode == Mode::Command {
         let input_part = format!(":{}", app.command_input);
         let ghost_part = if let Some(idx) = app.command_completion_idx {
-            if let Some((cmd, _)) = app.command_completions.get(idx) {
+            if let Some((cmd, _, _)) = app.command_completions.get(idx) {
                 cmd.strip_prefix(app.command_input.trim())
                     .unwrap_or("")
                     .to_string()
