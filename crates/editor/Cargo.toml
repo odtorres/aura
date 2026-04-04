@@ -11,6 +11,9 @@ homepage = "https://odtorres.github.io/aura/"
 keywords = ["editor", "terminal", "ai", "tui", "vim"]
 categories = ["command-line-utilities", "text-editors"]
 
+[package.metadata.dist]
+dist = true
+
 [[bin]]
 name = "aura"
 path = "src/main.rs"
