@@ -9278,4 +9278,88 @@ impl App {
     pub fn handle_close_confirm_cancel(&mut self) {
         self.tab_close_confirm = None;
     }
+
+    /// Run the appropriate language formatter on the current buffer.
+    ///
+    /// Detects the formatter from the file extension and runs it in-place.
+    /// The buffer content is replaced with the formatted output.
+    pub fn format_current_buffer(&mut self) {
+        let path = match self.tab().buffer.file_path() {
+            Some(p) => p.to_path_buf(),
+            None => return, // scratch buffer, nothing to format
+        };
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Map extensions to formatter commands.
+        let formatter: Option<(&str, Vec<&str>)> = match ext.as_str() {
+            "rs" => Some(("rustfmt", vec!["--edition", "2021"])),
+            "py" => Some(("black", vec!["-q", "-"])),
+            "js" | "jsx" | "ts" | "tsx" | "css" | "json" | "md" | "html" | "yaml" | "yml" => {
+                Some(("prettier", vec!["--write"]))
+            }
+            "go" => Some(("gofmt", vec!["-w"])),
+            "zig" => Some(("zig", vec!["fmt"])),
+            "c" | "cpp" | "cc" | "h" | "hpp" => Some(("clang-format", vec!["-i"])),
+            "lua" => Some(("stylua", vec![])),
+            "sh" | "bash" => Some(("shfmt", vec!["-w"])),
+            _ => None,
+        };
+
+        let (cmd, args) = match formatter {
+            Some(f) => f,
+            None => return, // no formatter for this file type
+        };
+
+        // Save the buffer to disk first so the formatter can read it.
+        if self.tab_mut().buffer.save().is_err() {
+            return;
+        }
+
+        let path_str = path.display().to_string();
+
+        // Special case: black reads from stdin with `-` flag, but we want file mode.
+        let mut full_args: Vec<&str> = args;
+        // For formatters that take the file as an argument (most of them).
+        if cmd != "black" {
+            full_args.push(&path_str);
+        }
+
+        // For black, use the file path instead of stdin.
+        let final_args = if cmd == "black" {
+            vec!["-q", &path_str]
+        } else {
+            full_args
+        };
+
+        let result = std::process::Command::new(cmd).args(&final_args).output();
+
+        match result {
+            Ok(output) if output.status.success() => {
+                // Reload the buffer from disk (formatter wrote in-place).
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let tab = self.tab_mut();
+                    let current = tab.buffer.rope().to_string();
+                    if content != current {
+                        // Replace buffer content with formatted version.
+                        let len = tab.buffer.rope().len_chars();
+                        tab.buffer.delete(0, len, aura_core::AuthorId::Human);
+                        tab.buffer.insert(0, &content, aura_core::AuthorId::Human);
+                    }
+                }
+            }
+            Ok(_output) => {
+                // Formatter failed silently — don't block save.
+                tracing::debug!("Formatter {cmd} returned non-zero exit code");
+            }
+            Err(_) => {
+                // Formatter not installed — silently skip.
+                tracing::debug!("Formatter {cmd} not found, skipping format on save");
+            }
+        }
+    }
 }

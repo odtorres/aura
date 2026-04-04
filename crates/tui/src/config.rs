@@ -184,6 +184,8 @@ pub struct EditorConfig {
     pub relative_line_numbers: bool,
     /// Enable soft word wrap (no horizontal scrolling).
     pub word_wrap: bool,
+    /// Run language formatter on save (uses LSP formatting or external command).
+    pub format_on_save: bool,
 }
 
 impl Default for EditorConfig {
@@ -198,6 +200,7 @@ impl Default for EditorConfig {
             auto_save_seconds: 0,
             relative_line_numbers: false,
             word_wrap: false,
+            format_on_save: false,
         }
     }
 }

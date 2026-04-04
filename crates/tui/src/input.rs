@@ -3546,20 +3546,26 @@ pub fn execute_command_from_palette(app: &mut App, cmd: &str) {
 
 fn execute_command(app: &mut App, cmd: &str) {
     match cmd.trim() {
-        "w" => match app.tab_mut().buffer.save() {
-            Ok(_) => {
-                app.set_status("Written");
-                if app.sidebar_view == SidebarView::Git {
-                    app.refresh_source_control();
-                }
-                // Notify plugins of the save.
-                if let Some(path) = app.tab().buffer.file_path() {
-                    let path_str = path.display().to_string();
-                    app.plugin_manager.notify_save(&path_str);
-                }
+        "w" => {
+            // Format on save if enabled.
+            if app.config.editor.format_on_save {
+                app.format_current_buffer();
             }
-            Err(e) => app.set_status(format!("Error: {}", e)),
-        },
+            match app.tab_mut().buffer.save() {
+                Ok(_) => {
+                    app.set_status("Written");
+                    if app.sidebar_view == SidebarView::Git {
+                        app.refresh_source_control();
+                    }
+                    // Notify plugins of the save.
+                    if let Some(path) = app.tab().buffer.file_path() {
+                        let path_str = path.display().to_string();
+                        app.plugin_manager.notify_save(&path_str);
+                    }
+                }
+                Err(e) => app.set_status(format!("Error: {}", e)),
+            }
+        }
         "q" => {
             if app.tabs.count() > 1 {
                 // Multiple tabs: close current tab.

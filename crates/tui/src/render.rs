@@ -478,6 +478,11 @@ fn map_line_to_row(line: usize, total_lines: usize, minimap_height: usize) -> Op
 /// priority — later entries overwrite earlier ones when they map to the same
 /// minimap row.  `viewport_start` / `viewport_lines` describe the currently
 /// visible region so it can be highlighted.
+/// Draw the minimap: condensed code overview with viewport indicator and diagnostic markers.
+///
+/// The minimap shows a compressed view of the file where each row maps to one
+/// or more source lines. The viewport window is highlighted with a lighter background.
+/// Diagnostic markers (errors/warnings) are shown as colored dots on the right edge.
 fn draw_minimap(
     frame: &mut Frame,
     area: Rect,
@@ -485,17 +490,22 @@ fn draw_minimap(
     total_lines: usize,
     viewport_start: usize,
     viewport_lines: usize,
+    buffer_lines: &[String],
 ) {
     let h = area.height as usize;
-    if h == 0 || total_lines == 0 {
+    let w = area.width as usize;
+    if h == 0 || total_lines == 0 || w == 0 {
         return;
     }
 
-    // Build per-row background colours.
-    let dark_bg = Color::Rgb(40, 40, 40);
-    let viewport_bg = Color::Rgb(100, 100, 100);
+    let dark_bg = Color::Rgb(30, 30, 30);
+    let viewport_bg = Color::Rgb(50, 50, 55);
 
-    let mut row_colors: Vec<Color> = Vec::with_capacity(h);
+    // Build marker lookup (line -> color, highest priority wins).
+    let mut marker_map: std::collections::HashMap<usize, Color> = std::collections::HashMap::new();
+    for &(line, color) in markers {
+        marker_map.insert(line, color);
+    }
 
     // Compute viewport row range.
     let vp_row_start = map_line_to_row(viewport_start, total_lines, h).unwrap_or(0);
@@ -510,28 +520,73 @@ fn draw_minimap(
             .saturating_add(1)
     };
 
+    // Scrollbar column (rightmost): 1 char wide showing viewport position.
+    let scrollbar_x = area.x + area.width.saturating_sub(1);
+    let content_w = w.saturating_sub(1); // minimap code area width
+
     for r in 0..h {
-        if r >= vp_row_start && r < vp_row_end {
-            row_colors.push(viewport_bg);
+        let in_viewport = r >= vp_row_start && r < vp_row_end;
+        let bg = if in_viewport { viewport_bg } else { dark_bg };
+
+        // Map this row to a source line.
+        let source_line = if total_lines <= h {
+            r
         } else {
-            row_colors.push(dark_bg);
-        }
-    }
+            r * total_lines / h
+        };
 
-    // Apply markers (lowest priority first, so higher priorities overwrite).
-    for &(line, color) in markers {
-        if let Some(row) = map_line_to_row(line, total_lines, h) {
-            row_colors[row] = color;
-        }
-    }
+        // Get the condensed line content.
+        let line_text = buffer_lines
+            .get(source_line)
+            .map(|s| s.as_str())
+            .unwrap_or("");
 
-    // Render each row as a single space with the computed background.
-    for (r, &bg) in row_colors.iter().enumerate() {
-        let cell_area = Rect::new(area.x, area.y + r as u16, 1, 1);
+        // Compress the line: skip leading whitespace proportionally, show condensed chars.
+        let trimmed = line_text.trim_start();
+        let indent = line_text.len().saturating_sub(trimmed.len());
+        let indent_display = (indent / 2).min(content_w); // 2:1 compression for indent
+
+        // Build the display string: indent spaces + condensed content.
+        let remaining_w = content_w.saturating_sub(indent_display);
+        let condensed: String = trimmed.chars().take(remaining_w).collect();
+
+        // Dim the text for minimap appearance.
+        let text_fg = if in_viewport {
+            Color::Rgb(120, 120, 130)
+        } else {
+            Color::Rgb(80, 80, 85)
+        };
+
+        let indent_str: String = " ".repeat(indent_display);
+        let pad_len = content_w
+            .saturating_sub(indent_display)
+            .saturating_sub(condensed.len());
+        let pad: String = " ".repeat(pad_len);
+
+        let cell_area = Rect::new(area.x, area.y + r as u16, content_w as u16, 1);
         frame.render_widget(
-            Paragraph::new(Span::styled(" ", Style::default().bg(bg))),
+            Paragraph::new(Line::from(vec![
+                Span::styled(indent_str, Style::default().bg(bg)),
+                Span::styled(condensed, Style::default().fg(text_fg).bg(bg)),
+                Span::styled(pad, Style::default().bg(bg)),
+            ])),
             cell_area,
         );
+
+        // Scrollbar column: filled block for viewport, thin for rest.
+        let has_marker = marker_map.get(&source_line);
+        let sb_char = if let Some(&color) = has_marker {
+            Span::styled("●", Style::default().fg(color).bg(dark_bg))
+        } else if in_viewport {
+            Span::styled(
+                "█",
+                Style::default().fg(Color::Rgb(90, 90, 100)).bg(dark_bg),
+            )
+        } else {
+            Span::styled("│", Style::default().fg(Color::Rgb(50, 50, 50)).bg(dark_bg))
+        };
+        let sb_area = Rect::new(scrollbar_x, area.y + r as u16, 1, 1);
+        frame.render_widget(Paragraph::new(Line::from(sb_char)), sb_area);
     }
 }
 
@@ -1232,6 +1287,15 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
             DiffLine::Both(_, _) => None,
         })
         .collect();
+    // Build diff line content for minimap preview.
+    let diff_lines: Vec<String> = dv
+        .lines
+        .iter()
+        .map(|line| match line {
+            DiffLine::LeftOnly(s) | DiffLine::RightOnly(s) => s.clone(),
+            DiffLine::Both(_, r) => r.clone(),
+        })
+        .collect();
     draw_minimap(
         frame,
         diff_minimap_area,
@@ -1239,6 +1303,7 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
         dv.lines.len(),
         scroll,
         viewport_height,
+        &diff_lines,
     );
 }
 
@@ -5523,12 +5588,13 @@ fn draw_editor_pane(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Minimap.
+    // Minimap + scrollbar column.
     let show_minimap = app.config.editor.show_minimap;
-    let (content_area, minimap_area) = if show_minimap {
+    let minimap_width: u16 = 12; // narrow code overview
+    let (content_area, minimap_area) = if show_minimap && inner.width > minimap_width + 20 {
         let hsplit = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .constraints([Constraint::Min(1), Constraint::Length(minimap_width)])
             .split(inner);
         (hsplit[0], Some(hsplit[1]))
     } else {
@@ -5591,6 +5657,17 @@ fn draw_editor_pane(
             (prio, line)
         });
 
+        // Collect buffer lines for minimap code preview.
+        let buffer_lines: Vec<String> = (0..total_lines)
+            .map(|i| {
+                tab.buffer
+                    .rope()
+                    .get_line(i)
+                    .map(|l| l.to_string().trim_end_matches('\n').to_string())
+                    .unwrap_or_default()
+            })
+            .collect();
+
         draw_minimap(
             frame,
             minimap_rect,
@@ -5598,6 +5675,7 @@ fn draw_editor_pane(
             total_lines,
             scroll_row,
             viewport_h,
+            &buffer_lines,
         );
     }
 }
