@@ -224,16 +224,23 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Esc => {
                 app.search_active = false;
                 app.search_input.clear();
+                app.search_history_idx = None;
                 // Keep previous search_query/matches for n/N.
             }
             KeyCode::Enter => {
                 app.search_active = false;
+                app.search_history_idx = None;
                 if app.search_input.is_empty() {
                     // Repeat last search if input is empty.
                     if app.search_query.is_some() {
                         app.search_next();
                     }
                 } else {
+                    // Save to history (avoid duplicates at end).
+                    let query = app.search_input.clone();
+                    if app.search_history.last() != Some(&query) {
+                        app.search_history.push(query);
+                    }
                     app.search_query = Some(app.search_input.clone());
                     app.execute_search();
                     if app.search_matches.is_empty() {
@@ -246,6 +253,35 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     }
                 }
                 app.search_input.clear();
+            }
+            KeyCode::Up => {
+                // Browse search history (older).
+                if !app.search_history.is_empty() {
+                    let idx = match app.search_history_idx {
+                        Some(i) => i.saturating_sub(1),
+                        None => app.search_history.len() - 1,
+                    };
+                    app.search_history_idx = Some(idx);
+                    app.search_input = app.search_history[idx].clone();
+                    app.search_query = Some(app.search_input.clone());
+                    app.execute_search();
+                }
+            }
+            KeyCode::Down => {
+                // Browse search history (newer).
+                if let Some(idx) = app.search_history_idx {
+                    if idx + 1 < app.search_history.len() {
+                        let next = idx + 1;
+                        app.search_history_idx = Some(next);
+                        app.search_input = app.search_history[next].clone();
+                    } else {
+                        // Past the end — clear to empty.
+                        app.search_history_idx = None;
+                        app.search_input.clear();
+                    }
+                    app.search_query = Some(app.search_input.clone());
+                    app.execute_search();
+                }
             }
             KeyCode::Backspace => {
                 app.search_input.pop();
@@ -1718,6 +1754,18 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Char('n') => {
                 app.lsp_rename_start();
+                return;
+            }
+            KeyCode::Char('e') => {
+                // ge — backward to end of previous word.
+                let tab = app.tab_mut();
+                let mut pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                if pos > 0 {
+                    pos = pos.saturating_sub(1);
+                    pos = tab.buffer.word_end_backward(pos);
+                }
+                tab.cursor = tab.buffer.char_idx_to_cursor(pos);
+                app.clamp_cursor();
                 return;
             }
             KeyCode::Char('t') => {

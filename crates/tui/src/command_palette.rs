@@ -12,6 +12,8 @@ pub enum PaletteItem {
         id: String,
         /// Human-readable label.
         label: String,
+        /// Keyboard shortcut (e.g., "Ctrl+T"), empty if none.
+        shortcut: String,
     },
     /// A file in the workspace.
     File {
@@ -40,9 +42,17 @@ impl PaletteItem {
     /// Get the search text (used for fuzzy matching).
     pub fn search_text(&self) -> String {
         match self {
-            PaletteItem::Command { id, label } => format!("{label} {id}"),
+            PaletteItem::Command { id, label, .. } => format!("{label} {id}"),
             PaletteItem::File { path } => path.clone(),
             PaletteItem::Setting { label, key } => format!("{label} {key}"),
+        }
+    }
+
+    /// Get the keyboard shortcut (empty for non-command items).
+    pub fn shortcut(&self) -> &str {
+        match self {
+            PaletteItem::Command { shortcut, .. } => shortcut.as_str(),
+            _ => "",
         }
     }
 
@@ -196,164 +206,61 @@ fn is_fuzzy_match(text: &str, query: &str) -> bool {
 }
 
 /// Build the list of editor commands for the palette.
+/// Helper to build a command palette item.
+fn cmd(id: &str, label: &str, shortcut: &str) -> PaletteItem {
+    PaletteItem::Command {
+        id: id.into(),
+        label: label.into(),
+        shortcut: shortcut.into(),
+    }
+}
+
+/// Build the list of editor commands for the palette.
 pub fn editor_commands() -> Vec<PaletteItem> {
     vec![
-        PaletteItem::Command {
-            id: "w".into(),
-            label: "Save (:w)".into(),
-        },
-        PaletteItem::Command {
-            id: "q".into(),
-            label: "Quit (:q)".into(),
-        },
-        PaletteItem::Command {
-            id: "wq".into(),
-            label: "Save & Quit (:wq)".into(),
-        },
-        PaletteItem::Command {
-            id: "q!".into(),
-            label: "Force Quit (:q!)".into(),
-        },
-        PaletteItem::Command {
-            id: "qa".into(),
-            label: "Quit All (:qa)".into(),
-        },
-        PaletteItem::Command {
-            id: "wqa".into(),
-            label: "Save All & Quit (:wqa)".into(),
-        },
-        PaletteItem::Command {
-            id: "vsplit".into(),
-            label: "Vertical Split (:vsplit)".into(),
-        },
-        PaletteItem::Command {
-            id: "hsplit".into(),
-            label: "Horizontal Split (:hsplit)".into(),
-        },
-        PaletteItem::Command {
-            id: "only".into(),
-            label: "Close Split (:only)".into(),
-        },
-        PaletteItem::Command {
-            id: "settings".into(),
-            label: "Settings (:settings)".into(),
-        },
-        PaletteItem::Command {
-            id: "compact".into(),
-            label: "Compact Conversations (:compact)".into(),
-        },
-        PaletteItem::Command {
-            id: "host".into(),
-            label: "Host Collab Session (:host)".into(),
-        },
-        PaletteItem::Command {
-            id: "collab-stop".into(),
-            label: "Stop Collab (:collab-stop)".into(),
-        },
-        PaletteItem::Command {
-            id: "commit".into(),
-            label: "AI Commit Message (:commit)".into(),
-        },
-        PaletteItem::Command {
-            id: "blame".into(),
-            label: "Toggle Blame (:blame)".into(),
-        },
-        PaletteItem::Command {
-            id: "help".into(),
-            label: "Help (:help)".into(),
-        },
-        PaletteItem::Command {
-            id: "plugins".into(),
-            label: "List Plugins (:plugins)".into(),
-        },
-        PaletteItem::Command {
-            id: "update".into(),
-            label: "Check for Updates (:update)".into(),
-        },
-        PaletteItem::Command {
-            id: "version".into(),
-            label: "Show Version (:version)".into(),
-        },
-        PaletteItem::Command {
-            id: "tree".into(),
-            label: "Toggle File Tree (:tree)".into(),
-        },
-        PaletteItem::Command {
-            id: "term".into(),
-            label: "Toggle Terminal (:term)".into(),
-        },
-        PaletteItem::Command {
-            id: "chat".into(),
-            label: "Toggle Chat Panel (:chat)".into(),
-        },
-        PaletteItem::Command {
-            id: "files".into(),
-            label: "File Picker (:files)".into(),
-        },
-        PaletteItem::Command {
-            id: "intent".into(),
-            label: "AI Intent Mode (:intent)".into(),
-        },
-        PaletteItem::Command {
-            id: "outline".into(),
-            label: "Document Outline (:outline)".into(),
-        },
-        PaletteItem::Command {
-            id: "visor".into(),
-            label: "AI Visor (:visor)".into(),
-        },
-        PaletteItem::Command {
-            id: "search".into(),
-            label: "Project Search (:search)".into(),
-        },
-        PaletteItem::Command {
-            id: "graph".into(),
-            label: "Git Graph (:graph)".into(),
-        },
-        PaletteItem::Command {
-            id: "stash".into(),
-            label: "Git Stash (:stash)".into(),
-        },
-        PaletteItem::Command {
-            id: "pr".into(),
-            label: "Create PR (:pr)".into(),
-        },
-        PaletteItem::Command {
-            id: "follow".into(),
-            label: "Follow Peer (:follow <name>)".into(),
-        },
-        PaletteItem::Command {
-            id: "unfollow".into(),
-            label: "Stop Following (:unfollow)".into(),
-        },
-        PaletteItem::Command {
-            id: "share-term".into(),
-            label: "Share Terminal (:share-term)".into(),
-        },
-        PaletteItem::Command {
-            id: "view-term".into(),
-            label: "View Shared Terminal (:view-term)".into(),
-        },
-        PaletteItem::Command {
-            id: "term new".into(),
-            label: "New Terminal Tab (:term new)".into(),
-        },
-        PaletteItem::Command {
-            id: "fix".into(),
-            label: "Fix Last Failed Command (:fix)".into(),
-        },
-        PaletteItem::Command {
-            id: "agent".into(),
-            label: "AI Agent (:agent <task>)".into(),
-        },
-        PaletteItem::Command {
-            id: "registers".into(),
-            label: "View Registers (:registers)".into(),
-        },
-        PaletteItem::Command {
-            id: "marks".into(),
-            label: "View Marks (:marks)".into(),
-        },
+        cmd("w", "Save", "Ctrl+S"),
+        cmd("q", "Quit", ""),
+        cmd("wq", "Save & Quit", ""),
+        cmd("q!", "Force Quit", ""),
+        cmd("qa", "Quit All", ""),
+        cmd("wqa", "Save All & Quit", ""),
+        cmd("vsplit", "Vertical Split", ""),
+        cmd("hsplit", "Horizontal Split", ""),
+        cmd("only", "Close Split", ""),
+        cmd("settings", "Settings", "Ctrl+,"),
+        cmd("compact", "Compact Conversations", ""),
+        cmd("host", "Host Collab Session", ""),
+        cmd("collab-stop", "Stop Collab", ""),
+        cmd("commit", "AI Commit Message", ""),
+        cmd("blame", "Toggle Blame", ""),
+        cmd("help", "Help", ""),
+        cmd("plugins", "List Plugins", ""),
+        cmd("update", "Check for Updates", ""),
+        cmd("version", "Show Version", ""),
+        cmd("tree", "Toggle File Tree", "Ctrl+N"),
+        cmd("term", "Toggle Terminal", "Ctrl+T"),
+        cmd("chat", "Toggle Chat Panel", "Ctrl+J"),
+        cmd("files", "File Picker", "Ctrl+P"),
+        cmd("intent", "AI Intent Mode", ""),
+        cmd("outline", "Document Outline", "Ctrl+O"),
+        cmd("visor", "AI Visor", "Ctrl+I"),
+        cmd("search", "Project Search", "Ctrl+F"),
+        cmd("graph", "Git Graph", "Ctrl+Shift+G"),
+        cmd("stash", "Git Stash", ""),
+        cmd("pr", "Create PR", ""),
+        cmd("follow", "Follow Peer", ""),
+        cmd("unfollow", "Stop Following", ""),
+        cmd("share-term", "Share Terminal", ""),
+        cmd("view-term", "View Shared Terminal", ""),
+        cmd("term new", "New Terminal Tab", "Ctrl+Shift+T"),
+        cmd("fix", "Fix Last Failed Command", ""),
+        cmd("agent", "AI Agent", ""),
+        cmd("agent plan", "AI Agent (Plan Mode)", ""),
+        cmd("registers", "View Registers", ""),
+        cmd("marks", "View Marks", ""),
+        cmd("branches", "Branch Picker", "Ctrl+B"),
+        cmd("git", "Source Control", "Ctrl+G"),
+        cmd("noh", "Clear Search Highlights", ""),
     ]
 }
 
@@ -415,6 +322,7 @@ mod tests {
             PaletteItem::Command {
                 id: "w".into(),
                 label: "Save".into(),
+                shortcut: String::new(),
             },
             PaletteItem::File {
                 path: "test.rs".into(),
@@ -431,10 +339,12 @@ mod tests {
             PaletteItem::Command {
                 id: "w".into(),
                 label: "Save".into(),
+                shortcut: String::new(),
             },
             PaletteItem::Command {
                 id: "q".into(),
                 label: "Quit".into(),
+                shortcut: String::new(),
             },
         ];
         palette.query = "save".into();

@@ -4719,7 +4719,8 @@ fn draw_command_palette(
         };
 
         let display = item.display_text();
-        let line = ratatui::text::Line::from(vec![
+        let shortcut = item.shortcut();
+        let mut spans = vec![
             Span::styled(
                 format!(" [{badge}] "),
                 if is_selected {
@@ -4739,7 +4740,18 @@ fn draw_command_palette(
                     Style::default().fg(Color::White)
                 },
             ),
-        ]);
+        ];
+        if !shortcut.is_empty() {
+            spans.push(Span::styled(
+                format!("  ({shortcut})"),
+                if is_selected {
+                    Style::default().fg(Color::DarkGray).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                },
+            ));
+        }
+        let line = ratatui::text::Line::from(spans);
 
         let bg = if is_selected {
             Style::default().bg(Color::Cyan)

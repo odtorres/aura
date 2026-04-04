@@ -449,6 +449,39 @@ impl Buffer {
         i
     }
 
+    /// Move backward to the end of the previous word (vim `ge` motion).
+    pub fn word_end_backward(&self, char_idx: usize) -> usize {
+        if char_idx == 0 {
+            return 0;
+        }
+        let mut i = char_idx;
+
+        // Skip whitespace backward.
+        while i > 0 && self.char_at(i).is_whitespace() {
+            i -= 1;
+        }
+
+        if i == 0 {
+            return 0;
+        }
+
+        // Now we're on the last char of a word — skip backward through the word.
+        let ch = self.char_at(i);
+        if is_word_char(ch) {
+            while i > 0 && is_word_char(self.char_at(i - 1)) {
+                i -= 1;
+            }
+        } else {
+            while i > 0
+                && !is_word_char(self.char_at(i - 1))
+                && !self.char_at(i - 1).is_whitespace()
+            {
+                i -= 1;
+            }
+        }
+        i
+    }
+
     /// Get the character at a given index. Returns a space if out of bounds.
     fn char_at(&self, idx: usize) -> char {
         if idx < self.rope.len_chars() {

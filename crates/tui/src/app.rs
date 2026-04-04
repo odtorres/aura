@@ -562,6 +562,8 @@ pub struct App {
     pub rename_input: String,
     /// Last time the source control panel was refreshed.
     last_sc_refresh: std::time::Instant,
+    /// Last time auto-save was performed.
+    auto_save_last: std::time::Instant,
     /// Right-side AI conversation history panel.
     pub conversation_history: ConversationHistoryPanel,
     /// Whether the conversation history panel has keyboard focus.
@@ -658,6 +660,10 @@ pub struct App {
     pub search_active: bool,
     /// Whether search direction is forward (/) or backward (?).
     pub search_forward: bool,
+    /// History of previous search queries (most recent last).
+    pub search_history: Vec<String>,
+    /// Index into search_history when browsing with Up/Down (None = not browsing).
+    pub search_history_idx: Option<usize>,
     /// All match positions as (start_char_idx, end_char_idx) pairs.
     pub search_matches: Vec<(usize, usize)>,
     /// Index into search_matches for the current/focused match.
@@ -989,6 +995,7 @@ impl App {
             rename_active: false,
             rename_input: String::new(),
             last_sc_refresh: std::time::Instant::now(),
+            auto_save_last: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
             chat_panel: ChatPanel::new(40),
@@ -1032,6 +1039,8 @@ impl App {
             search_input: String::new(),
             search_active: false,
             search_forward: true,
+            search_history: Vec::new(),
+            search_history_idx: None,
             search_matches: Vec::new(),
             search_current: 0,
             peek_definition: None,
@@ -1309,6 +1318,17 @@ impl App {
                 && self.last_sc_refresh.elapsed() > Duration::from_secs(2)
             {
                 self.refresh_source_control();
+            }
+
+            // Auto-save modified buffers on interval.
+            let auto_secs = self.config.editor.auto_save_seconds;
+            if auto_secs > 0 && self.auto_save_last.elapsed() > Duration::from_secs(auto_secs) {
+                self.auto_save_last = std::time::Instant::now();
+                for tab in self.tabs.tabs_mut() {
+                    if tab.buffer.is_modified() && tab.buffer.file_path().is_some() {
+                        let _ = tab.buffer.save();
+                    }
+                }
             }
 
             // Poll for terminal events with a small timeout.
@@ -8629,6 +8649,7 @@ impl App {
                 |(name, task)| crate::command_palette::PaletteItem::Command {
                     id: format!("task {name}"),
                     label: format!("Task: {} — {}", name, task.description),
+                    shortcut: String::new(),
                 },
             )
             .collect();
