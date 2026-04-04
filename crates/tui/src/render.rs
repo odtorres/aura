@@ -5984,7 +5984,23 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
         format!("/{}{}", app.search_input, match_info)
     } else {
         match app.mode {
-            Mode::Command => format!(":{}", app.command_input),
+            Mode::Command => {
+                // Build command input with inline ghost completion.
+                let base = format!(":{}", app.command_input);
+                if let Some(idx) = app.command_completion_idx {
+                    if let Some((cmd, _)) = app.command_completions.get(idx) {
+                        if let Some(suffix) = cmd.strip_prefix(app.command_input.trim()) {
+                            format!("{base}{suffix}")
+                        } else {
+                            base
+                        }
+                    } else {
+                        base
+                    }
+                } else {
+                    base
+                }
+            }
             Mode::Intent => format!("intent> {}", app.intent_input),
             Mode::Review => {
                 if let Some(proposal) = &app.proposal {
@@ -6022,6 +6038,83 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
     };
+
+    // Render command completion popup above the command bar.
+    if app.mode == Mode::Command && !app.command_completions.is_empty() {
+        let max_items = app.command_completions.len().min(10);
+        let popup_height = max_items as u16 + 2; // +2 for borders
+                                                 // Find max width needed.
+        let max_width = app
+            .command_completions
+            .iter()
+            .take(max_items)
+            .map(|(cmd, desc)| cmd.len() + desc.len() + 5) // " :cmd  desc "
+            .max()
+            .unwrap_or(20)
+            .min(area.width as usize);
+        let popup_width = (max_width as u16 + 2).min(area.width); // +2 for borders
+
+        let popup_y = area.y.saturating_sub(popup_height);
+        let popup_area = Rect::new(area.x, popup_y, popup_width, popup_height);
+
+        let items: Vec<ratatui::text::Line> = app
+            .command_completions
+            .iter()
+            .take(max_items)
+            .enumerate()
+            .map(|(i, (cmd, desc))| {
+                let is_selected = app.command_completion_idx == Some(i);
+                let style = if is_selected {
+                    Style::default().fg(Color::Black).bg(app.theme.mode_command)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                let desc_style = if is_selected {
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .bg(app.theme.mode_command)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                ratatui::text::Line::from(vec![
+                    Span::styled(format!(" :{cmd}"), style),
+                    Span::styled(format!("  {desc} "), desc_style),
+                ])
+            })
+            .collect();
+
+        let popup_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().bg(app.theme.bg));
+        let popup_paragraph = Paragraph::new(items).block(popup_block);
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup_paragraph, popup_area);
+    }
+
+    // Render command bar content — use spans for ghost completion styling.
+    if app.mode == Mode::Command {
+        let input_part = format!(":{}", app.command_input);
+        let ghost_part = if let Some(idx) = app.command_completion_idx {
+            if let Some((cmd, _)) = app.command_completions.get(idx) {
+                cmd.strip_prefix(app.command_input.trim())
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let line = ratatui::text::Line::from(vec![
+            Span::styled(&input_part, Style::default().fg(app.theme.fg)),
+            Span::styled(ghost_part, Style::default().fg(Color::DarkGray)),
+        ]);
+        let paragraph = Paragraph::new(line);
+        frame.render_widget(paragraph, area);
+        return;
+    }
 
     let style = match app.mode {
         Mode::Intent => Style::default().fg(app.theme.mode_intent),

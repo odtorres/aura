@@ -319,6 +319,10 @@ pub struct App {
     pub should_quit: bool,
     /// Text buffer for command-mode input.
     pub command_input: String,
+    /// Filtered command completions matching the current input.
+    pub command_completions: Vec<(String, String)>,
+    /// Currently selected completion index.
+    pub command_completion_idx: Option<usize>,
     /// Transient message shown in the status bar.
     pub status_message: Option<String>,
     /// Yank register (clipboard).
@@ -820,6 +824,8 @@ impl App {
             mode: Mode::Normal,
             should_quit: false,
             command_input: String::new(),
+            command_completions: Vec::new(),
+            command_completion_idx: None,
             status_message: None,
             register: None,
             pending_operator: None,

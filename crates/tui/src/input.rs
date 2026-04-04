@@ -2894,27 +2894,171 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     }
 }
 
+/// All available `:` commands with their descriptions for autocomplete.
+const COMMAND_LIST: &[(&str, &str)] = &[
+    ("w", "Write (save) current file"),
+    ("q", "Quit (close tab or exit)"),
+    ("q!", "Force quit without saving"),
+    ("qa", "Quit all tabs"),
+    ("qa!", "Force quit all tabs"),
+    ("wq", "Save and quit"),
+    ("wqa", "Save all and quit"),
+    ("intent", "Enter AI intent mode"),
+    ("decisions", "Show recent AI decisions"),
+    ("undo-tree", "Visual undo history"),
+    ("commit", "Generate AI commit message"),
+    ("branches", "Open branch picker"),
+    ("graph", "Visual git graph"),
+    ("blame", "Toggle git blame"),
+    ("log", "Show Aura git log"),
+    ("experiment", "Enter experiment mode"),
+    ("code-action", "LSP code actions"),
+    ("plugins", "List loaded plugins"),
+    ("help", "Open help overlay"),
+    ("files", "Fuzzy file picker"),
+    ("tabnew", "Open new scratch tab"),
+    ("tabe", "Open file in new tab"),
+    ("tabc", "Close current tab"),
+    ("tabn", "Next tab"),
+    ("tabp", "Previous tab"),
+    ("term", "Toggle terminal"),
+    ("term new", "New terminal tab"),
+    ("term close", "Close terminal tab"),
+    ("term next", "Next terminal tab"),
+    ("term prev", "Previous terminal tab"),
+    ("tree", "Toggle file tree sidebar"),
+    ("git", "Open source control panel"),
+    ("term-height", "Set terminal height"),
+    ("noh", "Clear search highlights"),
+    ("version", "Show AURA version"),
+    ("update", "Check for updates"),
+    ("vsplit", "Vertical split"),
+    ("hsplit", "Horizontal split"),
+    ("split", "Horizontal split"),
+    ("only", "Close all splits"),
+    ("settings", "Open settings"),
+    ("compact", "Compact AI conversations"),
+    ("host", "Start collab hosting"),
+    ("collab-stop", "Stop collab session"),
+    ("unfollow", "Stop following peer"),
+    ("share-term", "Toggle terminal sharing"),
+    ("view-term", "View shared terminal"),
+    ("stash", "Git stash"),
+    ("stash pop", "Git stash pop"),
+    ("stash drop", "Git stash drop"),
+    ("pr", "Create pull request"),
+    ("tasks", "List project tasks"),
+    ("outline", "Open symbol outline"),
+    ("agent", "Start AI agent"),
+    ("agent stop", "Stop AI agent"),
+    ("fix", "Fix last failed command"),
+    ("registers", "Show registers"),
+    ("marks", "Show marks"),
+    ("search", "Project-wide search"),
+    ("grep", "Project-wide search"),
+    ("visor", "Claude Code config browser"),
+    ("ai-visor", "Claude Code config browser"),
+    ("references", "LSP find references"),
+    ("rename", "LSP rename symbol"),
+    ("merge", "Open merge conflict view"),
+    ("debug", "Start debug session"),
+    ("breakpoint", "Toggle breakpoint"),
+    ("continue", "Debug continue"),
+    ("step", "Debug step over"),
+    ("stepin", "Debug step in"),
+    ("stepout", "Debug step out"),
+    ("debug stop", "Stop debugger"),
+    ("debug panel", "Toggle debug panel"),
+    ("set relativenumber", "Relative line numbers ON"),
+    ("set norelativenumber", "Relative line numbers OFF"),
+    ("set wrap", "Word wrap ON"),
+    ("set nowrap", "Word wrap OFF"),
+    ("accept-current", "Accept current in conflict"),
+    ("accept-incoming", "Accept incoming in conflict"),
+    ("accept-both", "Accept both in conflict"),
+    ("seed-history", "Seed conversation history"),
+];
+
+/// Update command completions based on current input.
+fn update_command_completions(app: &mut App) {
+    let input = app.command_input.trim().to_lowercase();
+    if input.is_empty() {
+        app.command_completions.clear();
+        app.command_completion_idx = None;
+        return;
+    }
+    app.command_completions = COMMAND_LIST
+        .iter()
+        .filter(|(cmd, _)| cmd.starts_with(&input) && *cmd != input)
+        .map(|(cmd, desc)| (cmd.to_string(), desc.to_string()))
+        .collect();
+    app.command_completion_idx = if app.command_completions.is_empty() {
+        None
+    } else {
+        Some(0)
+    };
+}
+
 /// Handle keys in Command mode.
 pub fn handle_command(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
             app.command_input.clear();
+            app.command_completions.clear();
+            app.command_completion_idx = None;
         }
         KeyCode::Enter => {
             let cmd = app.command_input.clone();
             app.command_input.clear();
+            app.command_completions.clear();
+            app.command_completion_idx = None;
             app.mode = Mode::Normal;
             execute_command(app, &cmd);
+        }
+        // Tab — accept current completion or cycle to next.
+        KeyCode::Tab => {
+            if !app.command_completions.is_empty() {
+                if let Some(idx) = app.command_completion_idx {
+                    app.command_input = app.command_completions[idx].0.clone();
+                    // After accepting, recompute for further narrowing.
+                    update_command_completions(app);
+                }
+            }
+        }
+        // Shift+Tab or Up — cycle completion backwards.
+        KeyCode::BackTab | KeyCode::Up => {
+            if !app.command_completions.is_empty() {
+                if let Some(idx) = app.command_completion_idx {
+                    app.command_completion_idx = Some(if idx == 0 {
+                        app.command_completions.len() - 1
+                    } else {
+                        idx - 1
+                    });
+                }
+            }
+        }
+        // Down — cycle completion forward.
+        KeyCode::Down => {
+            if !app.command_completions.is_empty() {
+                if let Some(idx) = app.command_completion_idx {
+                    app.command_completion_idx = Some((idx + 1) % app.command_completions.len());
+                }
+            }
         }
         KeyCode::Backspace => {
             app.command_input.pop();
             if app.command_input.is_empty() {
                 app.mode = Mode::Normal;
+                app.command_completions.clear();
+                app.command_completion_idx = None;
+            } else {
+                update_command_completions(app);
             }
         }
         KeyCode::Char(c) => {
             app.command_input.push(c);
+            update_command_completions(app);
         }
         _ => {}
     }
