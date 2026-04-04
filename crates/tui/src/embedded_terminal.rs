@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use unicode_width::UnicodeWidthChar;
 
 /// Terminal color — supports default, ANSI 256, and true color (RGB).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -43,6 +44,9 @@ pub struct TerminalCell {
     pub reverse: bool,
     /// Whether the cell has strikethrough (SGR 9).
     pub strikethrough: bool,
+    /// Whether this cell is a continuation (spacer) for a wide character in the
+    /// preceding cell. Continuation cells should be skipped during rendering.
+    pub continuation: bool,
 }
 
 impl Default for TerminalCell {
@@ -57,6 +61,7 @@ impl Default for TerminalCell {
             underline: false,
             reverse: false,
             strikethrough: false,
+            continuation: false,
         }
     }
 }
@@ -423,6 +428,13 @@ impl vte::Perform for Performer {
     fn print(&mut self, c: char) {
         let mut scr = self.screen.lock().expect("terminal screen lock");
 
+        let char_width = UnicodeWidthChar::width(c).unwrap_or(0);
+
+        // Zero-width characters (combining marks, etc.) — attach to current cell.
+        if char_width == 0 {
+            return;
+        }
+
         // If a wrap is pending (cursor was at the last column), wrap now.
         if scr.wrap_pending {
             scr.wrap_pending = false;
@@ -434,9 +446,38 @@ impl vte::Perform for Performer {
             }
         }
 
+        // For wide characters, if we're at the last column, wrap first.
+        if char_width == 2 && scr.cursor_col + 1 >= scr.cols {
+            if scr.auto_wrap {
+                // Clear the current cell and wrap to next line.
+                let cr = scr.cursor_row;
+                let cc = scr.cursor_col;
+                if cc < scr.cols {
+                    scr.cells[cr][cc] = TerminalCell::default();
+                }
+                scr.cursor_col = 0;
+                if scr.cursor_row == scr.scroll_bottom {
+                    scr.scroll_up();
+                } else if scr.cursor_row + 1 < scr.rows {
+                    scr.cursor_row += 1;
+                }
+            } else {
+                return; // Can't fit wide char, discard.
+            }
+        }
+
         let row = scr.cursor_row;
         let col = scr.cursor_col;
         if row < scr.rows && col < scr.cols {
+            // If we're overwriting a wide character's first cell, clear its continuation.
+            if col + 1 < scr.cols && scr.cells[row][col + 1].continuation {
+                scr.cells[row][col + 1] = TerminalCell::default();
+            }
+            // If we're overwriting a continuation cell, clear the wide char before it.
+            if scr.cells[row][col].continuation && col > 0 {
+                scr.cells[row][col - 1] = TerminalCell::default();
+            }
+
             let cell = TerminalCell {
                 ch: c,
                 fg: scr.current_fg,
@@ -447,16 +488,26 @@ impl vte::Perform for Performer {
                 underline: scr.current_underline,
                 reverse: scr.current_reverse,
                 strikethrough: scr.current_strikethrough,
+                continuation: false,
             };
             scr.cells[row][col] = cell;
-            if scr.cursor_col + 1 >= scr.cols {
+
+            // Place continuation cell for wide characters.
+            if char_width == 2 && col + 1 < scr.cols {
+                scr.cells[row][col + 1] = TerminalCell {
+                    ch: ' ',
+                    continuation: true,
+                    ..cell
+                };
+            }
+
+            let advance = col + char_width;
+            if advance >= scr.cols {
                 if scr.auto_wrap {
-                    // Don't wrap yet — set pending so the next print wraps.
                     scr.wrap_pending = true;
                 }
-                // cursor stays at last col until next print triggers wrap
             } else {
-                scr.cursor_col += 1;
+                scr.cursor_col = advance;
             }
         }
     }

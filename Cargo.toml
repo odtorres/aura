@@ -3,7 +3,7 @@ members = ["crates/core", "crates/tui", "crates/ai", "crates/editor", "crates/br
 resolver = "2"
 
 [workspace.package]
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 license = "MIT"
 rust-version = "1.75"
@@ -94,6 +94,7 @@ semver = "1"
 # Terminal emulation
 portable-pty = "0.8"
 vte = "0.13"
+unicode-width = "0.2"
 
 # Testing
 proptest = "1"

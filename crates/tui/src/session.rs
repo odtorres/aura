@@ -60,6 +60,9 @@ pub struct UiState {
     /// Whether the conversation history panel is visible.
     #[serde(default)]
     pub conversation_history_visible: bool,
+    /// AI Visor panel width.
+    #[serde(default)]
+    pub ai_visor_width: Option<u16>,
     /// Whether the AI Visor panel is visible.
     #[serde(default)]
     pub ai_visor_visible: bool,
@@ -244,6 +247,7 @@ mod tests {
                 terminal_height: Some(12),
                 conversation_history_width: None,
                 conversation_history_visible: false,
+                ai_visor_width: None,
                 ai_visor_visible: false,
                 debug_panel_visible: false,
                 split_active: false,
