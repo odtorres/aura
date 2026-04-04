@@ -1539,6 +1539,14 @@ impl App {
                     None
                 },
                 macro_registers,
+                search_history: self
+                    .search_history
+                    .iter()
+                    .rev()
+                    .take(50)
+                    .rev()
+                    .cloned()
+                    .collect(),
             },
         };
 
@@ -1689,6 +1697,9 @@ impl App {
                 self.macro_registers.insert(*c, keys);
             }
         }
+
+        // Restore search history.
+        self.search_history = session.ui.search_history.clone();
 
         self.set_status(format!(
             "Session restored ({} tab{})",

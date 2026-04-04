@@ -1817,6 +1817,25 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.clamp_cursor();
                 return;
             }
+            KeyCode::Char('E') => {
+                // gE — backward to end of previous WORD (whitespace-delimited).
+                let tab = app.tab_mut();
+                let mut pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
+                if pos > 0 {
+                    pos = pos.saturating_sub(1);
+                    // Skip whitespace backward.
+                    while pos > 0 && tab.buffer.rope().char(pos).is_whitespace() {
+                        pos -= 1;
+                    }
+                    // Skip non-whitespace backward.
+                    while pos > 0 && !tab.buffer.rope().char(pos - 1).is_whitespace() {
+                        pos -= 1;
+                    }
+                }
+                tab.cursor = tab.buffer.char_idx_to_cursor(pos);
+                app.clamp_cursor();
+                return;
+            }
             KeyCode::Char('t') => {
                 app.tabs.next();
                 return;

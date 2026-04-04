@@ -88,6 +88,11 @@ pub struct UiState {
     /// Recorded macro key sequences: register char → list of key strings.
     #[serde(default)]
     pub macro_registers: HashMap<char, Vec<String>>,
+
+    // --- Search history ---
+    /// Previous search queries (most recent last, max 50).
+    #[serde(default)]
+    pub search_history: Vec<String>,
 }
 
 /// Top-level session data written to disk.
@@ -259,6 +264,7 @@ mod tests {
                 split_direction: None,
                 split_tab_idx: None,
                 macro_registers: HashMap::from([('a', vec!["j".into(), "d".into(), "d".into()])]),
+                search_history: vec!["foo".into(), "bar".into()],
             },
         };
 
