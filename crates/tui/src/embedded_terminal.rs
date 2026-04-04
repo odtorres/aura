@@ -33,6 +33,16 @@ pub struct TerminalCell {
     pub bg: TermColor,
     /// Whether the cell is bold.
     pub bold: bool,
+    /// Whether the cell is dim/faint (SGR 2).
+    pub dim: bool,
+    /// Whether the cell is italic (SGR 3).
+    pub italic: bool,
+    /// Whether the cell is underlined (SGR 4).
+    pub underline: bool,
+    /// Whether the cell has reversed video (SGR 7) — fg/bg swapped.
+    pub reverse: bool,
+    /// Whether the cell has strikethrough (SGR 9).
+    pub strikethrough: bool,
 }
 
 impl Default for TerminalCell {
@@ -42,6 +52,11 @@ impl Default for TerminalCell {
             fg: TermColor::Default,
             bg: TermColor::Default,
             bold: false,
+            dim: false,
+            italic: false,
+            underline: false,
+            reverse: false,
+            strikethrough: false,
         }
     }
 }
@@ -92,6 +107,16 @@ pub struct TerminalScreen {
     current_bg: TermColor,
     /// Current SGR bold flag.
     current_bold: bool,
+    /// Current SGR dim/faint flag.
+    current_dim: bool,
+    /// Current SGR italic flag.
+    current_italic: bool,
+    /// Current SGR underline flag.
+    current_underline: bool,
+    /// Current SGR reverse video flag.
+    current_reverse: bool,
+    /// Current SGR strikethrough flag.
+    current_strikethrough: bool,
     /// Top of the scroll region (0-indexed).
     scroll_top: usize,
     /// Bottom of the scroll region (0-indexed, inclusive).
@@ -110,6 +135,16 @@ pub struct TerminalScreen {
     saved_bg: TermColor,
     /// Saved bold state for cursor save/restore.
     saved_bold: bool,
+    /// Saved dim state for cursor save/restore.
+    saved_dim: bool,
+    /// Saved italic state for cursor save/restore.
+    saved_italic: bool,
+    /// Saved underline state for cursor save/restore.
+    saved_underline: bool,
+    /// Saved reverse state for cursor save/restore.
+    saved_reverse: bool,
+    /// Saved strikethrough state for cursor save/restore.
+    saved_strikethrough: bool,
     /// Alternate screen buffer (saved when switching to alt screen).
     alt_screen: Option<Vec<Vec<TerminalCell>>>,
     /// Saved main-screen cursor for alt screen switch.
@@ -141,6 +176,11 @@ impl TerminalScreen {
             current_fg: TermColor::Default,
             current_bg: TermColor::Default,
             current_bold: false,
+            current_dim: false,
+            current_italic: false,
+            current_underline: false,
+            current_reverse: false,
+            current_strikethrough: false,
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
             scrollback: Vec::new(),
@@ -150,6 +190,11 @@ impl TerminalScreen {
             saved_fg: TermColor::Default,
             saved_bg: TermColor::Default,
             saved_bold: false,
+            saved_dim: false,
+            saved_italic: false,
+            saved_underline: false,
+            saved_reverse: false,
+            saved_strikethrough: false,
             alt_screen: None,
             alt_saved_cursor: (0, 0),
             auto_wrap: true,
@@ -234,6 +279,11 @@ impl TerminalScreen {
         self.saved_fg = self.current_fg;
         self.saved_bg = self.current_bg;
         self.saved_bold = self.current_bold;
+        self.saved_dim = self.current_dim;
+        self.saved_italic = self.current_italic;
+        self.saved_underline = self.current_underline;
+        self.saved_reverse = self.current_reverse;
+        self.saved_strikethrough = self.current_strikethrough;
     }
 
     /// Restore cursor position and attributes.
@@ -244,6 +294,11 @@ impl TerminalScreen {
         self.current_fg = self.saved_fg;
         self.current_bg = self.saved_bg;
         self.current_bold = self.saved_bold;
+        self.current_dim = self.saved_dim;
+        self.current_italic = self.saved_italic;
+        self.current_underline = self.saved_underline;
+        self.current_reverse = self.saved_reverse;
+        self.current_strikethrough = self.saved_strikethrough;
         self.wrap_pending = false;
     }
 
@@ -387,6 +442,11 @@ impl vte::Perform for Performer {
                 fg: scr.current_fg,
                 bg: scr.current_bg,
                 bold: scr.current_bold,
+                dim: scr.current_dim,
+                italic: scr.current_italic,
+                underline: scr.current_underline,
+                reverse: scr.current_reverse,
+                strikethrough: scr.current_strikethrough,
             };
             scr.cells[row][col] = cell;
             if scr.cursor_col + 1 >= scr.cols {
@@ -607,6 +667,11 @@ impl vte::Perform for Performer {
                     scr.current_fg = TermColor::Default;
                     scr.current_bg = TermColor::Default;
                     scr.current_bold = false;
+                    scr.current_dim = false;
+                    scr.current_italic = false;
+                    scr.current_underline = false;
+                    scr.current_reverse = false;
+                    scr.current_strikethrough = false;
                     return;
                 }
                 let mut i = 0;
@@ -616,9 +681,26 @@ impl vte::Perform for Performer {
                             scr.current_fg = TermColor::Default;
                             scr.current_bg = TermColor::Default;
                             scr.current_bold = false;
+                            scr.current_dim = false;
+                            scr.current_italic = false;
+                            scr.current_underline = false;
+                            scr.current_reverse = false;
+                            scr.current_strikethrough = false;
                         }
                         1 => scr.current_bold = true,
-                        22 => scr.current_bold = false,
+                        2 => scr.current_dim = true,
+                        3 => scr.current_italic = true,
+                        4 => scr.current_underline = true,
+                        7 => scr.current_reverse = true,
+                        9 => scr.current_strikethrough = true,
+                        22 => {
+                            scr.current_bold = false;
+                            scr.current_dim = false;
+                        }
+                        23 => scr.current_italic = false,
+                        24 => scr.current_underline = false,
+                        27 => scr.current_reverse = false,
+                        29 => scr.current_strikethrough = false,
                         // Standard foreground colors 30-37.
                         30..=37 => scr.current_fg = TermColor::Indexed((pv[i] - 30) as u8),
                         // Default foreground.
@@ -780,6 +862,11 @@ impl vte::Perform for Performer {
                 scr.current_fg = TermColor::Default;
                 scr.current_bg = TermColor::Default;
                 scr.current_bold = false;
+                scr.current_dim = false;
+                scr.current_italic = false;
+                scr.current_underline = false;
+                scr.current_reverse = false;
+                scr.current_strikethrough = false;
                 scr.auto_wrap = true;
                 scr.wrap_pending = false;
                 scr.scroll_top = 0;
@@ -826,6 +913,10 @@ pub struct EmbeddedTerminal {
     master: Option<Box<dyn MasterPty + Send>>,
     /// Whether the PTY is alive.
     pub running: bool,
+    /// Selection anchor (row, col) — where selection started.
+    pub selection_anchor: Option<(usize, usize)>,
+    /// Selection end (row, col) — where selection currently extends to.
+    pub selection_end: Option<(usize, usize)>,
 }
 
 impl EmbeddedTerminal {
@@ -869,6 +960,8 @@ impl EmbeddedTerminal {
                     master: None,
                     label: String::new(),
                     running: false,
+                    selection_anchor: None,
+                    selection_end: None,
                 };
             }
         };
@@ -907,6 +1000,8 @@ impl EmbeddedTerminal {
                     master: None,
                     label: String::new(),
                     running: false,
+                    selection_anchor: None,
+                    selection_end: None,
                 };
             }
         };
@@ -924,6 +1019,8 @@ impl EmbeddedTerminal {
                     master: None,
                     label: String::new(),
                     running: false,
+                    selection_anchor: None,
+                    selection_end: None,
                 };
             }
         };
@@ -941,6 +1038,8 @@ impl EmbeddedTerminal {
                     master: None,
                     label: String::new(),
                     running: false,
+                    selection_anchor: None,
+                    selection_end: None,
                 };
             }
         };
@@ -958,6 +1057,8 @@ impl EmbeddedTerminal {
             master: Some(pair.master),
             label: String::new(),
             running: true,
+            selection_anchor: None,
+            selection_end: None,
         }
     }
 
@@ -1295,6 +1396,75 @@ impl EmbeddedTerminal {
     /// Deprecated: use `send_enter` instead.
     pub fn execute(&mut self) {
         self.send_enter();
+    }
+
+    /// Start or update the text selection at the given screen position.
+    ///
+    /// If no selection exists, sets both anchor and end to `(row, col)`.
+    /// Otherwise, moves only the end.
+    pub fn start_selection(&mut self, row: usize, col: usize) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some((row, col));
+        }
+        self.selection_end = Some((row, col));
+    }
+
+    /// Extend the current selection to the given position.
+    pub fn extend_selection(&mut self, row: usize, col: usize) {
+        self.selection_end = Some((row, col));
+    }
+
+    /// Clear the current selection.
+    pub fn clear_selection(&mut self) {
+        self.selection_anchor = None;
+        self.selection_end = None;
+    }
+
+    /// Returns the normalized selection range: (start_row, start_col, end_row, end_col).
+    ///
+    /// Returns `None` if there is no active selection.
+    pub fn selection_range(&self) -> Option<(usize, usize, usize, usize)> {
+        let anchor = self.selection_anchor?;
+        let end = self.selection_end?;
+        let (sr, sc, er, ec) = if anchor.0 < end.0 || (anchor.0 == end.0 && anchor.1 <= end.1) {
+            (anchor.0, anchor.1, end.0, end.1)
+        } else {
+            (end.0, end.1, anchor.0, anchor.1)
+        };
+        Some((sr, sc, er, ec))
+    }
+
+    /// Extract the selected text from the current snapshot.
+    pub fn selected_text(&self) -> Option<String> {
+        let (sr, sc, er, ec) = self.selection_range()?;
+        let (snapshot, _, _) = self.snapshot();
+        let mut result = String::new();
+
+        for row_idx in sr..=er {
+            if row_idx >= snapshot.len() {
+                break;
+            }
+            let row = &snapshot[row_idx];
+            let col_start = if row_idx == sr { sc } else { 0 };
+            let col_end = if row_idx == er {
+                (ec + 1).min(row.len())
+            } else {
+                row.len()
+            };
+
+            let line: String = row[col_start..col_end].iter().map(|c| c.ch).collect();
+            let trimmed = line.trim_end();
+            result.push_str(trimmed);
+            if row_idx < er {
+                result.push('\n');
+            }
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
 }
 

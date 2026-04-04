@@ -1607,13 +1607,43 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
         let mut spans: Vec<Span> = Vec::new();
         let max_col = (inner.width as usize).min(row.len());
 
+        // Check if this row is within the terminal selection range.
+        let selection = app.terminal().selection_range();
+
         let mut col = 0;
         while col < max_col {
             // Group consecutive cells with the same style.
             let cell = &row[col];
-            let fg = term_color_to_ratatui(cell.fg, Color::White);
-            let bg = term_color_to_ratatui(cell.bg, Color::Reset);
+            let raw_fg = term_color_to_ratatui(cell.fg, Color::White);
+            let raw_bg = term_color_to_ratatui(cell.bg, Color::Reset);
+            // Apply reverse video: swap fg/bg.
+            let (fg, bg) = if cell.reverse {
+                (raw_bg, raw_fg)
+            } else {
+                (raw_fg, raw_bg)
+            };
             let bold = cell.bold;
+            let dim = cell.dim;
+            let italic = cell.italic;
+            let underline = cell.underline;
+            let strikethrough = cell.strikethrough;
+
+            // Check if this cell is inside the selection.
+            let in_selection = if let Some((sr, sc, er, ec)) = selection {
+                if row_idx > sr && row_idx < er {
+                    true
+                } else if row_idx == sr && row_idx == er {
+                    col >= sc && col <= ec
+                } else if row_idx == sr {
+                    col >= sc
+                } else if row_idx == er {
+                    col <= ec
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
 
             let mut text = String::new();
             text.push(cell.ch);
@@ -1623,7 +1653,32 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
                 let nc = &row[next];
                 let nfg = term_color_to_ratatui(nc.fg, Color::White);
                 let nbg = term_color_to_ratatui(nc.bg, Color::Reset);
-                if nfg == fg && nbg == bg && nc.bold == bold {
+                let (nfg, nbg) = if nc.reverse { (nbg, nfg) } else { (nfg, nbg) };
+                // Check if next cell has the same selection state.
+                let next_in_sel = if let Some((sr, sc, er, ec)) = selection {
+                    if row_idx > sr && row_idx < er {
+                        true
+                    } else if row_idx == sr && row_idx == er {
+                        next >= sc && next <= ec
+                    } else if row_idx == sr {
+                        next >= sc
+                    } else if row_idx == er {
+                        next <= ec
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if nfg == fg
+                    && nbg == bg
+                    && nc.bold == bold
+                    && nc.dim == dim
+                    && nc.italic == italic
+                    && nc.underline == underline
+                    && nc.strikethrough == strikethrough
+                    && next_in_sel == in_selection
+                {
                     text.push(nc.ch);
                     next += 1;
                 } else {
@@ -1634,6 +1689,22 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
             let mut style = Style::default().fg(fg).bg(bg);
             if bold {
                 style = style.add_modifier(Modifier::BOLD);
+            }
+            if dim {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            if italic {
+                style = style.add_modifier(Modifier::ITALIC);
+            }
+            if underline {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            if strikethrough {
+                style = style.add_modifier(Modifier::CROSSED_OUT);
+            }
+            // Highlight selected cells.
+            if in_selection {
+                style = style.bg(Color::Indexed(237)).fg(Color::White);
             }
 
             // Show cursor as reversed when terminal is focused.

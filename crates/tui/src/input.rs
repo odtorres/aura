@@ -708,8 +708,109 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Down if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
                 app.terminal_mut().height = app.terminal().height.saturating_sub(2).max(5);
             }
-            // Ctrl+C — send interrupt.
+            // Cmd+C (macOS) or Ctrl+Shift+C — copy selection to clipboard.
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::SUPER) => {
+                if let Some(text) = app.terminal().selected_text() {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&text);
+                    }
+                    app.terminal_mut().clear_selection();
+                    app.set_status("Copied from terminal");
+                }
+            }
+            KeyCode::Char('C')
+                if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+            {
+                if let Some(text) = app.terminal().selected_text() {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&text);
+                    }
+                    app.terminal_mut().clear_selection();
+                    app.set_status("Copied from terminal");
+                }
+            }
+            // Cmd+V (macOS) or Ctrl+Shift+V — paste from clipboard into terminal.
+            KeyCode::Char('v') if modifiers.contains(KeyModifiers::SUPER) => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        // Use bracketed paste to avoid shell interpretation issues.
+                        app.terminal_mut().send_bytes(b"\x1b[200~");
+                        app.terminal_mut().send_bytes(text.as_bytes());
+                        app.terminal_mut().send_bytes(b"\x1b[201~");
+                    }
+                }
+            }
+            KeyCode::Char('V')
+                if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+            {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        app.terminal_mut().send_bytes(b"\x1b[200~");
+                        app.terminal_mut().send_bytes(text.as_bytes());
+                        app.terminal_mut().send_bytes(b"\x1b[201~");
+                    }
+                }
+            }
+            // Shift+Arrow keys — text selection.
+            KeyCode::Left if modifiers.contains(KeyModifiers::SHIFT) => {
+                let (_, cursor_row, cursor_col) = app.terminal().snapshot();
+                let new_col = cursor_col.saturating_sub(1);
+                app.terminal_mut().start_selection(cursor_row, cursor_col);
+                app.terminal_mut().extend_selection(cursor_row, new_col);
+            }
+            KeyCode::Right if modifiers.contains(KeyModifiers::SHIFT) => {
+                let (snapshot, cursor_row, cursor_col) = app.terminal().snapshot();
+                let max_col = snapshot
+                    .first()
+                    .map(|r| r.len().saturating_sub(1))
+                    .unwrap_or(0);
+                let new_col = (cursor_col + 1).min(max_col);
+                app.terminal_mut().start_selection(cursor_row, cursor_col);
+                app.terminal_mut().extend_selection(cursor_row, new_col);
+            }
+            KeyCode::Up if modifiers.contains(KeyModifiers::SHIFT) => {
+                let (_, cursor_row, cursor_col) = app.terminal().snapshot();
+                let new_row = cursor_row.saturating_sub(1);
+                app.terminal_mut().start_selection(cursor_row, cursor_col);
+                app.terminal_mut().extend_selection(new_row, cursor_col);
+            }
+            KeyCode::Down if modifiers.contains(KeyModifiers::SHIFT) => {
+                let (snapshot, cursor_row, cursor_col) = app.terminal().snapshot();
+                let max_row = snapshot.len().saturating_sub(1);
+                let new_row = (cursor_row + 1).min(max_row);
+                app.terminal_mut().start_selection(cursor_row, cursor_col);
+                app.terminal_mut().extend_selection(new_row, cursor_col);
+            }
+            // Shift+Home — select to start of line.
+            KeyCode::Home if modifiers.contains(KeyModifiers::SHIFT) => {
+                let (_, cursor_row, cursor_col) = app.terminal().snapshot();
+                app.terminal_mut().start_selection(cursor_row, cursor_col);
+                app.terminal_mut().extend_selection(cursor_row, 0);
+            }
+            // Shift+End — select to end of line.
+            KeyCode::End if modifiers.contains(KeyModifiers::SHIFT) => {
+                let (snapshot, cursor_row, cursor_col) = app.terminal().snapshot();
+                let max_col = snapshot
+                    .get(cursor_row)
+                    .map(|r| r.len().saturating_sub(1))
+                    .unwrap_or(0);
+                app.terminal_mut().start_selection(cursor_row, cursor_col);
+                app.terminal_mut().extend_selection(cursor_row, max_col);
+            }
+            // Cmd+A or Ctrl+Shift+A — select all visible terminal content.
+            KeyCode::Char('a') if modifiers.contains(KeyModifiers::SUPER) => {
+                let (snapshot, _, _) = app.terminal().snapshot();
+                let max_row = snapshot.len().saturating_sub(1);
+                let max_col = snapshot
+                    .last()
+                    .map(|r| r.len().saturating_sub(1))
+                    .unwrap_or(0);
+                app.terminal_mut().selection_anchor = Some((0, 0));
+                app.terminal_mut().selection_end = Some((max_row, max_col));
+            }
+            // Ctrl+C — send interrupt (clear selection first if any).
             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_ctrl_c();
             }
             // Ctrl+D — send EOF.
@@ -726,27 +827,34 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.terminal_mut().send_bytes(&[ctrl_byte]);
             }
             KeyCode::Enter => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_enter();
             }
             KeyCode::Backspace => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_backspace();
             }
             KeyCode::Tab => {
                 app.terminal_mut().send_tab();
             }
             KeyCode::Up => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_arrow_up();
             }
             KeyCode::Down => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_arrow_down();
             }
             KeyCode::Left => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_arrow_left();
             }
             KeyCode::Right => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_arrow_right();
             }
             KeyCode::Char(c) => {
+                app.terminal_mut().clear_selection();
                 app.terminal_mut().send_char(c);
             }
             _ => {}
