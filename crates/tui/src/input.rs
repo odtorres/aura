@@ -2809,9 +2809,30 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     .buffer
                     .delete(word_start, word_end, aura_core::AuthorId::human());
 
-                // Expand snippet.
+                // Resolve snippet variables then expand.
+                let ctx = crate::snippets::SnippetContext {
+                    filename: app
+                        .tab()
+                        .buffer
+                        .file_path()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("untitled")
+                        .to_string(),
+                    filename_base: app
+                        .tab()
+                        .buffer
+                        .file_path()
+                        .and_then(|p| p.file_stem())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("untitled")
+                        .to_string(),
+                    line_number: app.tab().cursor.row + 1,
+                    selected_text: String::new(),
+                };
+                let resolved_body = crate::snippets::resolve_variables(&snippet.body, Some(&ctx));
                 let (expanded, placeholders) =
-                    crate::snippets::SnippetEngine::expand(&snippet.body, &indent);
+                    crate::snippets::SnippetEngine::expand(&resolved_body, &indent);
 
                 // Insert expanded text.
                 app.tab_mut()

@@ -178,8 +178,23 @@ pub enum LspEvent {
     References(Vec<LspLocation>),
     /// Response to a textDocument/rename request (uri → edits).
     RenameApplied(HashMap<String, Vec<TextEdit>>),
+    /// Inlay hints for the visible range.
+    InlayHints(Vec<InlayHint>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
+}
+
+/// An inlay hint from the language server.
+#[derive(Debug, Clone)]
+pub struct InlayHint {
+    /// Line number (0-based).
+    pub line: u32,
+    /// Character offset (0-based).
+    pub character: u32,
+    /// The hint label text.
+    pub label: String,
+    /// Whether this is a type hint (vs parameter hint).
+    pub is_type: bool,
 }
 
 // ── Server configuration ──────────────────────────────────────────
@@ -471,6 +486,22 @@ impl LspClient {
         );
     }
 
+    /// Request inlay hints for a range of lines.
+    pub fn request_inlay_hints(&mut self, start_line: u32, end_line: u32) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/inlayHint",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "range": {
+                    "start": { "line": start_line, "character": 0 },
+                    "end": { "line": end_line, "character": 0 }
+                }
+            }),
+        );
+    }
+
     /// Request a rename of the symbol at the given position.
     pub fn rename(&mut self, line: u32, character: u32, new_name: &str) {
         let id = self.alloc_id();
@@ -696,6 +727,43 @@ fn reader_thread(
                                     .filter_map(|v| serde_json::from_value(v.clone()).ok())
                                     .collect();
                                 let _ = tx.send(LspEvent::CodeActions(actions));
+                            }
+                            continue;
+                        }
+                        "textDocument/inlayHint" => {
+                            if let Some(arr) = result.as_array() {
+                                let hints: Vec<InlayHint> = arr
+                                    .iter()
+                                    .filter_map(|v| {
+                                        let pos = v.get("position")?;
+                                        let line = pos.get("line")?.as_u64()? as u32;
+                                        let character = pos.get("character")?.as_u64()? as u32;
+                                        let label = if let Some(s) = v.get("label")?.as_str() {
+                                            s.to_string()
+                                        } else if let Some(parts) = v.get("label")?.as_array() {
+                                            // InlayHintLabelPart[] format.
+                                            parts
+                                                .iter()
+                                                .filter_map(|p| {
+                                                    p.get("value")?.as_str().map(String::from)
+                                                })
+                                                .collect::<Vec<_>>()
+                                                .join("")
+                                        } else {
+                                            return None;
+                                        };
+                                        // kind: 1 = Type, 2 = Parameter
+                                        let kind =
+                                            v.get("kind").and_then(|k| k.as_u64()).unwrap_or(0);
+                                        Some(InlayHint {
+                                            line,
+                                            character,
+                                            label,
+                                            is_type: kind == 1,
+                                        })
+                                    })
+                                    .collect();
+                                let _ = tx.send(LspEvent::InlayHints(hints));
                             }
                             continue;
                         }

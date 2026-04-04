@@ -1326,6 +1326,12 @@ impl App {
             if self.tab().lsp_last_change.elapsed() > Duration::from_millis(300) {
                 if self.tab().lsp_change_pending {
                     self.send_lsp_did_change();
+                    // Request inlay hints for the visible range after changes settle.
+                    let scroll = self.tab().scroll_row as u32;
+                    let viewport = 50u32; // request a bit more than visible
+                    if let Some(ref mut lsp) = self.tab_mut().lsp_client {
+                        lsp.request_inlay_hints(scroll, scroll + viewport);
+                    }
                 }
                 if self.tab().semantic_dirty {
                     self.refresh_semantic_index();
@@ -3620,6 +3626,9 @@ impl App {
                 }
                 LspEvent::RenameApplied(edits) => {
                     self.apply_rename_edits(edits);
+                }
+                LspEvent::InlayHints(hints) => {
+                    self.tab_mut().inlay_hints = hints;
                 }
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);

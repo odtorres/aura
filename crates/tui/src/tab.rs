@@ -141,6 +141,8 @@ pub struct EditorTab {
     pub foldable_ranges: std::collections::HashMap<usize, usize>,
     /// Whether this tab is pinned (protected from accidental close).
     pub pinned: bool,
+    /// Cached inlay hints from LSP for the current viewport.
+    pub inlay_hints: Vec<crate::lsp::InlayHint>,
 }
 
 impl EditorTab {
@@ -223,6 +225,7 @@ impl EditorTab {
             folded_ranges: std::collections::HashMap::new(),
             foldable_ranges: std::collections::HashMap::new(),
             pinned: false,
+            inlay_hints: Vec::new(),
         };
         tab.refresh_semantic_index();
         tab

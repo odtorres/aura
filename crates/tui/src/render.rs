@@ -5656,6 +5656,10 @@ fn draw_editor_pane(
     draw_editor(frame, app, content_area, &git_status);
     // Rainbow indent guides (drawn before search highlights so they don't obscure matches).
     draw_indent_guides(frame, app, content_area);
+    // Inlay hints from LSP.
+    if !app.tab().inlay_hints.is_empty() {
+        draw_inlay_hints(frame, app, content_area);
+    }
     // Search match highlights (drawn as overlay on top of text).
     if !app.search_matches.is_empty() {
         draw_search_highlights(frame, app, content_area);
@@ -5773,6 +5777,58 @@ fn draw_indent_guides(frame: &mut Frame, app: &App, area: Rect) {
             col += tab_w;
             level += 1;
         }
+    }
+}
+
+/// Draw inlay hints from LSP as dimmed inline text.
+fn draw_inlay_hints(frame: &mut Frame, app: &App, area: Rect) {
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_x = area.x + gutter_width;
+    let text_w = area.width.saturating_sub(gutter_width) as usize;
+
+    let type_style = Style::default()
+        .fg(Color::Rgb(120, 160, 180))
+        .add_modifier(Modifier::ITALIC);
+    let param_style = Style::default()
+        .fg(Color::Rgb(160, 140, 120))
+        .add_modifier(Modifier::ITALIC);
+
+    for hint in &tab.inlay_hints {
+        let row = hint.line as usize;
+        if row < scroll_row || row >= scroll_row + visible_rows {
+            continue;
+        }
+        let screen_y = area.y + (row - scroll_row) as u16;
+        let col = (hint.character as usize).saturating_sub(scroll_col);
+        if col >= text_w {
+            continue;
+        }
+
+        // Render the hint label after the position.
+        let label = if hint.is_type {
+            format!(": {}", hint.label)
+        } else {
+            format!("{}:", hint.label)
+        };
+        let max_len = text_w.saturating_sub(col);
+        let display: String = label.chars().take(max_len).collect();
+        let style = if hint.is_type {
+            type_style
+        } else {
+            param_style
+        };
+
+        let cell = Rect::new(
+            text_x + col as u16,
+            screen_y,
+            display.len().min(max_len) as u16,
+            1,
+        );
+        frame.render_widget(Paragraph::new(Span::styled(display, style)), cell);
     }
 }
 

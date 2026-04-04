@@ -71,6 +71,69 @@ pub struct SnippetEngine {
     pub active: Option<ActiveSnippet>,
 }
 
+/// Context for resolving snippet variables like `$TM_FILENAME`.
+pub struct SnippetContext {
+    /// Current file name (e.g., "main.rs").
+    pub filename: String,
+    /// Current file path without extension.
+    pub filename_base: String,
+    /// Current line number (1-based).
+    pub line_number: usize,
+    /// Current selected text (empty if none).
+    pub selected_text: String,
+}
+
+/// Resolve snippet variables in a body string before placeholder expansion.
+///
+/// Supported variables:
+/// - `$TM_FILENAME` / `${TM_FILENAME}` — file name
+/// - `$TM_FILENAME_BASE` — file name without extension
+/// - `$TM_LINE_NUMBER` — current line (1-based)
+/// - `$TM_SELECTED_TEXT` — selected text
+/// - `$CURRENT_YEAR`, `$CURRENT_MONTH`, `$CURRENT_DATE` — date parts
+pub fn resolve_variables(body: &str, ctx: Option<&SnippetContext>) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Approximate date from epoch seconds.
+    let days = now / 86400;
+    let year = 1970 + days / 365;
+    let month = (days % 365) / 30 + 1;
+    let day = (days % 365) % 30 + 1;
+
+    let mut result = body.to_string();
+    let vars: Vec<(&str, String)> = vec![
+        (
+            "TM_FILENAME",
+            ctx.map(|c| c.filename.clone()).unwrap_or_default(),
+        ),
+        (
+            "TM_FILENAME_BASE",
+            ctx.map(|c| c.filename_base.clone()).unwrap_or_default(),
+        ),
+        (
+            "TM_LINE_NUMBER",
+            ctx.map(|c| c.line_number.to_string()).unwrap_or_default(),
+        ),
+        (
+            "TM_SELECTED_TEXT",
+            ctx.map(|c| c.selected_text.clone()).unwrap_or_default(),
+        ),
+        ("CURRENT_YEAR", format!("{year}")),
+        ("CURRENT_MONTH", format!("{month:02}")),
+        ("CURRENT_DATE", format!("{day:02}")),
+    ];
+
+    // Replace longer names first to avoid partial matches.
+    for (name, value) in &vars {
+        result = result.replace(&format!("${{{name}}}"), value);
+        result = result.replace(&format!("${name}"), value);
+    }
+
+    result
+}
+
 impl SnippetEngine {
     /// Create a new engine with built-in snippets.
     pub fn new() -> Self {
