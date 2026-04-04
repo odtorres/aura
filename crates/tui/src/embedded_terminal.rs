@@ -968,6 +968,14 @@ pub struct EmbeddedTerminal {
     pub selection_anchor: Option<(usize, usize)>,
     /// Selection end (row, col) — where selection currently extends to.
     pub selection_end: Option<(usize, usize)>,
+    /// Whether terminal search is active (Ctrl+F or / in terminal).
+    pub search_active: bool,
+    /// Terminal search query.
+    pub search_query: String,
+    /// Search match positions: (scrollback_or_screen_row, col, length).
+    pub search_matches: Vec<(usize, usize, usize)>,
+    /// Current match index.
+    pub search_current: usize,
 }
 
 impl EmbeddedTerminal {
@@ -1013,6 +1021,10 @@ impl EmbeddedTerminal {
                     running: false,
                     selection_anchor: None,
                     selection_end: None,
+                    search_active: false,
+                    search_query: String::new(),
+                    search_matches: Vec::new(),
+                    search_current: 0,
                 };
             }
         };
@@ -1053,6 +1065,10 @@ impl EmbeddedTerminal {
                     running: false,
                     selection_anchor: None,
                     selection_end: None,
+                    search_active: false,
+                    search_query: String::new(),
+                    search_matches: Vec::new(),
+                    search_current: 0,
                 };
             }
         };
@@ -1072,6 +1088,10 @@ impl EmbeddedTerminal {
                     running: false,
                     selection_anchor: None,
                     selection_end: None,
+                    search_active: false,
+                    search_query: String::new(),
+                    search_matches: Vec::new(),
+                    search_current: 0,
                 };
             }
         };
@@ -1091,6 +1111,10 @@ impl EmbeddedTerminal {
                     running: false,
                     selection_anchor: None,
                     selection_end: None,
+                    search_active: false,
+                    search_query: String::new(),
+                    search_matches: Vec::new(),
+                    search_current: 0,
                 };
             }
         };
@@ -1110,6 +1134,10 @@ impl EmbeddedTerminal {
             running: true,
             selection_anchor: None,
             selection_end: None,
+            search_active: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_current: 0,
         }
     }
 
@@ -1515,6 +1543,94 @@ impl EmbeddedTerminal {
             None
         } else {
             Some(result)
+        }
+    }
+
+    /// Execute a search across the terminal scrollback and screen buffer.
+    ///
+    /// Updates `search_matches` with (row_in_all_lines, col, length) triples.
+    /// Row numbering: 0..scrollback.len() are scrollback lines,
+    /// then scrollback.len()..scrollback.len()+screen.rows are screen lines.
+    pub fn execute_search(&mut self) {
+        self.search_matches.clear();
+        self.search_current = 0;
+
+        if self.search_query.is_empty() {
+            return;
+        }
+
+        let scr = self.screen.lock().expect("terminal screen lock");
+        let query = &self.search_query;
+
+        // Helper: extract text from a row of cells.
+        let row_text = |cells: &[TerminalCell]| -> String { cells.iter().map(|c| c.ch).collect() };
+
+        // Search scrollback lines.
+        for (row_idx, line) in scr.scrollback.iter().enumerate() {
+            let text = row_text(line);
+            let mut start = 0;
+            while let Some(pos) = text[start..].find(query.as_str()) {
+                self.search_matches
+                    .push((row_idx, start + pos, query.len()));
+                start += pos + 1;
+            }
+        }
+
+        // Search screen lines.
+        let sb_len = scr.scrollback.len();
+        for (row_idx, line) in scr.cells.iter().enumerate() {
+            let text = row_text(line);
+            let mut start = 0;
+            while let Some(pos) = text[start..].find(query.as_str()) {
+                self.search_matches
+                    .push((sb_len + row_idx, start + pos, query.len()));
+                start += pos + 1;
+            }
+        }
+    }
+
+    /// Jump to the next search match and scroll to it.
+    pub fn search_next(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_current = (self.search_current + 1) % self.search_matches.len();
+        self.scroll_to_match();
+    }
+
+    /// Jump to the previous search match and scroll to it.
+    pub fn search_prev(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_current = if self.search_current == 0 {
+            self.search_matches.len() - 1
+        } else {
+            self.search_current - 1
+        };
+        self.scroll_to_match();
+    }
+
+    /// Scroll the terminal view to make the current search match visible.
+    pub fn scroll_to_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        let (match_row, _, _) = self.search_matches[self.search_current];
+        let scr = self.screen.lock().expect("terminal screen lock");
+        let sb_len = scr.scrollback.len();
+
+        if match_row < sb_len {
+            // Match is in scrollback — scroll to show it.
+            let target_offset = sb_len - match_row;
+            drop(scr);
+            let mut scr = self.screen.lock().expect("terminal screen lock");
+            scr.scroll_offset = target_offset;
+        } else {
+            // Match is on the live screen — clear scroll offset.
+            drop(scr);
+            let mut scr = self.screen.lock().expect("terminal screen lock");
+            scr.scroll_offset = 0;
         }
     }
 }

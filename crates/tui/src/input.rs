@@ -708,6 +708,55 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         // Reset idle timer for AI suggestions.
         app.terminal_last_key = std::time::Instant::now();
 
+        // Terminal search mode: handle search input.
+        if app.terminal().search_active {
+            match code {
+                KeyCode::Esc => {
+                    app.terminal_mut().search_active = false;
+                    app.terminal_mut().search_query.clear();
+                    app.terminal_mut().search_matches.clear();
+                }
+                KeyCode::Enter => {
+                    app.terminal_mut().search_active = false;
+                    if !app.terminal().search_matches.is_empty() {
+                        let total = app.terminal().search_matches.len();
+                        let cur = app.terminal().search_current + 1;
+                        app.set_status(format!("Terminal search: {cur}/{total}"));
+                    }
+                }
+                KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.terminal_mut().search_next();
+                }
+                KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.terminal_mut().search_prev();
+                }
+                KeyCode::Backspace => {
+                    app.terminal_mut().search_query.pop();
+                    app.terminal_mut().execute_search();
+                }
+                KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.terminal_mut().search_query.push(c);
+                    app.terminal_mut().execute_search();
+                    if !app.terminal().search_matches.is_empty() {
+                        // Jump to last match (most recent output).
+                        let last = app.terminal().search_matches.len() - 1;
+                        app.terminal_mut().search_current = last;
+                        app.terminal_mut().scroll_to_match();
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Ctrl+F — activate terminal search.
+        if code == KeyCode::Char('f') && modifiers.contains(KeyModifiers::CONTROL) {
+            app.terminal_mut().search_active = true;
+            app.terminal_mut().search_query.clear();
+            app.terminal_mut().search_matches.clear();
+            return;
+        }
+
         // Handle AI suggestion: Tab to accept, any other key dismisses.
         if app.terminal_suggestion.is_some() {
             if code == KeyCode::Tab {
@@ -3601,6 +3650,16 @@ pub fn execute_command_from_palette(app: &mut App, cmd: &str) {
 fn execute_command(app: &mut App, cmd: &str) {
     match cmd.trim() {
         "w" => {
+            // Apply .editorconfig rules before saving.
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                let ec = crate::config::lookup_editorconfig(&path);
+                if ec.trim_trailing_whitespace == Some(true) {
+                    app.trim_trailing_whitespace();
+                }
+                if ec.insert_final_newline == Some(true) {
+                    app.ensure_final_newline();
+                }
+            }
             // Format on save if enabled.
             if app.config.editor.format_on_save {
                 app.format_current_buffer();

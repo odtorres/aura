@@ -600,6 +600,169 @@ pub fn load_config_table(path: &Path) -> Option<toml::Table> {
     content.parse().ok()
 }
 
+/// Per-file settings resolved from `.editorconfig` files.
+#[derive(Debug, Clone)]
+pub struct EditorConfigResult {
+    /// Indent style: "space" or "tab".
+    pub indent_style: Option<String>,
+    /// Indent size (number of spaces or tab width).
+    pub indent_size: Option<usize>,
+    /// Whether to trim trailing whitespace on save.
+    pub trim_trailing_whitespace: Option<bool>,
+    /// Whether to insert a final newline on save.
+    pub insert_final_newline: Option<bool>,
+}
+
+/// Look up `.editorconfig` settings for a file path.
+///
+/// Walks up from the file's directory, reading `.editorconfig` files and
+/// accumulating matching properties. Stops when `root = true` is found.
+pub fn lookup_editorconfig(file_path: &Path) -> EditorConfigResult {
+    let mut result = EditorConfigResult {
+        indent_style: None,
+        indent_size: None,
+        trim_trailing_whitespace: None,
+        insert_final_newline: None,
+    };
+
+    let file_name = match file_path.file_name().and_then(|n| n.to_str()) {
+        Some(n) => n.to_string(),
+        None => return result,
+    };
+
+    let mut dir = file_path.parent();
+    while let Some(d) = dir {
+        let ec_path = d.join(".editorconfig");
+        if ec_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&ec_path) {
+                let (is_root, props) = parse_editorconfig(&content, &file_name);
+                // Apply properties (first match wins, so don't overwrite).
+                if result.indent_style.is_none() {
+                    result.indent_style = props.indent_style;
+                }
+                if result.indent_size.is_none() {
+                    result.indent_size = props.indent_size;
+                }
+                if result.trim_trailing_whitespace.is_none() {
+                    result.trim_trailing_whitespace = props.trim_trailing_whitespace;
+                }
+                if result.insert_final_newline.is_none() {
+                    result.insert_final_newline = props.insert_final_newline;
+                }
+                if is_root {
+                    break;
+                }
+            }
+        }
+        dir = d.parent();
+    }
+
+    result
+}
+
+/// Parse an `.editorconfig` file and return properties matching a filename.
+///
+/// Returns `(is_root, properties)`.
+fn parse_editorconfig(content: &str, filename: &str) -> (bool, EditorConfigResult) {
+    let mut is_root = false;
+    let mut result = EditorConfigResult {
+        indent_style: None,
+        indent_size: None,
+        trim_trailing_whitespace: None,
+        insert_final_newline: None,
+    };
+
+    let mut section_matches = false;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+
+        // Root directive.
+        if line.to_lowercase().starts_with("root") {
+            if let Some(val) = line.split('=').nth(1) {
+                if val.trim().eq_ignore_ascii_case("true") {
+                    is_root = true;
+                }
+            }
+            continue;
+        }
+
+        // Section header: [pattern]
+        if line.starts_with('[') && line.ends_with(']') {
+            let pattern = &line[1..line.len() - 1];
+            section_matches = editorconfig_glob_matches(pattern, filename);
+            continue;
+        }
+
+        // Key = value (only if current section matches).
+        if !section_matches {
+            continue;
+        }
+        if let Some((key, val)) = line.split_once('=') {
+            let key = key.trim().to_lowercase();
+            let val = val.trim().to_lowercase();
+            match key.as_str() {
+                "indent_style" => result.indent_style = Some(val),
+                "indent_size" => {
+                    if let Ok(n) = val.parse::<usize>() {
+                        result.indent_size = Some(n);
+                    }
+                }
+                "trim_trailing_whitespace" => {
+                    result.trim_trailing_whitespace = Some(val == "true");
+                }
+                "insert_final_newline" => {
+                    result.insert_final_newline = Some(val == "true");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    (is_root, result)
+}
+
+/// Simple glob matching for editorconfig patterns.
+///
+/// Supports `*` (any chars except `/`), `*.ext`, `{a,b}` alternatives.
+fn editorconfig_glob_matches(pattern: &str, filename: &str) -> bool {
+    // Handle brace alternatives: {*.rs,*.toml}
+    if pattern.contains('{') && pattern.contains('}') {
+        if let Some(start) = pattern.find('{') {
+            if let Some(end) = pattern.find('}') {
+                let prefix = &pattern[..start];
+                let suffix = &pattern[end + 1..];
+                let alternatives = &pattern[start + 1..end];
+                return alternatives.split(',').any(|alt| {
+                    let full = format!("{prefix}{alt}{suffix}");
+                    editorconfig_glob_matches(&full, filename)
+                });
+            }
+        }
+    }
+
+    // Simple star matching.
+    if pattern == "*" {
+        return true;
+    }
+    if let Some(ext) = pattern.strip_prefix("*.") {
+        return filename.ends_with(&format!(".{ext}"));
+    }
+    if pattern.contains('*') {
+        // Split on * and check prefix/suffix.
+        let parts: Vec<&str> = pattern.split('*').collect();
+        if parts.len() == 2 {
+            return filename.starts_with(parts[0]) && filename.ends_with(parts[1]);
+        }
+    }
+
+    // Exact match.
+    pattern == filename
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -767,5 +930,47 @@ f = "fix"
 
         assert_eq!(config.leader_action('x'), Some("open_git_graph"));
         assert_eq!(config.leader_action('y'), None);
+    }
+
+    #[test]
+    fn test_editorconfig_glob_star() {
+        assert!(editorconfig_glob_matches("*", "anything.rs"));
+        assert!(editorconfig_glob_matches("*.rs", "main.rs"));
+        assert!(!editorconfig_glob_matches("*.rs", "main.py"));
+    }
+
+    #[test]
+    fn test_editorconfig_glob_braces() {
+        assert!(editorconfig_glob_matches("{*.rs,*.toml}", "Cargo.toml"));
+        assert!(editorconfig_glob_matches("{*.rs,*.toml}", "main.rs"));
+        assert!(!editorconfig_glob_matches("{*.rs,*.toml}", "main.py"));
+    }
+
+    #[test]
+    fn test_parse_editorconfig() {
+        let content = "\
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.rs]
+indent_size = 2
+";
+        let (is_root, result) = parse_editorconfig(content, "main.rs");
+        assert!(is_root);
+        // *.rs overrides indent_size; [*] provides indent_style.
+        assert_eq!(result.indent_size, Some(2));
+        assert_eq!(result.indent_style.as_deref(), Some("space"));
+    }
+
+    #[test]
+    fn test_parse_editorconfig_general_section() {
+        let content = "[*]\nindent_style = tab\ninsert_final_newline = true\n";
+        let (_, result) = parse_editorconfig(content, "anything.txt");
+        assert_eq!(result.indent_style.as_deref(), Some("tab"));
+        assert_eq!(result.insert_final_newline, Some(true));
     }
 }

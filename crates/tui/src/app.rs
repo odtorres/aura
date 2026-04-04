@@ -8293,6 +8293,14 @@ impl App {
             Ok(EditorTab::new(buf, conversation_store, &theme))
         })?;
         if was_new {
+            // Apply .editorconfig settings for this file.
+            let ec = crate::config::lookup_editorconfig(&path);
+            if let Some(ref style) = ec.indent_style {
+                self.config.editor.spaces_for_tabs = style == "space";
+            }
+            if let Some(size) = ec.indent_size {
+                self.config.editor.tab_width = size;
+            }
             self.set_status(format!("Opened {}", path.display()));
         } else {
             self.set_status(format!("Switched to {}", path.display()));
@@ -9518,6 +9526,40 @@ impl App {
             }
         } else {
             self.set_status(format!("Failed to revert: {path}"));
+        }
+    }
+
+    /// Trim trailing whitespace from every line in the current buffer.
+    pub fn trim_trailing_whitespace(&mut self) {
+        let line_count = self.tab().buffer.line_count();
+        // Process in reverse to avoid index shifts.
+        for line_idx in (0..line_count).rev() {
+            let line = self.tab().buffer.rope().line(line_idx).to_string();
+            let trimmed = line.trim_end_matches([' ', '\t']);
+            if trimmed.len() < line.trim_end_matches('\n').len() {
+                let line_start = self.tab().buffer.rope().line_to_char(line_idx);
+                let trim_start = line_start + trimmed.len();
+                let trim_end = line_start + line.trim_end_matches('\n').len();
+                if trim_end > trim_start {
+                    self.tab_mut()
+                        .buffer
+                        .delete(trim_start, trim_end, aura_core::AuthorId::Human);
+                }
+            }
+        }
+    }
+
+    /// Ensure the buffer ends with a newline character.
+    pub fn ensure_final_newline(&mut self) {
+        let len = self.tab().buffer.rope().len_chars();
+        if len == 0 {
+            return;
+        }
+        let last_char = self.tab().buffer.rope().char(len - 1);
+        if last_char != '\n' {
+            self.tab_mut()
+                .buffer
+                .insert(len, "\n", aura_core::AuthorId::Human);
         }
     }
 
