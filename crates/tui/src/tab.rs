@@ -139,6 +139,8 @@ pub struct EditorTab {
     pub folded_ranges: std::collections::HashMap<usize, usize>,
     /// Cached foldable ranges from tree-sitter (start_line → end_line).
     pub foldable_ranges: std::collections::HashMap<usize, usize>,
+    /// Whether this tab is pinned (protected from accidental close).
+    pub pinned: bool,
 }
 
 impl EditorTab {
@@ -220,6 +222,7 @@ impl EditorTab {
             marks: std::collections::HashMap::new(),
             folded_ranges: std::collections::HashMap::new(),
             foldable_ranges: std::collections::HashMap::new(),
+            pinned: false,
         };
         tab.refresh_semantic_index();
         tab

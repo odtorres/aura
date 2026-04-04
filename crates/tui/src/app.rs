@@ -534,6 +534,8 @@ pub struct App {
     pub split_tab_idx: usize,
     /// Whether the secondary pane has focus (false = primary has focus).
     pub split_focus_secondary: bool,
+    /// Whether split panes synchronize scroll position.
+    pub split_scroll_sync: bool,
     /// File tree sidebar.
     pub file_tree: FileTree,
     /// Which sidebar view is active (Files or Git).
@@ -990,6 +992,7 @@ impl App {
             split_direction: SplitDirection::Vertical,
             split_tab_idx: 0,
             split_focus_secondary: false,
+            split_scroll_sync: false,
             file_tree: FileTree::new(terminal_cwd),
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
@@ -1481,6 +1484,7 @@ impl App {
                     scroll_col: tab.scroll_col,
                     marks,
                     folded_ranges,
+                    pinned: tab.pinned,
                 }
             })
             .collect();
@@ -1608,6 +1612,9 @@ impl App {
                     tab.folded_ranges.insert(start, end);
                 }
             }
+
+            // Restore pinned state.
+            tab.pinned = tab_state.pinned;
 
             if !opened {
                 // Replace the initial scratch tab with the first restored tab.
@@ -9348,6 +9355,10 @@ impl App {
 
     /// Close the current tab. Returns `true` if the app should quit.
     pub fn close_current_tab(&mut self) -> bool {
+        if self.tab().pinned {
+            self.set_status("Tab is pinned. Use :unpin first or :tabc! to force close");
+            return false;
+        }
         if self.tab().is_modified() {
             self.set_status("Unsaved changes! Use :tabclose! to force or :w first");
             return false;

@@ -28,6 +28,9 @@ pub struct TabState {
     /// Code folding: list of (start_line, end_line) pairs.
     #[serde(default)]
     pub folded_ranges: Vec<(usize, usize)>,
+    /// Whether this tab is pinned.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// Persisted UI layout state.
@@ -225,6 +228,7 @@ mod tests {
                     scroll_col: 0,
                     marks: HashMap::from([('a', (5, 0)), ('b', (20, 3))]),
                     folded_ranges: vec![(10, 25), (30, 40)],
+                    pinned: true,
                 },
                 TabState {
                     file_path: None,
@@ -234,6 +238,7 @@ mod tests {
                     scroll_col: 0,
                     marks: HashMap::new(),
                     folded_ranges: Vec::new(),
+                    pinned: false,
                 },
             ],
             active_tab: 0,

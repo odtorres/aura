@@ -3050,6 +3050,9 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("tabc", "Close current tab", ""),
     ("tabn", "Next tab", ""),
     ("tabp", "Previous tab", ""),
+    ("pin", "Pin current tab", ""),
+    ("unpin", "Unpin current tab", ""),
+    ("scrollsync", "Toggle split pane scroll sync", ""),
     ("term", "Toggle terminal", "Ctrl+T"),
     ("term new", "New terminal tab", "Ctrl+Shift+T"),
     ("term close", "Close terminal tab", ""),
@@ -3889,6 +3892,22 @@ fn execute_command(app: &mut App, cmd: &str) {
             if app.close_current_tab_force() {
                 app.should_quit = true;
             }
+        }
+        // :scrollsync — toggle split pane scroll synchronization.
+        "scrollsync" | "scrollbind" => {
+            app.split_scroll_sync = !app.split_scroll_sync;
+            let state = if app.split_scroll_sync { "on" } else { "off" };
+            app.set_status(format!("Scroll sync: {state}"));
+        }
+        // :pin — pin the current tab.
+        "pin" => {
+            app.tab_mut().pinned = true;
+            app.set_status("Tab pinned");
+        }
+        // :unpin — unpin the current tab.
+        "unpin" => {
+            app.tab_mut().pinned = false;
+            app.set_status("Tab unpinned");
         }
         // :tabn / :tabnext — next tab.
         "tabn" | "tabnext" => {

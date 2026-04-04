@@ -233,6 +233,23 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 && !app.source_control_focused;
 
             draw_editor_pane(frame, app, pane_a, primary_idx, primary_focused);
+            // Sync scroll position from focused pane to the other if enabled.
+            if app.split_scroll_sync
+                && primary_idx < app.tabs.count()
+                && secondary_idx < app.tabs.count()
+            {
+                if primary_focused {
+                    let sr = app.tabs.tabs()[primary_idx].scroll_row;
+                    let sc = app.tabs.tabs()[primary_idx].scroll_col;
+                    app.tabs.tabs_mut()[secondary_idx].scroll_row = sr;
+                    app.tabs.tabs_mut()[secondary_idx].scroll_col = sc;
+                } else if secondary_focused {
+                    let sr = app.tabs.tabs()[secondary_idx].scroll_row;
+                    let sc = app.tabs.tabs()[secondary_idx].scroll_col;
+                    app.tabs.tabs_mut()[primary_idx].scroll_row = sr;
+                    app.tabs.tabs_mut()[primary_idx].scroll_col = sc;
+                }
+            }
             draw_editor_pane(frame, app, pane_b, secondary_idx, secondary_focused);
         } else {
             let is_focused = !app.terminal_focused
@@ -1322,10 +1339,11 @@ fn draw_tab_bar(frame: &mut Frame, app: &mut App, area: Rect) {
 
     for (i, tab) in tabs.iter().enumerate() {
         let is_active = i == active_idx;
+        let pin = if tab.pinned { " " } else { "" };
         let label = if i < 9 {
-            format!(" {}:{} ", i + 1, tab.title())
+            format!(" {pin}{}:{} ", i + 1, tab.title())
         } else {
-            format!(" {} ", tab.title())
+            format!(" {pin}{} ", tab.title())
         };
         // Close button: "× " (× is a single-width Unicode char).
         let close_btn = "\u{00d7} ";
@@ -6145,11 +6163,27 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
+    // Detect line ending style from the buffer.
+    let line_ending = {
+        let rope = app.buffer().rope();
+        let has_crlf = (0..rope.len_lines().min(20)).any(|i| {
+            let line = rope.line(i);
+            let s: String = line.chars().collect();
+            s.ends_with("\r\n")
+        });
+        if has_crlf {
+            "CRLF"
+        } else {
+            "LF"
+        }
+    };
+
     let left = format!(
-        " {} │ {}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        " {} │ {}{} │ UTF-8 {}{}{}{}{}{}{}{}{}{}{}{}{}",
         app.mode.label(),
         file_name,
         modified,
+        line_ending,
         git_indicator,
         last_change,
         diag_str,
