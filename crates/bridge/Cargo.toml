@@ -3,7 +3,9 @@ name = "aura-mcp-bridge"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Stdio-to-TCP bridge for connecting Claude Code to AURA's MCP server"
+publish = false
 
 [[bin]]
 name = "aura-mcp-bridge"
