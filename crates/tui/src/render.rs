@@ -121,19 +121,23 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         if app.chat_panel.visible {
             app.chat_panel_rect = area;
             app.conv_history_rect = Rect::default();
+            app.ai_visor_rect = Rect::default();
             draw_chat_panel(frame, app, area);
         } else if app.ai_visor.visible {
             app.conv_history_rect = Rect::default();
             app.chat_panel_rect = Rect::default();
+            app.ai_visor_rect = area;
             draw_ai_visor(frame, app, area);
         } else {
             app.conv_history_rect = area;
             app.chat_panel_rect = Rect::default();
+            app.ai_visor_rect = Rect::default();
             draw_conversation_history(frame, app, area);
         }
     } else {
         app.conv_history_rect = Rect::default();
         app.chat_panel_rect = Rect::default();
+        app.ai_visor_rect = Rect::default();
     }
 
     // Save panel rects for mouse click-to-focus.
@@ -1612,6 +1616,11 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
 
         let mut col = 0;
         while col < max_col {
+            // Skip continuation cells (spacers for wide characters).
+            if row[col].continuation {
+                col += 1;
+                continue;
+            }
             // Group consecutive cells with the same style.
             let cell = &row[col];
             let raw_fg = term_color_to_ratatui(cell.fg, Color::White);
@@ -1650,6 +1659,11 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut next = col + 1;
             while next < max_col {
+                // Skip continuation cells (wide char spacers).
+                if row[next].continuation {
+                    next += 1;
+                    continue;
+                }
                 let nc = &row[next];
                 let nfg = term_color_to_ratatui(nc.fg, Color::White);
                 let nbg = term_color_to_ratatui(nc.bg, Color::Reset);
@@ -1785,6 +1799,10 @@ fn draw_shared_terminal(frame: &mut Frame, app: &App, area: Rect) {
 
         let mut col = 0;
         while col < max_col {
+            if row[col].continuation {
+                col += 1;
+                continue;
+            }
             let cell = &row[col];
             let fg = term_color_to_ratatui(cell.fg, Color::White);
             let bg = term_color_to_ratatui(cell.bg, Color::Reset);
@@ -1795,6 +1813,10 @@ fn draw_shared_terminal(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut next = col + 1;
             while next < max_col {
+                if row[next].continuation {
+                    next += 1;
+                    continue;
+                }
                 let nc = &row[next];
                 let nfg = term_color_to_ratatui(nc.fg, Color::White);
                 let nbg = term_color_to_ratatui(nc.bg, Color::Reset);
@@ -5797,8 +5819,16 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let agent_indicator = if let Some(ref session) = app.agent_mode {
         let elapsed = session.started_at.elapsed().as_secs();
+        let state = if session.paused { "⏸" } else { "▶" };
+        let trust = session.trust_level.label();
+        let subs = session.subagent_manager.active_count();
+        let sub_str = if subs > 0 {
+            format!(" {subs}sub")
+        } else {
+            String::new()
+        };
         format!(
-            " │ AGENT [{}/{}] {}f {}c {}s",
+            " │ AGENT {state} [{}/{}] {}f {}c{sub_str} {}s {trust}",
             session.iteration,
             session.max_iterations,
             session.files_changed.len(),

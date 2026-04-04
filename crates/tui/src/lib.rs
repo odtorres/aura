@@ -5,6 +5,8 @@
 //! and will eventually render ghost-text overlays and diff views.
 
 pub mod acp_server;
+pub mod agent_plan;
+pub mod agent_timeline;
 pub mod ai_visor;
 pub mod app;
 pub mod branch_picker;
@@ -39,6 +41,7 @@ pub mod settings_modal;
 pub mod snippets;
 pub mod source_control;
 pub mod speculative;
+pub mod subagent;
 pub mod tab;
 pub mod undo_tree;
 pub mod update;

@@ -1041,6 +1041,18 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // When the chat panel is focused, route all keys to chat input.
     if app.chat_panel_focused {
+        // Ctrl+P toggles agent pause/resume when in agent mode.
+        if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(ref session) = app.agent_mode {
+                if session.paused {
+                    app.resume_agent();
+                } else {
+                    app.pause_agent();
+                }
+                return;
+            }
+        }
+
         // If a tool call is pending approval, intercept Y/N.
         if app.chat_panel.pending_approval.is_some() {
             match code {
@@ -1049,6 +1061,20 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     app.deny_pending_tool();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // If an agent plan is pending approval, intercept Y/N.
+        if app.chat_panel.plan_pending_approval {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    app.approve_agent_plan();
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    app.deny_agent_plan();
                 }
                 _ => {}
             }
@@ -2951,6 +2977,12 @@ const COMMAND_LIST: &[(&str, &str)] = &[
     ("outline", "Open symbol outline"),
     ("agent", "Start AI agent"),
     ("agent stop", "Stop AI agent"),
+    ("agent pause", "Pause running agent"),
+    ("agent resume", "Resume paused agent"),
+    ("agent plan", "Start agent with planning phase"),
+    ("agent trust", "Set agent trust level (read|write|full)"),
+    ("agent timeline", "Toggle agent timeline view"),
+    ("agent diff", "Show agent changes diff"),
     ("fix", "Fix last failed command"),
     ("registers", "Show registers"),
     ("marks", "Show marks"),
@@ -4084,6 +4116,54 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let task = task.trim();
                 if task == "stop" {
                     app.stop_agent("user request");
+                } else if task == "pause" {
+                    app.pause_agent();
+                } else if task == "resume" {
+                    app.resume_agent();
+                } else if let Some(level) = task.strip_prefix("trust ") {
+                    let level = level.trim();
+                    if let Some(trust) = crate::app::TrustLevel::parse_str(level) {
+                        if let Some(ref mut session) = app.agent_mode {
+                            session.trust_level = trust;
+                            app.set_status(format!("Agent trust level: {}", trust.label()));
+                        } else {
+                            app.set_status(
+                                "No active agent. Start one with :agent <task>".to_string(),
+                            );
+                        }
+                    } else {
+                        app.set_status("Invalid trust level. Use: read, write, or full");
+                    }
+                } else if task == "timeline" {
+                    if let Some(ref mut session) = app.agent_mode {
+                        session.timeline.visible = !session.timeline.visible;
+                    } else {
+                        app.set_status("No active agent session");
+                    }
+                } else if task == "diff" {
+                    // TODO: Show agent diff review panel
+                    app.set_status("Agent diff review (coming soon)");
+                } else if let Some(plan_task) = task.strip_prefix("plan ") {
+                    let plan_task = plan_task.trim();
+                    if !plan_task.is_empty() {
+                        let (max_iters, actual_task) =
+                            if let Some(rest) = plan_task.strip_prefix("-n ") {
+                                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                                let n = parts[0].parse::<usize>().unwrap_or(50);
+                                let t = parts.get(1).unwrap_or(&"").trim().to_string();
+                                (n, t)
+                            } else {
+                                (50, plan_task.to_string())
+                            };
+                        if !actual_task.is_empty() {
+                            app.start_agent_with_options(
+                                &actual_task,
+                                max_iters,
+                                crate::app::TrustLevel::FullAuto,
+                                true,
+                            );
+                        }
+                    }
                 } else if !task.is_empty() {
                     let (max_iters, actual_task) = if let Some(rest) = task.strip_prefix("-n ") {
                         let parts: Vec<&str> = rest.splitn(2, ' ').collect();

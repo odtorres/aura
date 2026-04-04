@@ -13,8 +13,8 @@ pub mod context;
 
 pub use claude_code::ClaudeCodeClient;
 pub use client::{
-    editor_tools, tool_permission, AiEvent, AnthropicClient, ContentBlock, Message, MessageContent,
-    ToolDefinition, ToolPermission,
+    agent_tools, editor_tools, tool_permission, AiEvent, AnthropicClient, ContentBlock, Message,
+    MessageContent, ToolDefinition, ToolPermission,
 };
 pub use context::{estimate_tokens, DiagnosticSummary, EditorContext};
 

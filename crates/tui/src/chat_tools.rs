@@ -30,6 +30,12 @@ pub fn execute_tool(
         "search_files" => tool_search_files(input, project_root),
         "edit_file" => tool_edit_file(input, project_root),
         "run_command" => tool_run_command(input, project_root),
+        "create_directory" => tool_create_directory(input, project_root),
+        "rename_file" => tool_rename_file(input, project_root),
+        // Subagent tools are handled directly by app.rs, not here.
+        "spawn_subagent" | "check_subagent" | "cancel_subagent" => {
+            Err(format!("{name} is handled by the agent system"))
+        }
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -269,6 +275,55 @@ fn tool_run_command(input: &serde_json::Value, root: &Path) -> Result<String, St
             ))
         }
     }
+}
+
+/// Create a directory (and parents).
+fn tool_create_directory(input: &serde_json::Value, root: &Path) -> Result<String, String> {
+    let path_str = input
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'path' parameter")?;
+
+    let path = resolve_path(path_str, root);
+    std::fs::create_dir_all(&path)
+        .map_err(|e| format!("Failed to create directory {}: {e}", path.display()))?;
+
+    Ok(format!("Created directory: {}", path.display()))
+}
+
+/// Rename or move a file or directory.
+fn tool_rename_file(input: &serde_json::Value, root: &Path) -> Result<String, String> {
+    let old_str = input
+        .get("old_path")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'old_path' parameter")?;
+    let new_str = input
+        .get("new_path")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'new_path' parameter")?;
+
+    let old_path = resolve_path(old_str, root);
+    let new_path = resolve_path(new_str, root);
+
+    // Ensure parent directory exists.
+    if let Some(parent) = new_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create parent directory: {e}"))?;
+    }
+
+    std::fs::rename(&old_path, &new_path).map_err(|e| {
+        format!(
+            "Failed to rename {} -> {}: {e}",
+            old_path.display(),
+            new_path.display()
+        )
+    })?;
+
+    Ok(format!(
+        "Renamed: {} -> {}",
+        old_path.display(),
+        new_path.display()
+    ))
 }
 
 /// Resolve a path relative to the project root.

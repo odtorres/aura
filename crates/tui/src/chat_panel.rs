@@ -172,6 +172,8 @@ pub struct ChatPanel {
     pub mention_selected: usize,
     /// Cached list of project files for @-mention completion.
     pub mention_file_cache: Vec<String>,
+    /// Whether an agent plan is awaiting user approval (Y/N).
+    pub plan_pending_approval: bool,
 }
 
 impl ChatPanel {
@@ -199,6 +201,7 @@ impl ChatPanel {
             mention_matches: Vec::new(),
             mention_selected: 0,
             mention_file_cache: Vec::new(),
+            plan_pending_approval: false,
         }
     }
 

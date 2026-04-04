@@ -57,6 +57,55 @@ pub enum SplitDirection {
     Horizontal,
 }
 
+/// Trust level controlling which tools are auto-approved in agent mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustLevel {
+    /// Only read tools (read_file, list_files, search_files) are auto-approved.
+    ReadOnly,
+    /// Read + write tools (edit_file, create_directory, rename_file) are auto-approved.
+    WriteAllowed,
+    /// Everything is auto-approved including run_command (original behavior).
+    FullAuto,
+}
+
+impl TrustLevel {
+    /// Parse from a string (for `:agent trust` command).
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "read" | "readonly" | "read_only" => Some(Self::ReadOnly),
+            "write" | "writeallowed" | "write_allowed" => Some(Self::WriteAllowed),
+            "full" | "fullauto" | "full_auto" | "auto" => Some(Self::FullAuto),
+            _ => None,
+        }
+    }
+
+    /// Whether a tool is auto-approved at this trust level.
+    pub fn auto_approves(&self, tool_name: &str) -> bool {
+        match self {
+            Self::ReadOnly => matches!(tool_name, "read_file" | "list_files" | "search_files"),
+            Self::WriteAllowed => matches!(
+                tool_name,
+                "read_file"
+                    | "list_files"
+                    | "search_files"
+                    | "edit_file"
+                    | "create_directory"
+                    | "rename_file"
+            ),
+            Self::FullAuto => true,
+        }
+    }
+
+    /// Display label.
+    pub fn label(&self) -> &str {
+        match self {
+            Self::ReadOnly => "ReadOnly",
+            Self::WriteAllowed => "Write",
+            Self::FullAuto => "FullAuto",
+        }
+    }
+}
+
 /// Autonomous agent session state.
 pub struct AgentSession {
     /// What the agent is working on.
@@ -71,6 +120,20 @@ pub struct AgentSession {
     pub commands_run: usize,
     /// When the session started.
     pub started_at: std::time::Instant,
+    /// Trust level controlling auto-approval of tools.
+    pub trust_level: TrustLevel,
+    /// Whether the agent is paused.
+    pub paused: bool,
+    /// Unique session ID for persistence.
+    pub session_id: String,
+    /// File contents captured before agent started (for diff review).
+    pub file_snapshots: std::collections::HashMap<String, String>,
+    /// Execution plan (if agent was started with `:agent plan`).
+    pub plan: Option<crate::agent_plan::AgentPlan>,
+    /// Activity timeline.
+    pub timeline: crate::agent_timeline::AgentTimeline,
+    /// Subagent orchestrator.
+    pub subagent_manager: crate::subagent::SubagentManager,
 }
 
 /// Surround editing state machine.
@@ -529,6 +592,8 @@ pub struct App {
     summarize_receiver: Option<(String, mpsc::Receiver<AiEvent>)>,
     /// Cached conversation history panel rect from the last render frame.
     pub conv_history_rect: Rect,
+    /// Cached rect for the AI visor panel (mouse detection).
+    pub ai_visor_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
     pub tab_bar_rect: Rect,
     /// Close button hit areas: (tab_index, x_start, x_end) in absolute screen coords.
@@ -935,6 +1000,7 @@ impl App {
             commit_msg_receiver: None,
             summarize_receiver: None,
             conv_history_rect: Rect::default(),
+            ai_visor_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
             tab_close_btn_ranges: Vec::new(),
             tab_close_confirm: None,
@@ -1167,6 +1233,9 @@ impl App {
             // Poll for chat panel streaming events.
             self.poll_chat_events();
 
+            // Poll for subagent streaming events.
+            self.poll_subagent_events();
+
             // Poll for LSP events.
             self.poll_lsp_events();
 
@@ -1385,6 +1454,7 @@ impl App {
                 terminal_height: Some(self.terminal().height),
                 conversation_history_width: Some(self.conversation_history.width),
                 conversation_history_visible: self.conversation_history.visible,
+                ai_visor_width: Some(self.ai_visor.width),
                 ai_visor_visible: self.ai_visor.visible,
                 debug_panel_visible: self.debug_panel.visible,
                 split_active: self.split_active,
@@ -1517,6 +1587,9 @@ impl App {
         }
         if let Some(w) = session.ui.conversation_history_width {
             self.conversation_history.width = w.max(20);
+        }
+        if let Some(w) = session.ui.ai_visor_width {
+            self.ai_visor.width = w.max(20);
         }
 
         // Restore additional panel visibility.
@@ -2767,7 +2840,19 @@ impl App {
     // ── Autonomous Agent Mode ────────────────────────────────────
 
     /// Start an autonomous agent session with the given task.
+    /// Start an autonomous agent session.
     pub fn start_agent(&mut self, task: &str, max_iterations: usize) {
+        self.start_agent_with_options(task, max_iterations, TrustLevel::FullAuto, false);
+    }
+
+    /// Start an agent session with explicit options.
+    pub fn start_agent_with_options(
+        &mut self,
+        task: &str,
+        max_iterations: usize,
+        trust_level: TrustLevel,
+        planning: bool,
+    ) {
         if self.ai_client.is_none() {
             self.set_status("No AI backend available for agent mode");
             return;
@@ -2779,6 +2864,24 @@ impl App {
             self.chat_panel_focused = true;
         }
 
+        // Snapshot all open files for diff review later.
+        let mut file_snapshots = std::collections::HashMap::new();
+        for tab in self.tabs.tabs() {
+            if let Some(path) = tab.buffer.file_path() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    file_snapshots.insert(path.display().to_string(), content);
+                }
+            }
+        }
+
+        let session_id = format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+
         self.agent_mode = Some(AgentSession {
             task: task.to_string(),
             max_iterations,
@@ -2786,21 +2889,51 @@ impl App {
             files_changed: Vec::new(),
             commands_run: 0,
             started_at: std::time::Instant::now(),
+            trust_level,
+            paused: false,
+            session_id,
+            file_snapshots,
+            plan: None,
+            timeline: crate::agent_timeline::AgentTimeline::default(),
+            subagent_manager: crate::subagent::SubagentManager::default(),
         });
 
-        // Send the agent task as a chat message with enhanced system prompt.
-        let agent_prompt = format!(
-            "You are in AUTONOMOUS AGENT MODE. You can freely read, edit files, \
-             and run commands without user approval.\n\n\
-             Your task: {task}\n\n\
-             Work autonomously to complete this task:\n\
-             1. Analyze the codebase to understand what needs to change\n\
-             2. Make the necessary edits\n\
-             3. Run tests/checks to verify your changes work\n\
-             4. Fix any errors that arise\n\
-             5. When done, respond with a summary of what you did\n\n\
-             Be thorough but efficient. You have up to {max_iterations} tool iterations."
-        );
+        // Build the agent prompt.
+        let trust_note = match trust_level {
+            TrustLevel::ReadOnly => {
+                "Read-only tools are auto-approved. Write/command tools require user approval."
+            }
+            TrustLevel::WriteAllowed => {
+                "Read and write tools are auto-approved. Shell commands require user approval."
+            }
+            TrustLevel::FullAuto => "All tools are auto-approved.",
+        };
+
+        let agent_prompt = if planning {
+            format!(
+                "You are in AUTONOMOUS AGENT MODE with PLANNING.\n\n\
+                 Trust level: {trust_note}\n\n\
+                 Your task: {task}\n\n\
+                 FIRST: Create a numbered execution plan. Format each step as:\n\
+                 1. Description of what to do\n\
+                 2. Next step\n\
+                 ...\n\n\
+                 Present the plan and wait for approval before executing."
+            )
+        } else {
+            format!(
+                "You are in AUTONOMOUS AGENT MODE.\n\n\
+                 Trust level: {trust_note}\n\n\
+                 Your task: {task}\n\n\
+                 Work autonomously to complete this task:\n\
+                 1. Analyze the codebase to understand what needs to change\n\
+                 2. Make the necessary edits\n\
+                 3. Run tests/checks to verify your changes work\n\
+                 4. Fix any errors that arise\n\
+                 5. When done, respond with a summary of what you did\n\n\
+                 Be thorough but efficient. You have up to {max_iterations} tool iterations."
+            )
+        };
 
         // Inject as user message and send.
         self.chat_panel.input = agent_prompt;
@@ -2812,20 +2945,100 @@ impl App {
 
     /// Stop the agent and show summary.
     pub fn stop_agent(&mut self, reason: &str) {
-        if let Some(session) = self.agent_mode.take() {
+        if let Some(mut session) = self.agent_mode.take() {
+            // Cancel any running subagents.
+            session.subagent_manager.cancel_all();
+
             let elapsed = session.started_at.elapsed();
             let secs = elapsed.as_secs();
             let files = session.files_changed.len();
             let cmds = session.commands_run;
             let iters = session.iteration;
+            let subagents = session.subagent_manager.total_count();
+
+            let sub_info = if subagents > 0 {
+                format!(", {subagents} subagent(s)")
+            } else {
+                String::new()
+            };
+
             self.set_status(format!(
-                "Agent stopped ({reason}): {iters} iterations, {files} file(s), {cmds} cmd(s), {secs}s"
+                "Agent stopped ({reason}): {iters} iterations, {files} file(s), {cmds} cmd(s){sub_info}, {secs}s"
             ));
             // Stop any ongoing streaming.
             self.chat_panel.streaming = false;
             self.chat_panel.in_tool_loop = false;
             self.pending_tool_calls.clear();
         }
+    }
+
+    /// Pause a running agent.
+    pub fn pause_agent(&mut self) {
+        if let Some(ref mut session) = self.agent_mode {
+            if session.paused {
+                return;
+            }
+            session.paused = true;
+            // Drop the receiver to stop consuming streaming events.
+            self.chat_receiver = None;
+            self.chat_panel.streaming = false;
+            self.set_status("Agent paused (Ctrl+P or :agent resume to continue)");
+        }
+    }
+
+    /// Resume a paused agent.
+    pub fn resume_agent(&mut self) {
+        let should_resume = self.agent_mode.as_ref().map(|s| s.paused).unwrap_or(false);
+        if !should_resume {
+            return;
+        }
+        let task = self.agent_mode.as_ref().unwrap().task.clone();
+        self.agent_mode.as_mut().unwrap().paused = false;
+        self.set_status(format!("Agent resumed: {task}"));
+        // Re-send to continue the tool loop.
+        self.continue_tool_loop();
+    }
+
+    /// Approve the agent's execution plan and start executing.
+    pub fn approve_agent_plan(&mut self) {
+        self.chat_panel.plan_pending_approval = false;
+
+        if let Some(ref mut session) = self.agent_mode {
+            if let Some(ref mut plan) = session.plan {
+                plan.approved = true;
+            }
+        }
+
+        // Build a message telling the AI to execute the plan.
+        let plan_summary = self
+            .agent_mode
+            .as_ref()
+            .and_then(|s| s.plan.as_ref())
+            .map(|p| {
+                p.steps
+                    .iter()
+                    .map(|s| format!("{}. {}", s.index, s.description))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+
+        self.chat_panel
+            .push_system_message("✓ Plan approved — executing...");
+
+        let exec_prompt =
+            format!("Your plan has been approved. Execute it now, step by step:\n{plan_summary}");
+        self.chat_panel.input = exec_prompt;
+        self.chat_panel.input_cursor = self.chat_panel.input.chars().count();
+        self.send_chat_message();
+    }
+
+    /// Deny the agent's execution plan and stop the agent.
+    pub fn deny_agent_plan(&mut self) {
+        self.chat_panel.plan_pending_approval = false;
+        self.chat_panel
+            .push_system_message("✗ Plan rejected — agent stopped.");
+        self.stop_agent("plan rejected");
     }
 
     // ── Code Folding ─────────────────────────────────────────────
@@ -6221,6 +6434,8 @@ impl App {
             self.chat_panel_rect
         } else if self.conversation_history.visible {
             self.conv_history_rect
+        } else if self.ai_visor.visible {
+            self.ai_visor_rect
         } else {
             Rect::default()
         };
@@ -6263,6 +6478,8 @@ impl App {
                     self.chat_panel_rect
                 } else if self.conversation_history.visible {
                     self.conv_history_rect
+                } else if self.ai_visor.visible {
+                    self.ai_visor_rect
                 } else {
                     return;
                 };
@@ -6578,7 +6795,11 @@ impl App {
 
         // Use tools if the backend supports them.
         if client.supports_tools() {
-            let tools = editor_tools();
+            let mut tools = editor_tools();
+            // Include subagent tools when in agent mode.
+            if self.agent_mode.is_some() {
+                tools.extend(aura_ai::agent_tools());
+            }
             let rx = client.stream_completion_with_tools(&system, messages, tools);
             self.chat_receiver = Some(rx);
             self.chat_panel.start_streaming();
@@ -6630,6 +6851,40 @@ impl App {
                     self.chat_panel.finish_streaming();
                     self.chat_panel.in_tool_loop = false;
                     self.chat_receiver = None;
+
+                    // If in agent planning mode and no plan yet, try to parse one.
+                    let needs_plan_approval = if let Some(ref mut session) = self.agent_mode {
+                        if session.plan.is_none() {
+                            if let Some(plan) = crate::agent_plan::parse_plan_from_response(
+                                &full_text,
+                                &session.task.clone(),
+                            ) {
+                                session.plan = Some(plan);
+                                session
+                                    .timeline
+                                    .add(crate::agent_timeline::TimelineEntry::new(
+                                        crate::agent_timeline::TimelineActionType::PlanCreated,
+                                        "Agent plan created — awaiting approval",
+                                    ));
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if needs_plan_approval {
+                        self.chat_panel.push_system_message(
+                            "📋 Plan ready — press Y to approve and execute, N to cancel.",
+                        );
+                        self.chat_panel.plan_pending_approval = true;
+                        self.chat_panel_focused = true;
+                    }
+
                     // Refresh history so new interactions appear in the AI History panel.
                     self.refresh_conversation_history();
                     return;
@@ -6724,7 +6979,8 @@ impl App {
             return;
         }
 
-        let is_agent = self.agent_mode.is_some();
+        // Determine auto-approve logic: trust level in agent mode, else base permission.
+        let agent_trust = self.agent_mode.as_ref().map(|s| s.trust_level);
 
         // Process all auto-approve tools first.
         let mut needs_approval = Vec::new();
@@ -6732,9 +6988,14 @@ impl App {
 
         for call in calls {
             let permission = tool_permission(&call.name);
-            // In agent mode, auto-approve ALL tools.
-            if is_agent || permission == ToolPermission::AutoApprove {
+            let should_auto = match agent_trust {
+                Some(trust) => trust.auto_approves(&call.name),
+                None => permission == ToolPermission::AutoApprove,
+            };
+
+            if should_auto {
                 // Track agent metrics.
+                let mut limit_reached = false;
                 if let Some(ref mut session) = self.agent_mode {
                     session.iteration += 1;
                     if call.name == "edit_file" {
@@ -6742,18 +7003,43 @@ impl App {
                             if !session.files_changed.contains(&path.to_string()) {
                                 session.files_changed.push(path.to_string());
                             }
+                            session.timeline.record_file_change(path);
                         }
                     }
                     if call.name == "run_command" {
                         session.commands_run += 1;
+                        if let Some(cmd) = call.input.get("command").and_then(|v| v.as_str()) {
+                            session.timeline.record_command(cmd, 0);
+                        }
                     }
+                    session.timeline.record_tool(&call.name, true);
                     // Check iteration limit.
                     if session.iteration > session.max_iterations {
-                        self.stop_agent("Iteration limit reached");
-                        return;
+                        limit_reached = true;
                     }
                 }
-                self.execute_tool_call(&call);
+                if limit_reached {
+                    self.stop_agent("Iteration limit reached");
+                    return;
+                }
+                // Handle subagent tools directly (they need access to App state).
+                if matches!(
+                    call.name.as_str(),
+                    "spawn_subagent" | "check_subagent" | "cancel_subagent"
+                ) {
+                    let result = match call.name.as_str() {
+                        "spawn_subagent" => self.spawn_subagent_from_tool_call(&call.input),
+                        "check_subagent" => self.check_subagent(&call.input),
+                        "cancel_subagent" => self.cancel_subagent(&call.input),
+                        _ => unreachable!(),
+                    };
+                    self.chat_panel
+                        .set_tool_result(call.item_index, result.clone(), true);
+                    self.chat_panel
+                        .add_tool_result_to_context(&call.id, &result, false);
+                } else {
+                    self.execute_tool_call(&call);
+                }
             } else {
                 needs_approval.push(call);
             }
@@ -6864,11 +7150,316 @@ impl App {
         };
 
         let messages = self.chat_panel.build_messages();
-        let tools = editor_tools();
+        let mut tools = editor_tools();
+        // Include subagent tools when in agent mode.
+        if self.agent_mode.is_some() {
+            tools.extend(aura_ai::agent_tools());
+        }
         let system = self.tool_loop_system_prompt.clone();
         let rx = client.stream_completion_with_tools(&system, messages, tools);
         self.chat_receiver = Some(rx);
         self.chat_panel.start_streaming();
+    }
+
+    /// Poll all active subagents for streaming events.
+    fn poll_subagent_events(&mut self) {
+        let session = match self.agent_mode.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+
+        let active_ids = session.subagent_manager.active_ids();
+        let project_root = std::env::current_dir().unwrap_or_default();
+
+        for id in active_ids {
+            let subagent = match session.subagent_manager.get_mut(&id) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            let rx = match subagent.receiver.as_ref() {
+                Some(rx) => rx,
+                None => continue,
+            };
+
+            loop {
+                match rx.try_recv() {
+                    Ok(AiEvent::Token(text)) => {
+                        subagent.streaming_text.push_str(&text);
+                    }
+                    Ok(AiEvent::Done(full_text)) => {
+                        subagent.status =
+                            crate::subagent::SubagentStatus::Completed(full_text.clone());
+                        subagent.receiver = None;
+                        let label = subagent.role.label().to_string();
+                        session
+                            .timeline
+                            .add(crate::agent_timeline::TimelineEntry::for_subagent(
+                                &id,
+                                crate::agent_timeline::TimelineActionType::SubagentCompleted {
+                                    summary: full_text.chars().take(100).collect::<String>(),
+                                },
+                                &format!("[{label}] completed"),
+                            ));
+                        break;
+                    }
+                    Ok(AiEvent::ToolUse {
+                        id: tool_id,
+                        name,
+                        input,
+                    }) => {
+                        // Check tool restrictions.
+                        if subagent.tool_restrictions.allows(&name) {
+                            subagent.iteration += 1;
+                            if subagent.iteration > subagent.max_iterations {
+                                subagent.status = crate::subagent::SubagentStatus::Failed(
+                                    "Iteration limit reached".into(),
+                                );
+                                subagent.receiver = None;
+                                break;
+                            }
+                            // Execute the tool.
+                            let result = chat_tools::execute_tool(&name, &input, &project_root);
+                            let (content, is_error) = match result {
+                                Ok(output) => (output, false),
+                                Err(err) => (err, true),
+                            };
+                            // Add tool_use and tool_result to subagent context.
+                            subagent.current_assistant_blocks.push(
+                                aura_ai::ContentBlock::ToolUse {
+                                    id: tool_id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                },
+                            );
+                            // Build the assistant message from accumulated blocks.
+                            let assistant_blocks =
+                                std::mem::take(&mut subagent.current_assistant_blocks);
+                            if !assistant_blocks.is_empty() {
+                                subagent.context_messages.push(aura_ai::Message {
+                                    role: "assistant".to_string(),
+                                    content: aura_ai::MessageContent::Blocks(assistant_blocks),
+                                });
+                            }
+                            // Add tool result.
+                            subagent.context_messages.push(aura_ai::Message {
+                                role: "user".to_string(),
+                                content: aura_ai::MessageContent::Blocks(vec![
+                                    aura_ai::ContentBlock::ToolResult {
+                                        tool_use_id: tool_id,
+                                        content,
+                                        is_error: if is_error { Some(true) } else { None },
+                                    },
+                                ]),
+                            });
+                        } else {
+                            // Tool not allowed — send denial.
+                            subagent.current_assistant_blocks.push(
+                                aura_ai::ContentBlock::ToolUse {
+                                    id: tool_id.clone(),
+                                    name: name.clone(),
+                                    input,
+                                },
+                            );
+                            let assistant_blocks =
+                                std::mem::take(&mut subagent.current_assistant_blocks);
+                            if !assistant_blocks.is_empty() {
+                                subagent.context_messages.push(aura_ai::Message {
+                                    role: "assistant".to_string(),
+                                    content: aura_ai::MessageContent::Blocks(assistant_blocks),
+                                });
+                            }
+                            subagent.context_messages.push(aura_ai::Message {
+                                role: "user".to_string(),
+                                content: aura_ai::MessageContent::Blocks(vec![
+                                    aura_ai::ContentBlock::ToolResult {
+                                        tool_use_id: tool_id,
+                                        content: format!(
+                                            "Tool '{name}' is not allowed for this subagent role."
+                                        ),
+                                        is_error: Some(true),
+                                    },
+                                ]),
+                            });
+                        }
+                    }
+                    Ok(AiEvent::ToolUseComplete {
+                        text: _,
+                        content_blocks,
+                    }) => {
+                        // Store assistant blocks and continue subagent loop.
+                        subagent.current_assistant_blocks = content_blocks;
+                        subagent.status = crate::subagent::SubagentStatus::WaitingTool;
+                        // Continue the subagent's tool loop.
+                        if let Some(client) = &self.ai_client {
+                            let messages = subagent.context_messages.clone();
+                            let tools = editor_tools();
+                            let system = subagent.system_prompt.clone();
+                            let rx = client.stream_completion_with_tools(&system, messages, tools);
+                            subagent.receiver = Some(rx);
+                            subagent.status = crate::subagent::SubagentStatus::Running;
+                        }
+                        break;
+                    }
+                    Ok(AiEvent::Activity(_)) => {}
+                    Ok(AiEvent::Error(err)) => {
+                        subagent.status = crate::subagent::SubagentStatus::Failed(err);
+                        subagent.receiver = None;
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        if !subagent.streaming_text.is_empty() {
+                            let text = subagent.streaming_text.clone();
+                            subagent.status = crate::subagent::SubagentStatus::Completed(text);
+                        } else {
+                            subagent.status =
+                                crate::subagent::SubagentStatus::Failed("Connection lost".into());
+                        }
+                        subagent.receiver = None;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Spawn a subagent from a tool call and return the result string.
+    fn spawn_subagent_from_tool_call(&mut self, input: &serde_json::Value) -> String {
+        let task = input
+            .get("task")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unspecified task");
+        let role_str = input
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("custom");
+        let role = crate::subagent::SubagentRole::parse_str(role_str);
+
+        // Build tool restrictions.
+        let tool_restrictions =
+            if let Some(tools_arr) = input.get("tools").and_then(|v| v.as_array()) {
+                let allowed: Vec<String> = tools_arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                if allowed.is_empty() {
+                    role.default_tool_restrictions()
+                } else {
+                    crate::subagent::ToolRestrictions {
+                        allowed_tools: allowed,
+                    }
+                }
+            } else {
+                role.default_tool_restrictions()
+            };
+
+        // Generate a short ID.
+        let id = format!(
+            "sub_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                % 100_000
+        );
+
+        let mut subagent = crate::subagent::Subagent::new(
+            id.clone(),
+            role.clone(),
+            task.to_string(),
+            tool_restrictions,
+            25, // max iterations per subagent
+        );
+
+        // Send the initial request.
+        if let Some(client) = &self.ai_client {
+            let system_prompt = subagent.system_prompt.clone();
+            let messages = vec![aura_ai::Message {
+                role: "user".to_string(),
+                content: aura_ai::MessageContent::Text(task.to_string()),
+            }];
+            subagent.context_messages = messages.clone();
+            let tools = editor_tools();
+            let rx = client.stream_completion_with_tools(&system_prompt, messages, tools);
+            subagent.receiver = Some(rx);
+        }
+
+        let role_label = role.label().to_string();
+        let can_add = self
+            .agent_mode
+            .as_ref()
+            .map(|s| s.subagent_manager.can_spawn())
+            .unwrap_or(false);
+
+        if !can_add {
+            return "Cannot spawn subagent: maximum concurrent subagents reached".to_string();
+        }
+
+        if let Some(ref mut session) = self.agent_mode {
+            session.subagent_manager.add(subagent);
+            session
+                .timeline
+                .add(crate::agent_timeline::TimelineEntry::new(
+                    crate::agent_timeline::TimelineActionType::SubagentSpawned {
+                        role: role_label.clone(),
+                    },
+                    &format!("Spawned [{role_label}] subagent: {task}"),
+                ));
+        }
+
+        format!("Subagent spawned with ID: {id} (role: {role_label}). Use check_subagent to get results.")
+    }
+
+    /// Check the status of a subagent.
+    fn check_subagent(&self, input: &serde_json::Value) -> String {
+        let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+        let session = match &self.agent_mode {
+            Some(s) => s,
+            None => return "No active agent session".to_string(),
+        };
+
+        match session.subagent_manager.get(id) {
+            Some(subagent) => {
+                let status = subagent.status.label();
+                let iters = subagent.iteration;
+                match &subagent.status {
+                    crate::subagent::SubagentStatus::Completed(summary) => {
+                        format!("Status: {status} ({iters} iterations)\n\nResult:\n{summary}")
+                    }
+                    crate::subagent::SubagentStatus::Failed(err) => {
+                        format!("Status: {status} ({iters} iterations)\n\nError: {err}")
+                    }
+                    _ => {
+                        let partial = if subagent.streaming_text.is_empty() {
+                            "No output yet.".to_string()
+                        } else {
+                            let preview: String =
+                                subagent.streaming_text.chars().take(200).collect();
+                            format!("Partial output:\n{preview}...")
+                        };
+                        format!("Status: {status} ({iters} iterations)\n{partial}")
+                    }
+                }
+            }
+            None => format!("Subagent '{id}' not found"),
+        }
+    }
+
+    /// Cancel a subagent.
+    fn cancel_subagent(&mut self, input: &serde_json::Value) -> String {
+        let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+        if let Some(ref mut session) = self.agent_mode {
+            if session.subagent_manager.cancel(id) {
+                format!("Subagent '{id}' cancelled")
+            } else {
+                format!("Subagent '{id}' not found")
+            }
+        } else {
+            "No active agent session".to_string()
+        }
     }
 
     /// Build a system prompt for chat that includes editor context.

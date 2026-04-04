@@ -150,6 +150,8 @@ pub enum ToolPermission {
 pub fn tool_permission(name: &str) -> ToolPermission {
     match name {
         "read_file" | "list_files" | "search_files" => ToolPermission::AutoApprove,
+        // Subagent tools are auto-approved (agent mode already does its own gating).
+        "spawn_subagent" | "check_subagent" | "cancel_subagent" => ToolPermission::AutoApprove,
         _ => ToolPermission::RequiresApproval,
     }
 }
@@ -249,6 +251,101 @@ pub fn editor_tools() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["command"]
+            }),
+        },
+        ToolDefinition {
+            name: "create_directory".to_string(),
+            description: "Create a directory (and parent directories if needed).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path to create (relative to project root)"
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "rename_file".to_string(),
+            description: "Rename or move a file or directory.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "old_path": {
+                        "type": "string",
+                        "description": "Current path of the file or directory"
+                    },
+                    "new_path": {
+                        "type": "string",
+                        "description": "New path for the file or directory"
+                    }
+                },
+                "required": ["old_path", "new_path"]
+            }),
+        },
+    ]
+}
+
+/// Return agent-mode-only tool definitions (subagent orchestration).
+///
+/// These are appended to the standard tools when the editor is in agent mode.
+pub fn agent_tools() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "spawn_subagent".to_string(),
+            description: "Spawn a focused sub-agent to work on a specific subtask in parallel. \
+                          The subagent runs independently with its own conversation context. \
+                          Use check_subagent to retrieve results when done.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "What the subagent should do"
+                    },
+                    "role": {
+                        "type": "string",
+                        "enum": ["explorer", "test_runner", "refactorer", "reviewer", "custom"],
+                        "description": "Subagent specialization: explorer (read-only analysis), test_runner (run tests), refactorer (code changes), reviewer (code review)"
+                    },
+                    "tools": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Tool names this subagent is allowed to use (empty = role default)"
+                    }
+                },
+                "required": ["task", "role"]
+            }),
+        },
+        ToolDefinition {
+            name: "check_subagent".to_string(),
+            description: "Check the status and result of a previously spawned subagent. \
+                          Returns the subagent's current status and, if completed, its result summary.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The subagent ID returned by spawn_subagent"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        ToolDefinition {
+            name: "cancel_subagent".to_string(),
+            description: "Cancel a running subagent.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The subagent ID to cancel"
+                    }
+                },
+                "required": ["id"]
             }),
         },
     ]
