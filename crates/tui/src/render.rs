@@ -5624,6 +5624,10 @@ fn draw_editor_pane(
     };
 
     draw_editor(frame, app, content_area, &git_status);
+    // Search match highlights (drawn as overlay on top of text).
+    if !app.search_matches.is_empty() {
+        draw_search_highlights(frame, app, content_area);
+    }
     if is_focused {
         draw_peer_cursors(frame, app, content_area);
         draw_secondary_cursors(frame, app, content_area);
@@ -5677,6 +5681,81 @@ fn draw_editor_pane(
             viewport_h,
             &buffer_lines,
         );
+    }
+}
+
+/// Draw search match highlights as overlays on the editor text.
+///
+/// Matches are highlighted with a yellow/orange background. The current match
+/// (focused by n/N navigation) is shown with a brighter highlight.
+fn draw_search_highlights(frame: &mut Frame, app: &App, area: Rect) {
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_x = area.x + gutter_width;
+    let text_w = area.width.saturating_sub(gutter_width) as usize;
+
+    let match_bg = Color::Rgb(120, 100, 30); // dim yellow for all matches
+    let current_bg = Color::Rgb(200, 160, 30); // bright yellow for current match
+    let match_fg = Color::Black;
+
+    for (idx, &(start, end)) in app.search_matches.iter().enumerate() {
+        let is_current = idx == app.search_current;
+        let bg = if is_current { current_bg } else { match_bg };
+
+        // Convert char indices to (row, col) positions.
+        let start_row = tab.buffer.rope().char_to_line(start);
+        let end_row = tab
+            .buffer
+            .rope()
+            .char_to_line(end.saturating_sub(1).max(start));
+
+        for row in start_row..=end_row {
+            if row < scroll_row || row >= scroll_row + visible_rows {
+                continue;
+            }
+            let screen_y = area.y + (row - scroll_row) as u16;
+            let line_start_char = tab.buffer.rope().line_to_char(row);
+
+            let col_start = if row == start_row {
+                (start - line_start_char).saturating_sub(scroll_col)
+            } else {
+                0
+            };
+            let col_end = if row == end_row {
+                (end - line_start_char).saturating_sub(scroll_col)
+            } else {
+                let line_len = tab.buffer.rope().line(row).len_chars().saturating_sub(1);
+                line_len.saturating_sub(scroll_col)
+            };
+
+            if col_start >= text_w || col_end == 0 || col_start >= col_end {
+                continue;
+            }
+            let col_end = col_end.min(text_w);
+
+            // Read the actual characters to overlay.
+            let line = tab.buffer.rope().line(row);
+            let display: String = line
+                .chars()
+                .skip(scroll_col + col_start)
+                .take(col_end - col_start)
+                .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+                .collect();
+
+            let cell_area = Rect::new(
+                text_x + col_start as u16,
+                screen_y,
+                display.len().min(text_w - col_start) as u16,
+                1,
+            );
+            frame.render_widget(
+                Paragraph::new(Span::styled(display, Style::default().fg(match_fg).bg(bg))),
+                cell_area,
+            );
+        }
     }
 }
 

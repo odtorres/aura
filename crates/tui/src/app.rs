@@ -538,6 +538,10 @@ pub struct App {
     pub source_control_focused: bool,
     /// Side-by-side diff view (None when not active).
     pub diff_view: Option<DiffView>,
+    /// Agent diff: list of (path, old_content, new_content) for multi-file review.
+    pub agent_diff_files: Vec<(String, String, String)>,
+    /// Current index in agent_diff_files.
+    pub agent_diff_idx: usize,
     /// Active merge conflict editor (3-panel).
     pub merge_view: Option<crate::merge_view::MergeConflictView>,
     /// References panel (floating list of symbol references).
@@ -973,6 +977,8 @@ impl App {
             source_control: SourceControlPanel::new(30),
             source_control_focused: false,
             diff_view: None,
+            agent_diff_files: Vec::new(),
+            agent_diff_idx: 0,
             merge_view: None,
             references_panel: None,
             undo_tree: None,
@@ -2956,14 +2962,40 @@ impl App {
             let iters = session.iteration;
             let subagents = session.subagent_manager.total_count();
 
+            // Compute diffs from snapshots for review.
+            let mut diffs: Vec<(String, String, String)> = Vec::new();
+            for (path, old_content) in &session.file_snapshots {
+                let new_content = std::fs::read_to_string(path).unwrap_or_default();
+                if *old_content != new_content {
+                    diffs.push((path.clone(), old_content.clone(), new_content));
+                }
+            }
+            // Include files changed that weren't snapshotted.
+            for path in &session.files_changed {
+                if !session.file_snapshots.contains_key(path) {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        diffs.push((path.clone(), String::new(), content));
+                    }
+                }
+            }
+            self.agent_diff_files = diffs;
+            self.agent_diff_idx = 0;
+
             let sub_info = if subagents > 0 {
                 format!(", {subagents} subagent(s)")
             } else {
                 String::new()
             };
 
+            let diff_hint = if !self.agent_diff_files.is_empty() {
+                let n = self.agent_diff_files.len();
+                format!(" — :agent diff to review {n} file(s)")
+            } else {
+                String::new()
+            };
+
             self.set_status(format!(
-                "Agent stopped ({reason}): {iters} iterations, {files} file(s), {cmds} cmd(s){sub_info}, {secs}s"
+                "Agent stopped ({reason}): {iters} iterations, {files} file(s), {cmds} cmd(s){sub_info}, {secs}s{diff_hint}"
             ));
             // Stop any ongoing streaming.
             self.chat_panel.streaming = false;
@@ -4017,6 +4049,17 @@ impl App {
             self.search_matches.clear();
             self.search_current = 0;
         }
+    }
+
+    /// Jump to the nearest search match (used during incremental search).
+    pub fn jump_to_nearest_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        let (start, _) = self.search_matches[self.search_current];
+        let new_cursor = self.tab().buffer.char_idx_to_cursor(start);
+        self.tab_mut().cursor = new_cursor;
+        self.clamp_cursor();
     }
 
     /// Jump to the next search match from the current position.
@@ -9277,6 +9320,113 @@ impl App {
     /// Cancel the close-tab confirmation dialog.
     pub fn handle_close_confirm_cancel(&mut self) {
         self.tab_close_confirm = None;
+    }
+
+    /// Show the agent diff review: compare file snapshots from agent start with current disk.
+    pub fn show_agent_diff(&mut self) {
+        // Collect snapshots from the active agent session, or a recently-stopped one.
+        let snapshots = if let Some(ref session) = self.agent_mode {
+            session.file_snapshots.clone()
+        } else {
+            // No active session — check if we have leftover diff files.
+            if !self.agent_diff_files.is_empty() {
+                // Show existing diffs.
+                self.agent_diff_idx = 0;
+                if let Some((path, old, new)) = self.agent_diff_files.first() {
+                    let lines = crate::git::aligned_diff_lines(old, new);
+                    if lines.is_empty() {
+                        self.set_status("No changes to review");
+                    } else {
+                        let total = self.agent_diff_files.len();
+                        self.diff_view = Some(DiffView::new(format!("{path} [1/{total}]"), lines));
+                        self.set_status(format!("Agent diff: {total} file(s) changed"));
+                    }
+                }
+                return;
+            }
+            self.set_status("No agent session with file snapshots");
+            return;
+        };
+
+        if snapshots.is_empty() {
+            self.set_status("No file snapshots captured — agent has no changes to review");
+            return;
+        }
+
+        // Compare each snapshot with current disk content.
+        let mut diffs: Vec<(String, String, String)> = Vec::new();
+        for (path, old_content) in &snapshots {
+            let new_content = std::fs::read_to_string(path).unwrap_or_default();
+            if *old_content != new_content {
+                diffs.push((path.clone(), old_content.clone(), new_content));
+            }
+        }
+
+        // Also check files_changed that might not have been in snapshots.
+        if let Some(ref session) = self.agent_mode {
+            for path in &session.files_changed {
+                if !snapshots.contains_key(path) {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        diffs.push((path.clone(), String::new(), content));
+                    }
+                }
+            }
+        }
+
+        if diffs.is_empty() {
+            self.set_status("No changes detected");
+            return;
+        }
+
+        self.agent_diff_files = diffs;
+        self.agent_diff_idx = 0;
+
+        // Show the first file's diff.
+        let (path, old, new) = &self.agent_diff_files[0];
+        let lines = crate::git::aligned_diff_lines(old, new);
+        let total = self.agent_diff_files.len();
+        self.diff_view = Some(DiffView::new(format!("{path} [1/{total}]"), lines));
+        self.set_status(format!(
+            "Agent diff: {total} file(s) changed — use :agent diff to cycle"
+        ));
+    }
+
+    /// Cycle to the next file in the agent diff review.
+    pub fn next_agent_diff(&mut self) {
+        if self.agent_diff_files.is_empty() {
+            return;
+        }
+        self.agent_diff_idx = (self.agent_diff_idx + 1) % self.agent_diff_files.len();
+        let (path, old, new) = &self.agent_diff_files[self.agent_diff_idx];
+        let lines = crate::git::aligned_diff_lines(old, new);
+        let idx = self.agent_diff_idx + 1;
+        let total = self.agent_diff_files.len();
+        self.diff_view = Some(DiffView::new(format!("{path} [{idx}/{total}]"), lines));
+    }
+
+    /// Revert the current file in agent diff review to its snapshot state.
+    pub fn revert_agent_diff_file(&mut self) {
+        if self.agent_diff_files.is_empty() {
+            return;
+        }
+        let (path, old_content, _) = &self.agent_diff_files[self.agent_diff_idx];
+        let path = path.clone();
+        let old_content = old_content.clone();
+        if std::fs::write(&path, &old_content).is_ok() {
+            self.set_status(format!("Reverted: {path}"));
+            self.agent_diff_files.remove(self.agent_diff_idx);
+            if self.agent_diff_files.is_empty() {
+                self.diff_view = None;
+                self.set_status("All agent changes reviewed");
+            } else {
+                self.agent_diff_idx = self
+                    .agent_diff_idx
+                    .min(self.agent_diff_files.len().saturating_sub(1));
+                self.next_agent_diff();
+            }
+        } else {
+            self.set_status(format!("Failed to revert: {path}"));
+        }
     }
 
     /// Run the appropriate language formatter on the current buffer.

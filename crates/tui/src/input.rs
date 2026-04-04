@@ -253,15 +253,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 if !app.search_input.is_empty() {
                     app.search_query = Some(app.search_input.clone());
                     app.execute_search();
+                    if !app.search_matches.is_empty() {
+                        app.jump_to_nearest_match();
+                    }
                 } else {
                     app.search_matches.clear();
                 }
             }
             KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
                 app.search_input.push(c);
-                // Incremental search.
+                // Incremental search: update matches and jump to nearest.
                 app.search_query = Some(app.search_input.clone());
                 app.execute_search();
+                if !app.search_matches.is_empty() {
+                    app.jump_to_nearest_match();
+                }
             }
             _ => {}
         }
@@ -4147,8 +4153,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                         app.set_status("No active agent session");
                     }
                 } else if task == "diff" {
-                    // TODO: Show agent diff review panel
-                    app.set_status("Agent diff review (coming soon)");
+                    app.show_agent_diff();
                 } else if let Some(plan_task) = task.strip_prefix("plan ") {
                     let plan_task = plan_task.trim();
                     if !plan_task.is_empty() {
