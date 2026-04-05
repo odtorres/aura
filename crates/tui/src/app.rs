@@ -6279,8 +6279,7 @@ impl App {
                         }
                     }
                 }
-                crate::dap::DapEvent::Variables { vars, .. } => {
-                    // Convert to VariableNodes for display.
+                crate::dap::DapEvent::Variables { reference, vars } => {
                     let nodes: Vec<crate::debug_panel::VariableNode> = vars
                         .iter()
                         .map(|v| crate::debug_panel::VariableNode {
@@ -6293,8 +6292,50 @@ impl App {
                             variables_reference: v.variables_reference,
                         })
                         .collect();
-                    self.debug_panel.state.variables = nodes;
-                    self.debug_panel.state.selected_var = 0;
+
+                    if reference == 0 {
+                        // Top-level variables (scope response).
+                        self.debug_panel.state.variables = nodes;
+                        self.debug_panel.state.selected_var = 0;
+                    } else {
+                        // Child variables: insert after the parent node.
+                        let parent_idx = self
+                            .debug_panel
+                            .state
+                            .variables
+                            .iter()
+                            .position(|n| n.variables_reference == reference);
+                        if let Some(idx) = parent_idx {
+                            let parent_indent = self.debug_panel.state.variables[idx].indent;
+                            self.debug_panel.state.variables[idx].expanded = true;
+                            // Remove any existing children first.
+                            let mut remove_end = idx + 1;
+                            while remove_end < self.debug_panel.state.variables.len()
+                                && self.debug_panel.state.variables[remove_end].indent
+                                    > parent_indent
+                            {
+                                remove_end += 1;
+                            }
+                            if remove_end > idx + 1 {
+                                self.debug_panel.state.variables.drain(idx + 1..remove_end);
+                            }
+                            // Insert children with incremented indent.
+                            let children: Vec<crate::debug_panel::VariableNode> = nodes
+                                .into_iter()
+                                .map(|mut n| {
+                                    n.indent = parent_indent + 1;
+                                    n
+                                })
+                                .collect();
+                            let insert_pos = (idx + 1).min(self.debug_panel.state.variables.len());
+                            for (i, child) in children.into_iter().enumerate() {
+                                self.debug_panel
+                                    .state
+                                    .variables
+                                    .insert(insert_pos + i, child);
+                            }
+                        }
+                    }
                 }
                 crate::dap::DapEvent::BreakpointsSet(_results) => {
                     // Could update verified status in the future.

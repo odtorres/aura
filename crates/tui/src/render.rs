@@ -3676,17 +3676,72 @@ fn draw_project_search(frame: &mut Frame, app: &App, area: Rect) {
 
         // Truncate line text.
         let max_text = (inner.width as usize).saturating_sub(prefix.len());
-        let line_display: String = result.line_text.trim().chars().take(max_text).collect();
+        let line_text = result.line_text.trim();
+        let line_display: String = line_text.chars().take(max_text).collect();
 
-        let base_style = if is_selected {
-            Style::default().fg(Color::Black).bg(Color::Yellow)
+        let sel_bg = if is_selected {
+            Some(Color::Yellow)
         } else {
-            Style::default().fg(Color::White)
+            None
         };
 
-        let text = format!("{prefix}{line_display}");
+        // Try syntax highlighting for the result line.
+        let ext = std::path::Path::new(&result.file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let hl_spans = crate::highlight::Language::from_extension(ext)
+            .and_then(crate::highlight::SyntaxHighlighter::new)
+            .map(|mut hl| hl.highlight(&line_display, Some(&app.theme)));
+
+        let prefix_style = if is_selected {
+            Style::default().fg(Color::Black).bg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let mut spans = vec![Span::styled(prefix.clone(), prefix_style)];
+
+        if let Some(hl_lines) = hl_spans {
+            if let Some(hl_line) = hl_lines.first() {
+                // Build spans from per-char colors.
+                let chars: Vec<char> = line_display.chars().collect();
+                let mut run_start = 0;
+                let mut run_color = hl_line.colors.first().copied().unwrap_or(Color::White);
+                for (j, &color) in hl_line.colors.iter().enumerate() {
+                    if color != run_color || j >= chars.len() {
+                        let text: String = chars[run_start..j.min(chars.len())].iter().collect();
+                        if !text.is_empty() {
+                            let mut style = Style::default().fg(run_color);
+                            if let Some(bg) = sel_bg {
+                                style = style.bg(bg);
+                            }
+                            spans.push(Span::styled(text, style));
+                        }
+                        run_start = j;
+                        run_color = color;
+                    }
+                }
+                let text: String = chars[run_start..].iter().collect();
+                if !text.is_empty() {
+                    let mut style = Style::default().fg(run_color);
+                    if let Some(bg) = sel_bg {
+                        style = style.bg(bg);
+                    }
+                    spans.push(Span::styled(text, style));
+                }
+            }
+        } else {
+            let style = if is_selected {
+                Style::default().fg(Color::Black).bg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            spans.push(Span::styled(line_display, style));
+        }
+
         frame.render_widget(
-            Paragraph::new(text).style(base_style),
+            Paragraph::new(Line::from(spans)),
             Rect::new(inner.x, row_y, inner.width, 1),
         );
         row_y += 1;

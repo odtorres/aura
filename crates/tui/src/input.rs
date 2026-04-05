@@ -687,13 +687,30 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         }
                     }
                 }
-                // In variables: toggle expand (future: request children).
+                // In variables: toggle expand and fetch children via DAP.
                 if app.debug_panel.active_tab == crate::debug_panel::DebugTab::Variables {
                     let idx = app.debug_panel.state.selected_var;
-                    if let Some(node) = app.debug_panel.state.variables.get_mut(idx) {
+                    if let Some(node) = app.debug_panel.state.variables.get(idx) {
                         if node.expandable {
-                            node.expanded = !node.expanded;
-                            // TODO: fetch children via request_variables
+                            let var_ref = node.variables_reference;
+                            let is_expanded = node.expanded;
+                            if is_expanded {
+                                // Collapse: remove children.
+                                let indent = node.indent;
+                                let mut end = idx + 1;
+                                while end < app.debug_panel.state.variables.len()
+                                    && app.debug_panel.state.variables[end].indent > indent
+                                {
+                                    end += 1;
+                                }
+                                app.debug_panel.state.variables.drain(idx + 1..end);
+                                app.debug_panel.state.variables[idx].expanded = false;
+                            } else {
+                                // Expand: request children from DAP.
+                                if let Some(ref mut client) = app.dap_client {
+                                    client.request_variables(var_ref);
+                                }
+                            }
                         }
                     }
                 }

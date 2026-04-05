@@ -261,6 +261,11 @@ pub fn editor_commands() -> Vec<PaletteItem> {
         cmd("branches", "Branch Picker", "Ctrl+B"),
         cmd("git", "Source Control", "Ctrl+G"),
         cmd("noh", "Clear Search Highlights", ""),
+        cmd("calls", "Show Incoming Callers (LSP)", ""),
+        cmd("session list", "List Saved Sessions", ""),
+        cmd("scrollsync", "Toggle Split Scroll Sync", ""),
+        cmd("debug", "Start Debug Session", ""),
+        cmd("breakpoint", "Toggle Breakpoint", ""),
     ]
 }
 
