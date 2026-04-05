@@ -3090,6 +3090,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("tabc", "Close current tab", ""),
     ("tabn", "Next tab", ""),
     ("tabp", "Previous tab", ""),
+    ("tabmove left", "Move tab left", ""),
+    ("tabmove right", "Move tab right", ""),
     ("pin", "Pin current tab", ""),
     ("unpin", "Unpin current tab", ""),
     ("scrollsync", "Toggle split pane scroll sync", ""),
@@ -3141,6 +3143,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("merge", "Open merge conflict view", ""),
     ("debug", "Start debug session", ""),
     ("breakpoint", "Toggle breakpoint", ""),
+    ("breakpoint if", "Conditional breakpoint", ""),
     ("continue", "Debug continue", ""),
     ("step", "Debug step over", ""),
     ("stepin", "Debug step in", ""),
@@ -3957,6 +3960,13 @@ fn execute_command(app: &mut App, cmd: &str) {
         "tabp" | "tabprev" => {
             app.tabs.prev();
         }
+        // :tabmove — move tab left/right or to position.
+        "tabmove left" => {
+            app.tabs.move_tab_left();
+        }
+        "tabmove right" => {
+            app.tabs.move_tab_right();
+        }
         // :term / :terminal — toggle terminal pane and give it focus.
         "term" | "terminal" => {
             if app.terminal().visible && app.terminal_focused {
@@ -4285,6 +4295,16 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(cond) = other
+                .strip_prefix("breakpoint if ")
+                .or_else(|| other.strip_prefix("bp if "))
+            {
+                let cond = cond.trim();
+                if !cond.is_empty() {
+                    app.set_conditional_breakpoint(cond);
+                } else {
+                    app.set_status("Usage: :breakpoint if <condition>");
+                }
             } else if let Some(task_name) = other.strip_prefix("task ") {
                 let task_name = task_name.trim();
                 if !task_name.is_empty() {

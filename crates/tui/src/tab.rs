@@ -10,7 +10,6 @@ use crate::lsp::{self, Diagnostic, LspClient, LspEvent};
 use crate::semantic_index::SemanticIndexer;
 use aura_core::conversation::ConversationStore;
 use aura_core::{Buffer, Cursor};
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -131,8 +130,8 @@ pub struct EditorTab {
     pub conversation_lines: Vec<(usize, usize)>,
     /// Detected indent style for this buffer.
     pub indent_style: IndentStyle,
-    /// Breakpoints set on this file (0-indexed line numbers).
-    pub breakpoints: BTreeSet<usize>,
+    /// Breakpoints set on this file (0-indexed line numbers → optional condition).
+    pub breakpoints: std::collections::BTreeMap<usize, Option<String>>,
     /// Vim marks: maps register char (a-z) → cursor position.
     pub marks: std::collections::HashMap<char, Cursor>,
     /// Folded line ranges: maps fold start line → fold end line (exclusive).
@@ -220,7 +219,7 @@ impl EditorTab {
             semantic_info: None,
             conversation_lines,
             indent_style,
-            breakpoints: BTreeSet::new(),
+            breakpoints: std::collections::BTreeMap::new(),
             marks: std::collections::HashMap::new(),
             folded_ranges: std::collections::HashMap::new(),
             foldable_ranges: std::collections::HashMap::new(),
@@ -436,6 +435,32 @@ impl TabManager {
             self.active = self.active.saturating_sub(1);
         }
         Some(tab)
+    }
+
+    /// Move the active tab to a new position.
+    pub fn move_tab(&mut self, new_idx: usize) {
+        let idx = self.active;
+        let new_idx = new_idx.min(self.tabs.len().saturating_sub(1));
+        if idx == new_idx || self.tabs.len() <= 1 {
+            return;
+        }
+        let tab = self.tabs.remove(idx);
+        self.tabs.insert(new_idx, tab);
+        self.active = new_idx;
+    }
+
+    /// Move the active tab one position to the left.
+    pub fn move_tab_left(&mut self) {
+        if self.active > 0 {
+            self.move_tab(self.active - 1);
+        }
+    }
+
+    /// Move the active tab one position to the right.
+    pub fn move_tab_right(&mut self) {
+        if self.active + 1 < self.tabs.len() {
+            self.move_tab(self.active + 1);
+        }
     }
 
     /// Close the active tab. Returns the closed tab, or None if it's the last tab.

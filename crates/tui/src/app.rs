@@ -5942,16 +5942,34 @@ impl App {
     // ── Debugger ──────────────────────────────────────────────────
 
     /// Toggle a breakpoint on the current cursor line.
+    /// Toggle a breakpoint on the current line (no condition).
     pub fn toggle_breakpoint(&mut self) {
         let line = self.tab().cursor.row;
         let tab = self.tab_mut();
-        if tab.breakpoints.contains(&line) {
-            tab.breakpoints.remove(&line);
-        } else {
-            tab.breakpoints.insert(line);
+        use std::collections::btree_map::Entry;
+        match tab.breakpoints.entry(line) {
+            Entry::Occupied(e) => {
+                e.remove();
+            }
+            Entry::Vacant(e) => {
+                e.insert(None);
+            }
         }
         // If a debug session is active, resend breakpoints for this file.
         self.sync_breakpoints_to_adapter();
+    }
+
+    /// Set a conditional breakpoint on the current line.
+    pub fn set_conditional_breakpoint(&mut self, condition: &str) {
+        let line = self.tab().cursor.row;
+        self.tab_mut()
+            .breakpoints
+            .insert(line, Some(condition.to_string()));
+        self.sync_breakpoints_to_adapter();
+        self.set_status(format!(
+            "Conditional breakpoint at line {}: {condition}",
+            line + 1
+        ));
     }
 
     /// Start a debug session for the current file.
@@ -6045,16 +6063,22 @@ impl App {
     /// Send breakpoints for the current file to the adapter.
     fn sync_breakpoints_to_adapter(&mut self) {
         let file_path = self.tab().buffer.file_path().map(|p| p.to_path_buf());
-        let breakpoints: Vec<usize> = self.tab().breakpoints.iter().copied().collect();
+        let breakpoints: Vec<(usize, Option<String>)> = self
+            .tab()
+            .breakpoints
+            .iter()
+            .map(|(&line, cond)| (line, cond.clone()))
+            .collect();
 
         if let (Some(path), Some(client)) = (file_path, &mut self.dap_client) {
-            client.set_breakpoints(&path, &breakpoints);
+            client.set_breakpoints_with_conditions(&path, &breakpoints);
         }
     }
 
     /// Send breakpoints for all open tabs to the adapter.
+    #[allow(clippy::type_complexity)]
     fn sync_all_breakpoints_to_adapter(&mut self) {
-        let tab_info: Vec<(std::path::PathBuf, Vec<usize>)> = self
+        let tab_info: Vec<(std::path::PathBuf, Vec<(usize, Option<String>)>)> = self
             .tabs
             .tabs()
             .iter()
@@ -6063,14 +6087,18 @@ impl App {
                 if tab.breakpoints.is_empty() {
                     return None;
                 }
-                let lines: Vec<usize> = tab.breakpoints.iter().copied().collect();
-                Some((path, lines))
+                let bps: Vec<(usize, Option<String>)> = tab
+                    .breakpoints
+                    .iter()
+                    .map(|(&line, cond)| (line, cond.clone()))
+                    .collect();
+                Some((path, bps))
             })
             .collect();
 
         if let Some(client) = &mut self.dap_client {
-            for (path, lines) in &tab_info {
-                client.set_breakpoints(path, lines);
+            for (path, bps) in &tab_info {
+                client.set_breakpoints_with_conditions(path, bps);
             }
         }
     }

@@ -5293,7 +5293,7 @@ fn draw_editor(
                 Span::styled("▶", Style::default().fg(Color::Yellow))
             } else if is_foldable {
                 Span::styled("▼", Style::default().fg(Color::DarkGray))
-            } else if tab.breakpoints.contains(&line_idx) {
+            } else if tab.breakpoints.contains_key(&line_idx) {
                 if is_debug_stopped {
                     Span::styled(
                         "⏸",

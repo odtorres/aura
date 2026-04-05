@@ -266,9 +266,27 @@ impl DapClient {
 
     /// Set breakpoints for a source file (replaces all breakpoints in that file).
     pub fn set_breakpoints(&mut self, source_path: &Path, lines: &[usize]) {
-        let breakpoints: Vec<serde_json::Value> = lines
+        let bps: Vec<(usize, Option<String>)> = lines.iter().map(|&l| (l, None)).collect();
+        self.set_breakpoints_with_conditions(source_path, &bps);
+    }
+
+    /// Set breakpoints with optional conditions for a source file.
+    pub fn set_breakpoints_with_conditions(
+        &mut self,
+        source_path: &Path,
+        breakpoints: &[(usize, Option<String>)],
+    ) {
+        let bp_values: Vec<serde_json::Value> = breakpoints
             .iter()
-            .map(|&line| serde_json::json!({ "line": line + 1 })) // DAP uses 1-indexed
+            .map(|(line, condition)| {
+                let mut bp = serde_json::json!({ "line": line + 1 }); // DAP uses 1-indexed
+                if let Some(cond) = condition {
+                    bp.as_object_mut()
+                        .unwrap()
+                        .insert("condition".into(), serde_json::json!(cond));
+                }
+                bp
+            })
             .collect();
 
         self.send_request(
@@ -277,7 +295,7 @@ impl DapClient {
                 "source": {
                     "path": source_path.display().to_string()
                 },
-                "breakpoints": breakpoints,
+                "breakpoints": bp_values,
                 "sourceModified": false
             }),
         );
