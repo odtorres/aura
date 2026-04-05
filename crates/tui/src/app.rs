@@ -9006,6 +9006,13 @@ impl App {
         self.show_authorship = self.config.editor.show_authorship;
         self.chat_panel.max_context_messages = self.config.conversations.max_context_messages;
         self.settings_modal.close();
+        // Persist to disk so settings survive restart.
+        self.save_settings();
+    }
+
+    /// Save the current configuration to `aura.toml`.
+    pub fn save_settings(&self) {
+        crate::config::save_config(&self.config_path, &self.config);
     }
 
     /// Manually compact the conversation database.

@@ -644,6 +644,85 @@ pub fn load_config_table(path: &Path) -> Option<toml::Table> {
     content.parse().ok()
 }
 
+/// Persist the current config to the `aura.toml` file.
+///
+/// Reads the existing TOML (if any), updates only the settings-modal-managed
+/// keys, and writes the result back. Keys that the user never touched remain
+/// unchanged.
+pub fn save_config(path: &Path, config: &AuraConfig) {
+    // Load existing table so we preserve user comments… well, toml crate
+    // doesn't preserve comments, but at least we preserve unknown keys.
+    let mut table: toml::Table = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_default();
+
+    // Helper: ensure a sub-table exists and return a mutable ref.
+    fn ensure_table<'a>(root: &'a mut toml::Table, key: &str) -> &'a mut toml::Table {
+        root.entry(key)
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+            .as_table_mut()
+            .expect("expected table")
+    }
+
+    // [editor]
+    {
+        let ed = ensure_table(&mut table, "editor");
+        ed.insert(
+            "show_minimap".into(),
+            toml::Value::Boolean(config.editor.show_minimap),
+        );
+        ed.insert(
+            "line_numbers".into(),
+            toml::Value::Boolean(config.editor.line_numbers),
+        );
+        ed.insert(
+            "show_authorship".into(),
+            toml::Value::Boolean(config.editor.show_authorship),
+        );
+        ed.insert(
+            "spaces_for_tabs".into(),
+            toml::Value::Boolean(config.editor.spaces_for_tabs),
+        );
+        ed.insert(
+            "tab_width".into(),
+            toml::Value::Integer(config.editor.tab_width as i64),
+        );
+        ed.insert(
+            "scroll_margin".into(),
+            toml::Value::Integer(config.editor.scroll_margin as i64),
+        );
+    }
+
+    // [conversations]
+    {
+        let conv = ensure_table(&mut table, "conversations");
+        conv.insert(
+            "auto_compact".into(),
+            toml::Value::Boolean(config.conversations.auto_compact),
+        );
+        conv.insert(
+            "max_context_messages".into(),
+            toml::Value::Integer(config.conversations.max_context_messages as i64),
+        );
+    }
+
+    // [update]
+    {
+        let upd = ensure_table(&mut table, "update");
+        upd.insert(
+            "check_for_updates".into(),
+            toml::Value::Boolean(config.update.check_for_updates),
+        );
+    }
+
+    // Write back.
+    let serialized = table.to_string();
+    if let Err(e) = std::fs::write(path, &serialized) {
+        tracing::warn!("Failed to save config to {}: {}", path.display(), e);
+    }
+}
+
 /// Per-file settings resolved from `.editorconfig` files.
 #[derive(Debug, Clone)]
 pub struct EditorConfigResult {

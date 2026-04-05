@@ -5831,17 +5831,32 @@ fn draw_indent_guides(frame: &mut Frame, app: &App, area: Rect) {
         let line = tab.buffer.rope().line(line_idx);
         let line_str: String = line.chars().collect();
 
-        // Count leading whitespace.
-        let indent_chars = line_str
-            .chars()
-            .take_while(|c| c.is_whitespace() && *c != '\n')
-            .count();
+        // Count leading whitespace (visual columns, expanding tabs).
+        let mut indent_cols = 0usize;
+        for ch in line_str.chars() {
+            if ch == ' ' {
+                indent_cols += 1;
+            } else if ch == '\t' {
+                indent_cols = (indent_cols / tab_w + 1) * tab_w;
+            } else {
+                break;
+            }
+        }
 
         // Draw a guide at each tab-stop within the indent region.
         let screen_y = area.y + vis_row as u16;
         let mut col = tab_w;
         let mut level = 0usize;
-        while col < indent_chars {
+        while col < indent_cols {
+            // Only draw if the character at this position is whitespace.
+            if col < line_str.len() {
+                let ch_at_col = line_str.as_bytes().get(col).copied().unwrap_or(b' ');
+                if ch_at_col != b' ' && ch_at_col != b'\t' {
+                    col += tab_w;
+                    level += 1;
+                    continue;
+                }
+            }
             let screen_col = col.saturating_sub(scroll_col);
             if screen_col < text_w {
                 let color = INDENT_COLORS[level % INDENT_COLORS.len()];

@@ -338,8 +338,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             // Ctrl+G — toggle git / source control panel.
             KeyCode::Char('g') => {
+                let was_git_focused =
+                    app.source_control_focused && app.sidebar_view == SidebarView::Git;
                 unfocus_all_panels(app);
-                if app.source_control_focused && app.sidebar_view == SidebarView::Git {
+                if was_git_focused {
                     // Already focused on git — close sidebar.
                     app.source_control_focused = false;
                 } else {
@@ -791,6 +793,14 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Esc => {
                 app.terminal_focused = false;
             }
+            // Ctrl+T / Ctrl+` — toggle terminal off (hide pane).
+            KeyCode::Char('t') | KeyCode::Char('`')
+                if modifiers.contains(KeyModifiers::CONTROL)
+                    && !modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                app.terminal_mut().visible = false;
+                app.terminal_focused = false;
+            }
             // Ctrl+Shift+T — new terminal tab.
             KeyCode::Char('T')
                 if modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
@@ -1119,6 +1129,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Char('c') => {
                 app.sc_commit();
             }
+            // g — generate AI commit message.
+            KeyCode::Char('g') => {
+                app.generate_commit_message();
+            }
             KeyCode::Char('i') | KeyCode::Enter
                 if app.source_control.focused_section == GitPanelSection::CommitMessage =>
             {
@@ -1370,16 +1384,18 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Right | KeyCode::Char('l') => {
                 app.settings_modal.toggle_selected();
-                // Apply changes live.
+                // Apply changes live and persist to disk.
                 app.settings_modal.apply_to_config(&mut app.config);
                 app.show_authorship = app.config.editor.show_authorship;
                 app.chat_panel.max_context_messages = app.config.conversations.max_context_messages;
+                app.save_settings();
             }
             KeyCode::Left | KeyCode::Char('h') => {
                 app.settings_modal.decrement_selected();
                 app.settings_modal.apply_to_config(&mut app.config);
                 app.show_authorship = app.config.editor.show_authorship;
                 app.chat_panel.max_context_messages = app.config.conversations.max_context_messages;
+                app.save_settings();
             }
             _ => {}
         }
