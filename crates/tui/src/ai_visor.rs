@@ -19,6 +19,8 @@ pub enum VisorTab {
     Hooks,
     /// Installed plugins.
     Plugins,
+    /// Discovered agents (project + global).
+    Agents,
 }
 
 /// A skill entry parsed from `.claude/skills/*/SKILL.md`.
@@ -52,6 +54,19 @@ pub struct PluginEntry {
     pub name: String,
     /// Source URL or path.
     pub source: String,
+}
+
+/// A discovered agent definition.
+#[derive(Debug, Clone)]
+pub struct AgentEntry {
+    /// Agent name.
+    pub name: String,
+    /// One-line description.
+    pub description: String,
+    /// Path to the agent definition file.
+    pub path: PathBuf,
+    /// Scope: "project" or "global".
+    pub scope: String,
 }
 
 /// A settings entry with scope indicator.
@@ -90,6 +105,8 @@ pub struct VisorSections {
     pub rules_count: usize,
     /// Number of docs files in .aura/docs/.
     pub docs_count: usize,
+    /// Discovered agents.
+    pub agents: Vec<AgentEntry>,
 }
 
 /// State for the AI Visor right-side panel.
@@ -148,7 +165,8 @@ impl AiVisorPanel {
             VisorTab::Settings => VisorTab::Skills,
             VisorTab::Skills => VisorTab::Hooks,
             VisorTab::Hooks => VisorTab::Plugins,
-            VisorTab::Plugins => VisorTab::Overview,
+            VisorTab::Plugins => VisorTab::Agents,
+            VisorTab::Agents => VisorTab::Overview,
         };
         self.selected = 0;
         self.scroll = 0;
@@ -162,6 +180,7 @@ impl AiVisorPanel {
             VisorTab::Skills => self.sections.skills.len(),
             VisorTab::Hooks => self.sections.hooks.len(),
             VisorTab::Plugins => self.sections.plugins.len(),
+            VisorTab::Agents => self.sections.agents.len(),
         }
     }
 
@@ -172,6 +191,18 @@ impl AiVisorPanel {
                 .skills
                 .get(self.selected)
                 .map(|s| s.path.as_path())
+        } else {
+            None
+        }
+    }
+
+    /// Get the path of the selected agent (for opening in editor).
+    pub fn selected_agent_path(&self) -> Option<&Path> {
+        if self.active_tab == VisorTab::Agents {
+            self.sections
+                .agents
+                .get(self.selected)
+                .map(|a| a.path.as_path())
         } else {
             None
         }
@@ -282,6 +313,16 @@ pub fn load_visor_data(project_root: &Path) -> VisorSections {
                 }
             }
         }
+    }
+
+    // Load agents from .claude/agents/ (project and global).
+    discover_agents(
+        &project_root.join(".claude/agents"),
+        "project",
+        &mut sections.agents,
+    );
+    if let Some(home) = dirs_home() {
+        discover_agents(&home.join(".claude/agents"), "global", &mut sections.agents);
     }
 
     // Count AURA project rules.
@@ -467,5 +508,66 @@ fn parse_skill_md(content: &str, path: &Path) -> SkillEntry {
         description,
         path: path.to_path_buf(),
         invocable,
+    }
+}
+
+/// Discover agent definitions from a `.claude/agents/` directory.
+///
+/// Agents are markdown files with optional YAML frontmatter containing
+/// `name` and `description` fields. Each `.md` file in the directory
+/// is treated as an agent definition.
+fn discover_agents(agents_dir: &Path, scope: &str, out: &mut Vec<AgentEntry>) {
+    let entries = match std::fs::read_dir(agents_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().is_some_and(|e| e == "md") {
+            continue;
+        }
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let mut description = String::new();
+
+        // Parse YAML frontmatter if present.
+        if let Some(after_start) = content.strip_prefix("---") {
+            if let Some(end) = after_start.find("---") {
+                let frontmatter = &after_start[..end];
+                for line in frontmatter.lines() {
+                    let line = line.trim();
+                    if let Some(val) = line.strip_prefix("name:") {
+                        name = val.trim().trim_matches('"').to_string();
+                    } else if let Some(val) = line.strip_prefix("description:") {
+                        description = val.trim().trim_matches('"').to_string();
+                    }
+                }
+            }
+        }
+
+        if description.is_empty() {
+            // Use first non-empty, non-header, non-frontmatter line.
+            description = content
+                .lines()
+                .skip_while(|l| l.starts_with("---") || l.trim().is_empty() || l.starts_with('#'))
+                .find(|l| !l.trim().is_empty() && !l.starts_with("---"))
+                .unwrap_or("")
+                .to_string();
+        }
+
+        out.push(AgentEntry {
+            name,
+            description,
+            path,
+            scope: scope.to_string(),
+        });
     }
 }

@@ -2270,6 +2270,7 @@ fn draw_ai_visor(frame: &mut Frame, app: &App, area: Rect) {
         ("3:Skills", VisorTab::Skills),
         ("4:Hooks", VisorTab::Hooks),
         ("5:Plugins", VisorTab::Plugins),
+        ("6:Agents", VisorTab::Agents),
     ];
     let mut tab_spans = Vec::new();
     for (label, tab) in &tabs {
@@ -2310,6 +2311,7 @@ fn draw_ai_visor(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(("Skills", format!("{} available", s.skills.len())));
             lines.push(("Hooks", format!("{} configured", s.hooks.len())));
             lines.push(("Plugins", format!("{} installed", s.plugins.len())));
+            lines.push(("Agents", format!("{} discovered", s.agents.len())));
             lines.push(("", String::new()));
             lines.push((
                 "Permissions",
@@ -2500,6 +2502,68 @@ fn draw_ai_visor(frame: &mut Frame, app: &App, area: Rect) {
                     Paragraph::new("  No plugins installed")
                         .style(Style::default().fg(Color::DarkGray)),
                     Rect::new(content.x, content.y, content.width, 1),
+                );
+            }
+        }
+        VisorTab::Agents => {
+            let mut y = content.y;
+            for (i, agent) in visor.sections.agents.iter().enumerate() {
+                if y >= content.y + content.height {
+                    break;
+                }
+                let is_selected = focused && i == visor.selected;
+                let scope_tag = match agent.scope.as_str() {
+                    "project" => "P",
+                    "global" => "G",
+                    _ => "?",
+                };
+                let name_line = format!(" [{}] {}", scope_tag, agent.name);
+                let desc_line = format!("     {}", agent.description);
+
+                let scope_color = match agent.scope.as_str() {
+                    "project" => Color::Green,
+                    "global" => Color::Blue,
+                    _ => Color::White,
+                };
+                let name_style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(scope_color)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(scope_color)
+                        .add_modifier(Modifier::BOLD)
+                };
+                let desc_style = if is_selected {
+                    Style::default().fg(Color::Black).bg(scope_color)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                frame.render_widget(
+                    Paragraph::new(name_line.chars().take(w).collect::<String>()).style(name_style),
+                    Rect::new(content.x, y, content.width, 1),
+                );
+                y += 1;
+                if y < content.y + content.height && !agent.description.is_empty() {
+                    frame.render_widget(
+                        Paragraph::new(desc_line.chars().take(w).collect::<String>())
+                            .style(desc_style),
+                        Rect::new(content.x, y, content.width, 1),
+                    );
+                    y += 1;
+                }
+            }
+            if visor.sections.agents.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("  No agents found").style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(content.x, content.y, content.width, 1),
+                );
+                frame.render_widget(
+                    Paragraph::new("  .claude/agents/*.md")
+                        .style(Style::default().fg(Color::Rgb(80, 80, 80))),
+                    Rect::new(content.x, content.y + 1, content.width, 1),
                 );
             }
         }

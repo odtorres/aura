@@ -617,12 +617,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.ai_visor.active_tab = crate::ai_visor::VisorTab::Plugins;
                 app.ai_visor.selected = 0;
             }
+            KeyCode::Char('6') => {
+                app.ai_visor.active_tab = crate::ai_visor::VisorTab::Agents;
+                app.ai_visor.selected = 0;
+            }
             KeyCode::Tab => app.ai_visor.next_tab(),
             KeyCode::Char('j') | KeyCode::Down => app.ai_visor.select_down(),
             KeyCode::Char('k') | KeyCode::Up => app.ai_visor.select_up(),
             KeyCode::Char('e') | KeyCode::Enter => {
-                // Open the selected skill's source file in the editor.
-                if let Some(path) = app.ai_visor.selected_skill_path().map(|p| p.to_path_buf()) {
+                // Open the selected skill or agent source file in the editor.
+                let path = app
+                    .ai_visor
+                    .selected_skill_path()
+                    .or_else(|| app.ai_visor.selected_agent_path())
+                    .map(|p| p.to_path_buf());
+                if let Some(path) = path {
                     if let Err(e) = app.open_file(path) {
                         app.set_status(e);
                     }

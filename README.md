@@ -431,6 +431,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Ctrl+G git panel toggle fix** — `Ctrl+G` now properly toggles the source control panel on/off (close branch was unreachable)
 - **`g` shortcut in git panel** — press `g` in the source control panel to generate an AI commit message (like `c` for commit)
 - **Indent guide rendering fix** — rainbow indent guides no longer render on top of code text for languages with mixed/tab indentation; guides use visual-column-aware counting and skip non-whitespace cells
+- **Agents tab in AI Visor** — `:visor` now has a 6th tab showing discovered agents from `.claude/agents/` (project) and `~/.claude/agents/` (global); press `6` or Tab to navigate, Enter to open agent file
 
 ## Documentation
 
