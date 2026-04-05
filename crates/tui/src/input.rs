@@ -3160,6 +3160,10 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("accept-incoming", "Accept incoming in conflict", ""),
     ("accept-both", "Accept both in conflict", ""),
     ("seed-history", "Seed conversation history", ""),
+    ("session save", "Save named session", ""),
+    ("session load", "Load named session", ""),
+    ("session list", "List saved sessions", ""),
+    ("session delete", "Delete named session", ""),
 ];
 
 /// Update command completions based on current input.
@@ -4297,6 +4301,56 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(session_cmd) = other.strip_prefix("session ") {
+                let session_cmd = session_cmd.trim();
+                let project_root = std::env::current_dir().unwrap_or_default();
+                if let Some(name) = session_cmd.strip_prefix("save ") {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        let path = crate::session::named_session_path(&project_root, name);
+                        app.save_session();
+                        // Copy the current session to the named path.
+                        let default_path = crate::session::session_path(&project_root);
+                        if let Ok(data) = std::fs::read_to_string(&default_path) {
+                            if let Some(parent) = path.parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            if std::fs::write(&path, &data).is_ok() {
+                                app.set_status(format!("Session saved: {name}"));
+                            } else {
+                                app.set_status("Failed to save session");
+                            }
+                        }
+                    }
+                } else if let Some(name) = session_cmd.strip_prefix("load ") {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        let path = crate::session::named_session_path(&project_root, name);
+                        if let Some(session) = crate::session::load_session(&path) {
+                            app.apply_session(session);
+                            app.set_status(format!("Session loaded: {name}"));
+                        } else {
+                            app.set_status(format!("Session not found: {name}"));
+                        }
+                    }
+                } else if session_cmd == "list" {
+                    let names = crate::session::list_named_sessions(&project_root);
+                    if names.is_empty() {
+                        app.set_status("No saved sessions");
+                    } else {
+                        app.set_status(format!("Sessions: {}", names.join(", ")));
+                    }
+                } else if let Some(name) = session_cmd.strip_prefix("delete ") {
+                    let name = name.trim();
+                    let path = crate::session::named_session_path(&project_root, name);
+                    if std::fs::remove_file(&path).is_ok() {
+                        app.set_status(format!("Session deleted: {name}"));
+                    } else {
+                        app.set_status(format!("Session not found: {name}"));
+                    }
+                } else {
+                    app.set_status("Usage: :session save|load|list|delete <name>");
+                }
             } else if let Some(expr) = other.strip_prefix("watch ") {
                 let expr = expr.trim();
                 if !expr.is_empty() {

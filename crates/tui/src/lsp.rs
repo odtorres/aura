@@ -180,6 +180,8 @@ pub enum LspEvent {
     RenameApplied(HashMap<String, Vec<TextEdit>>),
     /// Inlay hints for the visible range.
     InlayHints(Vec<InlayHint>),
+    /// Semantic tokens for the full document.
+    SemanticTokens(Vec<SemanticToken>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
 }
@@ -196,6 +198,48 @@ pub struct InlayHint {
     /// Whether this is a type hint (vs parameter hint).
     pub is_type: bool,
 }
+
+/// A decoded semantic token from the language server.
+#[derive(Debug, Clone)]
+pub struct SemanticToken {
+    /// Line number (0-based).
+    pub line: u32,
+    /// Start character (0-based).
+    pub start_char: u32,
+    /// Token length in characters.
+    pub length: u32,
+    /// Token type index (maps to the server's legend).
+    pub token_type: u32,
+    /// Token modifiers bitmask.
+    pub modifiers: u32,
+}
+
+/// Standard semantic token type names (LSP spec).
+pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
+    "namespace",
+    "type",
+    "class",
+    "enum",
+    "interface",
+    "struct",
+    "typeParameter",
+    "parameter",
+    "variable",
+    "property",
+    "enumMember",
+    "event",
+    "function",
+    "method",
+    "macro",
+    "keyword",
+    "modifier",
+    "comment",
+    "string",
+    "number",
+    "regexp",
+    "operator",
+    "decorator",
+];
 
 // ── Server configuration ──────────────────────────────────────────
 
@@ -486,6 +530,18 @@ impl LspClient {
         );
     }
 
+    /// Request full semantic tokens for the document.
+    pub fn request_semantic_tokens(&mut self) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/semanticTokens/full",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri }
+            }),
+        );
+    }
+
     /// Request inlay hints for a range of lines.
     pub fn request_inlay_hints(&mut self, start_line: u32, end_line: u32) {
         let id = self.alloc_id();
@@ -764,6 +820,43 @@ fn reader_thread(
                                     })
                                     .collect();
                                 let _ = tx.send(LspEvent::InlayHints(hints));
+                            }
+                            continue;
+                        }
+                        "textDocument/semanticTokens/full" => {
+                            // Semantic tokens are delta-encoded: [deltaLine, deltaStartChar, length, tokenType, tokenModifiers, ...]
+                            if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
+                                let nums: Vec<u32> = data
+                                    .iter()
+                                    .filter_map(|v| v.as_u64().map(|n| n as u32))
+                                    .collect();
+                                let mut tokens = Vec::new();
+                                let mut line: u32 = 0;
+                                let mut start_char: u32 = 0;
+                                for chunk in nums.chunks(5) {
+                                    if chunk.len() < 5 {
+                                        break;
+                                    }
+                                    let delta_line = chunk[0];
+                                    let delta_start = chunk[1];
+                                    let length = chunk[2];
+                                    let token_type = chunk[3];
+                                    let modifiers = chunk[4];
+                                    if delta_line > 0 {
+                                        line += delta_line;
+                                        start_char = delta_start;
+                                    } else {
+                                        start_char += delta_start;
+                                    }
+                                    tokens.push(SemanticToken {
+                                        line,
+                                        start_char,
+                                        length,
+                                        token_type,
+                                        modifiers,
+                                    });
+                                }
+                                let _ = tx.send(LspEvent::SemanticTokens(tokens));
                             }
                             continue;
                         }

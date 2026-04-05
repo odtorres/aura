@@ -1331,6 +1331,7 @@ impl App {
                     let viewport = 50u32; // request a bit more than visible
                     if let Some(ref mut lsp) = self.tab_mut().lsp_client {
                         lsp.request_inlay_hints(scroll, scroll + viewport);
+                        lsp.request_semantic_tokens();
                     }
                 }
                 if self.tab().semantic_dirty {
@@ -1460,7 +1461,7 @@ impl App {
     }
 
     /// Save the current session state to disk.
-    fn save_session(&self) {
+    pub fn save_session(&self) {
         let root = match self.session_project_root() {
             Some(r) => r,
             None => return,
@@ -1566,6 +1567,7 @@ impl App {
     /// Opens all tabs from the session file, restoring cursor and scroll
     /// positions.  Called from `main.rs` after `App::new` when no explicit
     /// file argument was given.
+    /// Restore the default session from `.aura/session.json`.
     pub fn restore_session(&mut self) {
         let root = match self.session_project_root() {
             Some(r) => r,
@@ -1576,7 +1578,11 @@ impl App {
             Some(s) => s,
             None => return,
         };
+        self.apply_session(session);
+    }
 
+    /// Apply a loaded session (restore tabs, UI state, etc.).
+    pub fn apply_session(&mut self, session: Session) {
         // Only restore if there are file-backed tabs to reopen.
         let file_tabs: Vec<&TabState> = session
             .tabs
@@ -3629,6 +3635,9 @@ impl App {
                 }
                 LspEvent::InlayHints(hints) => {
                     self.tab_mut().inlay_hints = hints;
+                }
+                LspEvent::SemanticTokens(tokens) => {
+                    self.tab_mut().semantic_tokens = tokens;
                 }
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);

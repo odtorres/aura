@@ -142,6 +142,8 @@ pub struct EditorTab {
     pub pinned: bool,
     /// Cached inlay hints from LSP for the current viewport.
     pub inlay_hints: Vec<crate::lsp::InlayHint>,
+    /// Cached semantic tokens from LSP.
+    pub semantic_tokens: Vec<crate::lsp::SemanticToken>,
 }
 
 impl EditorTab {
@@ -225,6 +227,7 @@ impl EditorTab {
             foldable_ranges: std::collections::HashMap::new(),
             pinned: false,
             inlay_hints: Vec::new(),
+            semantic_tokens: Vec::new(),
         };
         tab.refresh_semantic_index();
         tab

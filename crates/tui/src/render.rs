@@ -5654,7 +5654,11 @@ fn draw_editor_pane(
     };
 
     draw_editor(frame, app, content_area, &git_status);
-    // Rainbow indent guides (drawn before search highlights so they don't obscure matches).
+    // Semantic highlighting from LSP (drawn first so tree-sitter colors are overridden).
+    if !app.tab().semantic_tokens.is_empty() {
+        draw_semantic_highlights(frame, app, content_area);
+    }
+    // Rainbow indent guides.
     draw_indent_guides(frame, app, content_area);
     // Inlay hints from LSP.
     if !app.tab().inlay_hints.is_empty() {
@@ -5776,6 +5780,87 @@ fn draw_indent_guides(frame: &mut Frame, app: &App, area: Rect) {
             }
             col += tab_w;
             level += 1;
+        }
+    }
+}
+
+/// Map semantic token type index to a color.
+fn semantic_token_color(token_type: u32) -> Option<Color> {
+    match token_type {
+        0 => Some(Color::Rgb(180, 180, 220)),  // namespace
+        1 => Some(Color::Rgb(78, 201, 176)),   // type
+        2 => Some(Color::Rgb(78, 201, 176)),   // class
+        3 => Some(Color::Rgb(184, 215, 163)),  // enum
+        4 => Some(Color::Rgb(78, 201, 176)),   // interface
+        5 => Some(Color::Rgb(78, 201, 176)),   // struct
+        6 => Some(Color::Rgb(78, 201, 176)),   // typeParameter
+        7 => Some(Color::Rgb(156, 220, 254)),  // parameter
+        8 => Some(Color::Rgb(156, 220, 254)),  // variable
+        9 => Some(Color::Rgb(156, 220, 254)),  // property
+        10 => Some(Color::Rgb(184, 215, 163)), // enumMember
+        12 => Some(Color::Rgb(220, 220, 170)), // function
+        13 => Some(Color::Rgb(220, 220, 170)), // method
+        14 => Some(Color::Rgb(190, 140, 220)), // macro
+        15 => Some(Color::Rgb(86, 156, 214)),  // keyword
+        17 => Some(Color::Rgb(106, 153, 85)),  // comment
+        18 => Some(Color::Rgb(206, 145, 120)), // string
+        19 => Some(Color::Rgb(181, 206, 168)), // number
+        21 => Some(Color::Rgb(180, 180, 180)), // operator
+        22 => Some(Color::Rgb(220, 220, 170)), // decorator
+        _ => None,
+    }
+}
+
+/// Draw semantic token highlighting as overlays on the editor text.
+fn draw_semantic_highlights(frame: &mut Frame, app: &App, area: Rect) {
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_x = area.x + gutter_width;
+    let text_w = area.width.saturating_sub(gutter_width) as usize;
+
+    for token in &tab.semantic_tokens {
+        let row = token.line as usize;
+        if row < scroll_row || row >= scroll_row + visible_rows {
+            continue;
+        }
+        let color = match semantic_token_color(token.token_type) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        let col_start = (token.start_char as usize).saturating_sub(scroll_col);
+        let col_end = col_start + token.length as usize;
+        if col_start >= text_w {
+            continue;
+        }
+        let col_end = col_end.min(text_w);
+
+        let screen_y = area.y + (row - scroll_row) as u16;
+
+        // Read the characters to overlay with semantic color.
+        if let Some(line) = tab.buffer.rope().get_line(row) {
+            let display: String = line
+                .chars()
+                .skip(scroll_col + col_start)
+                .take(col_end - col_start)
+                .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+                .collect();
+
+            if !display.is_empty() {
+                let cell = Rect::new(
+                    text_x + col_start as u16,
+                    screen_y,
+                    display.len().min(col_end - col_start) as u16,
+                    1,
+                );
+                frame.render_widget(
+                    Paragraph::new(Span::styled(display, Style::default().fg(color))),
+                    cell,
+                );
+            }
         }
     }
 }

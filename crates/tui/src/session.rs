@@ -124,6 +124,36 @@ pub fn save_session(session: &Session, path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Path for a named session file.
+pub fn named_session_path(project_root: &Path, name: &str) -> PathBuf {
+    project_root
+        .join(".aura")
+        .join("sessions")
+        .join(format!("{name}.json"))
+}
+
+/// List all named sessions in the project.
+pub fn list_named_sessions(project_root: &Path) -> Vec<String> {
+    let dir = project_root.join(".aura").join("sessions");
+    let mut names = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry
+                .path()
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .map(String::from)
+            {
+                if entry.path().extension().and_then(|e| e.to_str()) == Some("json") {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
 /// Load a session from disk.  Returns `None` if the file doesn't exist or
 /// can't be parsed.
 pub fn load_session(path: &Path) -> Option<Session> {
