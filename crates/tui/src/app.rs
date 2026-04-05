@@ -3639,6 +3639,33 @@ impl App {
                 LspEvent::SemanticTokens(tokens) => {
                     self.tab_mut().semantic_tokens = tokens;
                 }
+                LspEvent::CallHierarchy(items) => {
+                    if items.is_empty() {
+                        self.set_status("No callers found");
+                    } else {
+                        let msg = items
+                            .iter()
+                            .map(|i| {
+                                format!(
+                                    "  {} ({}:{})",
+                                    i.name,
+                                    i.uri.rsplit('/').next().unwrap_or(&i.uri),
+                                    i.line + 1
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        self.chat_panel.push_system_message(&format!(
+                            "Incoming calls ({}):\n{}",
+                            items.len(),
+                            msg
+                        ));
+                        if !self.chat_panel.visible {
+                            self.chat_panel.visible = true;
+                        }
+                        self.set_status(format!("{} caller(s) found", items.len()));
+                    }
+                }
                 LspEvent::ServerError(e) => {
                     tracing::warn!("LSP server error: {}", e);
                     self.tab_mut().lsp_client = None;

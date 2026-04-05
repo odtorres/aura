@@ -6808,17 +6808,152 @@ fn draw_peek_definition(frame: &mut Frame, app: &App, editor_area: Rect) {
 }
 
 fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str) {
-    let lines: Vec<&str> = text.lines().take(10).collect();
-    let height = (lines.len() as u16 + 2).min(editor_area.height / 2);
-    let max_width = lines
-        .iter()
+    let max_lines = 15;
+
+    // Parse markdown: detect code blocks (```lang ... ```) and format them.
+    let mut hover_lines: Vec<Line> = Vec::new();
+    let mut in_code_block = false;
+    let mut code_lang = String::new();
+    let mut code_lines: Vec<String> = Vec::new();
+
+    for line in text.lines().take(max_lines + 5) {
+        if line.starts_with("```") {
+            if in_code_block {
+                // End of code block — syntax-highlight the accumulated code.
+                let ext = if code_lang.is_empty() {
+                    "rs"
+                } else {
+                    code_lang.as_str()
+                };
+                let code_text = code_lines.join("\n");
+                let highlighted =
+                    if let Some(lang) = crate::highlight::Language::from_extension(ext) {
+                        crate::highlight::SyntaxHighlighter::new(lang)
+                            .map(|mut hl| hl.highlight(&code_text, Some(&app.theme)))
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+
+                for (i, code_line) in code_lines.iter().enumerate() {
+                    if hover_lines.len() >= max_lines {
+                        break;
+                    }
+                    if let Some(hl_line) = highlighted.get(i) {
+                        // Convert per-char colors into spans by grouping consecutive same-color chars.
+                        let chars: Vec<char> = code_line.chars().collect();
+                        let mut spans: Vec<Span> = Vec::new();
+                        let mut run_start = 0;
+                        let mut run_color = hl_line
+                            .colors
+                            .first()
+                            .copied()
+                            .unwrap_or(Color::Rgb(200, 200, 200));
+                        for (j, &color) in hl_line.colors.iter().enumerate() {
+                            if color != run_color || j >= chars.len() {
+                                let text: String =
+                                    chars[run_start..j.min(chars.len())].iter().collect();
+                                if !text.is_empty() {
+                                    spans.push(Span::styled(
+                                        text,
+                                        Style::default().fg(run_color).bg(Color::Rgb(30, 30, 30)),
+                                    ));
+                                }
+                                run_start = j;
+                                run_color = color;
+                            }
+                        }
+                        // Flush remaining.
+                        let text: String = chars[run_start..].iter().collect();
+                        if !text.is_empty() {
+                            spans.push(Span::styled(
+                                text,
+                                Style::default().fg(run_color).bg(Color::Rgb(30, 30, 30)),
+                            ));
+                        }
+                        hover_lines.push(Line::from(spans));
+                    } else {
+                        hover_lines.push(Line::from(Span::styled(
+                            code_line.clone(),
+                            Style::default()
+                                .fg(Color::Rgb(200, 200, 200))
+                                .bg(Color::Rgb(30, 30, 30)),
+                        )));
+                    }
+                }
+                code_lines.clear();
+                in_code_block = false;
+            } else {
+                // Start of code block.
+                code_lang = line.trim_start_matches('`').trim().to_string();
+                in_code_block = true;
+            }
+            continue;
+        }
+
+        if in_code_block {
+            code_lines.push(line.to_string());
+            continue;
+        }
+
+        if hover_lines.len() >= max_lines {
+            break;
+        }
+
+        // Markdown formatting: bold, italic, headers.
+        if line.starts_with("# ") || line.starts_with("## ") || line.starts_with("### ") {
+            let header_text = line.trim_start_matches('#').trim();
+            hover_lines.push(Line::from(Span::styled(
+                header_text.to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        } else if line.starts_with("---") || line.starts_with("___") {
+            hover_lines.push(Line::from(Span::styled(
+                "─".repeat(20),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            // Inline code: `code`
+            let mut spans: Vec<Span> = Vec::new();
+            let mut rest = line;
+            while let Some(start) = rest.find('`') {
+                if start > 0 {
+                    spans.push(Span::raw(rest[..start].to_string()));
+                }
+                rest = &rest[start + 1..];
+                if let Some(end) = rest.find('`') {
+                    spans.push(Span::styled(
+                        rest[..end].to_string(),
+                        Style::default()
+                            .fg(Color::Rgb(206, 145, 120))
+                            .bg(Color::Rgb(40, 40, 40)),
+                    ));
+                    rest = &rest[end + 1..];
+                } else {
+                    spans.push(Span::raw(format!("`{rest}")));
+                    rest = "";
+                }
+            }
+            if !rest.is_empty() {
+                spans.push(Span::raw(rest.to_string()));
+            }
+            hover_lines.push(Line::from(spans));
+        }
+    }
+
+    let display_lines = hover_lines.len().min(max_lines);
+    let height = (display_lines as u16 + 2).min(editor_area.height / 2);
+    let max_width = text
+        .lines()
+        .take(max_lines)
         .map(|l| l.len() as u16)
         .max()
         .unwrap_or(20)
         .clamp(20, editor_area.width.saturating_sub(8));
-    let width = max_width + 4; // border + padding
+    let width = max_width + 4;
 
-    // Position below and to the right of the cursor.
     let cursor_x = (app.cursor().col - app.tab().scroll_col) as u16 + editor_area.x + 6;
     let cursor_y = (app.cursor().row - app.tab().scroll_row) as u16 + editor_area.y + 1;
 
@@ -6830,16 +6965,12 @@ fn draw_hover_popup(frame: &mut Frame, app: &App, editor_area: Rect, text: &str)
     };
 
     let popup_area = Rect::new(x, y, width, height);
-
-    // Clear background and draw.
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Hover ")
         .border_style(Style::default().fg(Color::Cyan));
-
-    let hover_lines: Vec<Line> = lines.iter().map(|l| Line::from(l.to_string())).collect();
 
     let paragraph = Paragraph::new(hover_lines)
         .block(block)

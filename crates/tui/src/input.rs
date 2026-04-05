@@ -3160,6 +3160,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("accept-incoming", "Accept incoming in conflict", ""),
     ("accept-both", "Accept both in conflict", ""),
     ("seed-history", "Seed conversation history", ""),
+    ("calls", "Show incoming callers (LSP call hierarchy)", ""),
     ("session save", "Save named session", ""),
     ("session load", "Load named session", ""),
     ("session list", "List saved sessions", ""),
@@ -4181,6 +4182,17 @@ fn execute_command(app: &mut App, cmd: &str) {
         // --- Navigation ---
         "outline" | "symbols" => {
             app.open_outline();
+        }
+        // --- Call hierarchy ---
+        "calls" | "callers" => {
+            let row = app.tab().cursor.row as u32;
+            let col = app.tab().cursor.col as u32;
+            if let Some(ref mut lsp) = app.tab_mut().lsp_client {
+                lsp.request_call_hierarchy(row, col);
+                app.set_status("Requesting callers...");
+            } else {
+                app.set_status("No LSP server");
+            }
         }
         // --- Agent mode ---
         "agent stop" => {

@@ -182,6 +182,8 @@ pub enum LspEvent {
     InlayHints(Vec<InlayHint>),
     /// Semantic tokens for the full document.
     SemanticTokens(Vec<SemanticToken>),
+    /// Call hierarchy items (incoming or outgoing calls).
+    CallHierarchy(Vec<CallHierarchyItem>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
 }
@@ -240,6 +242,21 @@ pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
     "operator",
     "decorator",
 ];
+
+/// A call hierarchy item (function/method with location).
+#[derive(Debug, Clone)]
+pub struct CallHierarchyItem {
+    /// Symbol name.
+    pub name: String,
+    /// File URI.
+    pub uri: String,
+    /// Line number (0-based).
+    pub line: u32,
+    /// Character offset (0-based).
+    pub character: u32,
+    /// Whether this is an incoming or outgoing call.
+    pub is_incoming: bool,
+}
 
 // ── Server configuration ──────────────────────────────────────────
 
@@ -526,6 +543,19 @@ impl LspClient {
                 "textDocument": { "uri": self.document_uri },
                 "position": { "line": line, "character": character },
                 "context": { "includeDeclaration": true }
+            }),
+        );
+    }
+
+    /// Request call hierarchy preparation at the cursor position.
+    pub fn request_call_hierarchy(&mut self, line: u32, character: u32) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/prepareCallHierarchy",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "position": { "line": line, "character": character }
             }),
         );
     }
@@ -820,6 +850,36 @@ fn reader_thread(
                                     })
                                     .collect();
                                 let _ = tx.send(LspEvent::InlayHints(hints));
+                            }
+                            continue;
+                        }
+                        "textDocument/prepareCallHierarchy"
+                        | "callHierarchy/incomingCalls"
+                        | "callHierarchy/outgoingCalls" => {
+                            let is_incoming = method.as_str() != "callHierarchy/outgoingCalls";
+                            if let Some(arr) = result.as_array() {
+                                let items: Vec<CallHierarchyItem> = arr
+                                    .iter()
+                                    .filter_map(|v| {
+                                        let item = v.get("from").or(Some(v))?;
+                                        let name = item.get("name")?.as_str()?.to_string();
+                                        let uri = item.get("uri")?.as_str()?.to_string();
+                                        let range = item.get("range")?;
+                                        let start = range.get("start")?;
+                                        let line = start.get("line")?.as_u64()? as u32;
+                                        let character = start.get("character")?.as_u64()? as u32;
+                                        Some(CallHierarchyItem {
+                                            name,
+                                            uri,
+                                            line,
+                                            character,
+                                            is_incoming,
+                                        })
+                                    })
+                                    .collect();
+                                if !items.is_empty() {
+                                    let _ = tx.send(LspEvent::CallHierarchy(items));
+                                }
                             }
                             continue;
                         }
