@@ -536,7 +536,7 @@ Organized by priority: features to add, existing features to improve.
 - [ ] **Call hierarchy** — LSP `callHierarchy/incomingCalls` and `outgoingCalls` displayed in a tree panel.
 - [x] **Rainbow indent guides** — Color indent guide lines by nesting depth (like bracket pair colorization).
 - [ ] **Workspace / multi-root** — Open multiple project folders as one session, with per-folder settings.
-- [ ] **Conditional breakpoints** — Break only when a user-specified expression evaluates to true.
+- [x] **Conditional breakpoints** — Break only when a user-specified expression evaluates to true.
 - [ ] **Watch expressions** — Monitor variable values during debug sessions, persisted across steps.
 - [x] **Search history** — Recall previous `/` and `:search` queries with Up/Down arrows.
 - [x] **File encoding detection** — Show current encoding in status bar, allow changing (UTF-8, Latin-1, etc.).
