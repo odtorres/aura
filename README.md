@@ -433,6 +433,10 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Indent guide rendering fix** — rainbow indent guides no longer render on top of code text for languages with mixed/tab indentation; guides use visual-column-aware counting and skip non-whitespace cells
 - **Agents tab in AI Visor** — `:visor` now has a 6th tab showing discovered agents from `.claude/agents/` (project) and `~/.claude/agents/` (global); press `6` or Tab to navigate, Enter to open agent file
 
+### New in v0.4.10
+- **AI Visor documentation** — new docs page covering all 6 visor tabs (Overview, Settings, Skills, Hooks, Plugins, Agents)
+- **Updated docs** — terminal, git, keybindings, and configuration pages updated with v0.4.9 features
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
