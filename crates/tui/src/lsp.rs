@@ -186,6 +186,8 @@ pub enum LspEvent {
     CallHierarchy(Vec<CallHierarchyItem>),
     /// Code lens items for the document.
     CodeLens(Vec<CodeLensItem>),
+    /// Signature help (function parameter info).
+    SignatureHelp(Option<SignatureHelpResult>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
 }
@@ -269,6 +271,19 @@ pub struct CodeLensItem {
     pub text: String,
     /// Optional command to execute when clicked.
     pub command: Option<String>,
+}
+
+/// Result of a signature help request.
+#[derive(Debug, Clone)]
+pub struct SignatureHelpResult {
+    /// The full signature label (e.g., "fn foo(x: i32, y: &str) -> bool").
+    pub label: String,
+    /// Parameter labels: (start_offset, end_offset) within the label string.
+    pub parameters: Vec<(usize, usize)>,
+    /// Index of the currently active parameter.
+    pub active_parameter: usize,
+    /// Optional documentation for the signature.
+    pub documentation: Option<String>,
 }
 
 // ── Server configuration ──────────────────────────────────────────
@@ -556,6 +571,19 @@ impl LspClient {
                 "textDocument": { "uri": self.document_uri },
                 "position": { "line": line, "character": character },
                 "context": { "includeDeclaration": true }
+            }),
+        );
+    }
+
+    /// Request signature help at the cursor position.
+    pub fn request_signature_help(&mut self, line: u32, character: u32) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/signatureHelp",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "position": { "line": line, "character": character }
             }),
         );
     }
@@ -906,6 +934,60 @@ fn reader_thread(
                                     let _ = tx.send(LspEvent::CallHierarchy(items));
                                 }
                             }
+                            continue;
+                        }
+                        "textDocument/signatureHelp" => {
+                            let sig = (|| {
+                                let sigs = result.get("signatures")?.as_array()?;
+                                let active_sig = result
+                                    .get("activeSignature")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0)
+                                    as usize;
+                                let sig = sigs.get(active_sig)?;
+                                let label = sig.get("label")?.as_str()?.to_string();
+                                let active_param = result
+                                    .get("activeParameter")
+                                    .or_else(|| sig.get("activeParameter"))
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0)
+                                    as usize;
+                                let params: Vec<(usize, usize)> = sig
+                                    .get("parameters")
+                                    .and_then(|p| p.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|p| {
+                                                let plabel = p.get("label")?;
+                                                if let Some(arr) = plabel.as_array() {
+                                                    // [start, end] offsets
+                                                    let s = arr.first()?.as_u64()? as usize;
+                                                    let e = arr.get(1)?.as_u64()? as usize;
+                                                    Some((s, e))
+                                                } else if let Some(s) = plabel.as_str() {
+                                                    // String label — find in signature
+                                                    let start = label.find(s)?;
+                                                    Some((start, start + s.len()))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let doc = sig.get("documentation").and_then(|d| {
+                                    d.as_str().map(String::from).or_else(|| {
+                                        d.get("value").and_then(|v| v.as_str()).map(String::from)
+                                    })
+                                });
+                                Some(SignatureHelpResult {
+                                    label,
+                                    parameters: params,
+                                    active_parameter: active_param,
+                                    documentation: doc,
+                                })
+                            })();
+                            let _ = tx.send(LspEvent::SignatureHelp(sig));
                             continue;
                         }
                         "textDocument/codeLens" => {

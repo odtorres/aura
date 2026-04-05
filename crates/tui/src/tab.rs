@@ -146,6 +146,8 @@ pub struct EditorTab {
     pub semantic_tokens: Vec<crate::lsp::SemanticToken>,
     /// Cached code lens from LSP.
     pub code_lens: Vec<crate::lsp::CodeLensItem>,
+    /// Active signature help (displayed as popup near cursor).
+    pub signature_help: Option<crate::lsp::SignatureHelpResult>,
 }
 
 impl EditorTab {
@@ -231,6 +233,7 @@ impl EditorTab {
             inlay_hints: Vec::new(),
             semantic_tokens: Vec::new(),
             code_lens: Vec::new(),
+            signature_help: None,
         };
         tab.refresh_semantic_index();
         tab

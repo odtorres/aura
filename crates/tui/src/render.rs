@@ -314,6 +314,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_peek_definition(frame, app, editor_inner_for_popups);
         }
 
+        // Render signature help popup if active.
+        if let Some(ref sig) = app.tab().signature_help.clone() {
+            draw_signature_help(frame, app, editor_inner_for_popups, sig);
+        }
+
         // Render hover popup if present.
         if let Some(hover_text) = app.tab().hover_info.clone() {
             draw_hover_popup(frame, app, editor_inner_for_popups, &hover_text);
@@ -6849,6 +6854,96 @@ fn draw_peek_definition(frame: &mut Frame, app: &App, editor_area: Rect) {
             Paragraph::new(scroll_hint)
                 .style(Style::default().fg(Color::DarkGray).bg(Color::Black)),
             Rect::new(hint_x, hint_y, hint_len, 1),
+        );
+    }
+}
+
+/// Draw the signature help popup with the active parameter highlighted.
+fn draw_signature_help(
+    frame: &mut Frame,
+    app: &App,
+    editor_area: Rect,
+    sig: &crate::lsp::SignatureHelpResult,
+) {
+    let label = &sig.label;
+    let height = if sig.documentation.is_some() {
+        4u16
+    } else {
+        3u16
+    };
+    let width = (label.len() as u16 + 4).clamp(20, editor_area.width.saturating_sub(4));
+
+    let cursor_x =
+        (app.cursor().col.saturating_sub(app.tab().scroll_col)) as u16 + editor_area.x + 6;
+    let cursor_y = (app.cursor().row.saturating_sub(app.tab().scroll_row)) as u16 + editor_area.y;
+
+    let x = cursor_x.min(editor_area.right().saturating_sub(width));
+    let y = cursor_y.saturating_sub(height);
+
+    let popup_area = Rect::new(x, y, width, height);
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Signature ")
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // Build the signature line with the active parameter highlighted.
+    let active_range = sig.parameters.get(sig.active_parameter);
+    let mut spans: Vec<Span> = Vec::new();
+
+    if let Some(&(start, end)) = active_range {
+        let start = start.min(label.len());
+        let end = end.min(label.len());
+        if start > 0 {
+            spans.push(Span::styled(
+                &label[..start],
+                Style::default().fg(Color::White),
+            ));
+        }
+        spans.push(Span::styled(
+            &label[start..end],
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        ));
+        if end < label.len() {
+            spans.push(Span::styled(
+                &label[end..],
+                Style::default().fg(Color::White),
+            ));
+        }
+    } else {
+        spans.push(Span::styled(
+            label.as_str(),
+            Style::default().fg(Color::White),
+        ));
+    }
+
+    let sig_line = Line::from(spans);
+    frame.render_widget(
+        Paragraph::new(sig_line).style(Style::default().bg(Color::Black)),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    // Render documentation if available.
+    if let Some(ref doc) = sig.documentation {
+        let doc_line: String = doc.chars().take(inner.width as usize).collect();
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                doc_line,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            ))
+            .style(Style::default().bg(Color::Black)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
     }
 }

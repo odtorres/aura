@@ -3003,6 +3003,18 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     }
                 }
             }
+
+            // Trigger signature help when typing '(' or ','.
+            if matches!(c, '(' | ',') {
+                let row = app.tab().cursor.row as u32;
+                let col = app.tab().cursor.col as u32;
+                if let Some(ref mut lsp) = app.tab_mut().lsp_client {
+                    lsp.request_signature_help(row, col);
+                }
+            } else if c == ')' {
+                // Dismiss signature help on closing paren.
+                app.tab_mut().signature_help = None;
+            }
         }
         KeyCode::Enter => {
             let tab = app.tab_mut();

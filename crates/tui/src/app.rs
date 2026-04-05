@@ -3651,6 +3651,9 @@ impl App {
                 LspEvent::CodeLens(items) => {
                     self.tab_mut().code_lens = items;
                 }
+                LspEvent::SignatureHelp(result) => {
+                    self.tab_mut().signature_help = result;
+                }
                 LspEvent::CallHierarchy(items) => {
                     if items.is_empty() {
                         self.set_status("No callers found");
