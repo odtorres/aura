@@ -2048,7 +2048,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             match op {
                 Operator::Delete => {
                     let text = tab.buffer.rope().slice(start_idx..end_idx).to_string();
-                    app.register = Some(text);
+                    app.set_yank(text);
                     app.tab_mut()
                         .buffer
                         .delete(start_idx, end_idx, AuthorId::human());
@@ -2057,7 +2057,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
                 Operator::Change => {
                     let text = tab.buffer.rope().slice(start_idx..end_idx).to_string();
-                    app.register = Some(text);
+                    app.set_yank(text);
                     app.tab_mut()
                         .buffer
                         .delete(start_idx, end_idx, AuthorId::human());
@@ -2067,7 +2067,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
                 Operator::Yank => {
                     let text = tab.buffer.rope().slice(start_idx..end_idx).to_string();
-                    app.register = Some(text);
+                    app.set_yank(text);
                     app.set_status(format!(
                         "{count} line{} yanked",
                         if count == 1 { "" } else { "s" }
@@ -2429,7 +2429,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             };
             if line_end > line_start {
                 let text = tab.buffer.rope().slice(line_start..line_end).to_string();
-                app.register = Some(text);
+                app.set_yank(text);
                 app.tab_mut()
                     .buffer
                     .delete(line_start, line_end, AuthorId::human());
@@ -2452,7 +2452,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             };
             if line_end > pos {
                 let text = tab.buffer.rope().slice(pos..line_end).to_string();
-                app.register = Some(text);
+                app.set_yank(text);
                 app.tab_mut()
                     .buffer
                     .delete(pos, line_end, AuthorId::human());
@@ -2474,7 +2474,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             };
             if line_end > pos {
                 let text = tab.buffer.rope().slice(pos..line_end).to_string();
-                app.register = Some(text);
+                app.set_yank(text);
                 app.tab_mut()
                     .buffer
                     .delete(pos, line_end, AuthorId::human());
@@ -2486,7 +2486,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Char('Y') => {
             let row = app.tab().cursor.row;
             if let Some(text) = app.tab().buffer.line_text(row) {
-                app.register = Some(text);
+                app.set_yank(text);
                 app.set_status("Yanked line");
             }
         }
@@ -3391,7 +3391,7 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                             tab.buffer.delete(del_start, del_end, AuthorId::human());
                         }
                     }
-                    app.register = Some(yanked);
+                    app.set_yank(yanked);
                     app.tab_mut().cursor.col = sc;
                     app.clamp_cursor();
                     app.mark_highlights_dirty();
@@ -3399,7 +3399,7 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             } else if let Some((start, end)) = app.visual_selection_range() {
                 let tab = app.tab_mut();
                 let text = tab.buffer.rope().slice(start..end).to_string();
-                app.register = Some(text);
+                app.set_yank(text);
                 let tab = app.tab_mut();
                 tab.buffer.delete(start, end, AuthorId::human());
                 tab.cursor = tab.buffer.char_idx_to_cursor(start);
@@ -3432,7 +3432,7 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                         }
                         yanked.push('\n');
                     }
-                    app.register = Some(yanked.clone());
+                    app.set_yank(yanked.clone());
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         let _ = clipboard.set_text(&yanked);
                     }
@@ -3440,7 +3440,7 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
             } else if let Some((start, end)) = app.visual_selection_range() {
                 let text = app.tab().buffer.rope().slice(start..end).to_string();
-                app.register = Some(text.clone());
+                app.set_yank(text.clone());
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set_text(&text);
                 }
@@ -3481,7 +3481,7 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         {
             if let Some((start, end)) = app.visual_selection_range() {
                 let text = app.tab().buffer.rope().slice(start..end).to_string();
-                app.register = Some(text.clone());
+                app.set_yank(text.clone());
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set_text(&text);
                 }
@@ -4793,7 +4793,7 @@ fn apply_operator(app: &mut App, op: Operator, start: usize, end: usize) {
     match op {
         Operator::Delete => {
             let text = app.tab().buffer.rope().slice(start..end).to_string();
-            app.register = Some(text);
+            app.set_yank(text);
             app.tab_mut().buffer.delete(start, end, AuthorId::human());
             let cursor = app.tab().buffer.char_idx_to_cursor(start);
             app.tab_mut().cursor = cursor;
@@ -4802,7 +4802,7 @@ fn apply_operator(app: &mut App, op: Operator, start: usize, end: usize) {
         }
         Operator::Change => {
             let text = app.tab().buffer.rope().slice(start..end).to_string();
-            app.register = Some(text);
+            app.set_yank(text);
             app.tab_mut().buffer.delete(start, end, AuthorId::human());
             let cursor = app.tab().buffer.char_idx_to_cursor(start);
             app.tab_mut().cursor = cursor;
@@ -4812,7 +4812,7 @@ fn apply_operator(app: &mut App, op: Operator, start: usize, end: usize) {
         }
         Operator::Yank => {
             let text = app.tab().buffer.rope().slice(start..end).to_string();
-            app.register = Some(text);
+            app.set_yank(text);
         }
         Operator::Indent => {
             let start_line = app.tab().buffer.char_idx_to_cursor(start).row;

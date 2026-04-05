@@ -170,6 +170,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_debug_panel(frame, app, debug_panel_area);
         }
 
+        app.status_bar_rect = status_area;
         draw_status_bar(frame, app, status_area);
         draw_command_bar(frame, app, command_area);
         return;
@@ -198,6 +199,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_debug_panel(frame, app, debug_panel_area);
         }
 
+        app.status_bar_rect = status_area;
         draw_status_bar(frame, app, status_area);
         draw_command_bar(frame, app, command_area);
     } else {
@@ -283,6 +285,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_debug_panel(frame, app, debug_panel_area);
         }
 
+        app.status_bar_rect = status_area;
         draw_status_bar(frame, app, status_area);
         draw_command_bar(frame, app, command_area);
 

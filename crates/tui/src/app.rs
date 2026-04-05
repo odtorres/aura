@@ -616,6 +616,8 @@ pub struct App {
     pub ai_visor_rect: Rect,
     /// Cached tab bar rect from the last render frame (used for mouse click-to-switch).
     pub tab_bar_rect: Rect,
+    /// Cached rect for the status bar (for mouse click detection).
+    pub status_bar_rect: Rect,
     /// Close button hit areas: (tab_index, x_start, x_end) in absolute screen coords.
     pub tab_close_btn_ranges: Vec<(usize, u16, u16)>,
     /// Tab index pending close confirmation (unsaved changes dialog).
@@ -1049,6 +1051,7 @@ impl App {
             conv_history_rect: Rect::default(),
             ai_visor_rect: Rect::default(),
             tab_bar_rect: Rect::default(),
+            status_bar_rect: Rect::default(),
             tab_close_btn_ranges: Vec::new(),
             tab_close_confirm: None,
             collab: None,
@@ -6463,6 +6466,13 @@ impl App {
             return;
         }
 
+        // Status bar: click to open relevant features.
+        if point_in(self.status_bar_rect) {
+            // Open command palette as the default action for status bar clicks.
+            self.open_command_palette();
+            return;
+        }
+
         // Tab bar: check close buttons first, then tab switching.
         if point_in(self.tab_bar_rect) {
             // Check if click is on a close button.
@@ -9702,6 +9712,16 @@ impl App {
         } else {
             self.set_status(format!("Failed to revert: {path}"));
         }
+    }
+
+    /// Set the yank register and optionally sync to system clipboard.
+    pub fn set_yank(&mut self, text: String) {
+        if self.config.editor.clipboard_sync && !text.is_empty() {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                let _ = clipboard.set_text(&text);
+            }
+        }
+        self.register = Some(text);
     }
 
     /// Trim trailing whitespace from every line in the current buffer.

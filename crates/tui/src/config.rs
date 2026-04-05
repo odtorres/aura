@@ -186,6 +186,8 @@ pub struct EditorConfig {
     pub word_wrap: bool,
     /// Run language formatter on save (uses LSP formatting or external command).
     pub format_on_save: bool,
+    /// Automatically sync yank register with system clipboard.
+    pub clipboard_sync: bool,
 }
 
 impl Default for EditorConfig {
@@ -201,6 +203,7 @@ impl Default for EditorConfig {
             relative_line_numbers: false,
             word_wrap: false,
             format_on_save: false,
+            clipboard_sync: true,
         }
     }
 }
