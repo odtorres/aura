@@ -6457,14 +6457,12 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let end_cur = app.buffer().char_idx_to_cursor(sel_end);
             let lines = end_cur.row.saturating_sub(start_cur.row) + 1;
             let chars = sel_end.saturating_sub(sel_start);
+            let selected_text = app.buffer().rope().slice(sel_start..sel_end).to_string();
+            let words = selected_text.split_whitespace().count();
             if lines > 1 {
-                format!(" {} lines selected │", lines)
+                format!(" {lines}L {words}W {chars}C │")
             } else {
-                format!(
-                    " {} char{} selected │",
-                    chars,
-                    if chars == 1 { "" } else { "s" }
-                )
+                format!(" {words}W {chars}C │")
             }
         } else {
             String::new()
@@ -7198,8 +7196,9 @@ fn draw_diagnostic_popup(
         .unwrap_or_default();
     let title = format!(" {severity}{source} ");
 
-    let lines: Vec<&str> = diag.message.lines().take(8).collect();
-    let height = (lines.len() as u16 + 2).min(editor_area.height / 3);
+    let lines: Vec<&str> = diag.message.lines().take(7).collect();
+    let has_lsp = app.tab().lsp_client.is_some();
+    let height = (lines.len() as u16 + if has_lsp { 3 } else { 2 }).min(editor_area.height / 3);
     let max_width = lines
         .iter()
         .map(|l| l.len() as u16)
@@ -7237,7 +7236,15 @@ fn draw_diagnostic_popup(
         .title(title)
         .border_style(Style::default().fg(border_color));
 
-    let diag_lines: Vec<Line> = lines.iter().map(|l| Line::from(l.to_string())).collect();
+    let mut diag_lines: Vec<Line> = lines.iter().map(|l| Line::from(l.to_string())).collect();
+    if has_lsp {
+        diag_lines.push(Line::from(Span::styled(
+            "  <leader>f to fix",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
 
     let paragraph = Paragraph::new(diag_lines)
         .block(block)

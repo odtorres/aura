@@ -3162,6 +3162,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("git", "Open source control panel", "Ctrl+G"),
     ("term-height", "Set terminal height", ""),
     ("noh", "Clear search highlights", ""),
+    ("sort", "Sort lines", ""),
+    ("sort!", "Sort lines (reverse)", ""),
     ("version", "Show AURA version", ""),
     ("update", "Check for updates", ""),
     ("vsplit", "Vertical split", ""),
@@ -4145,6 +4147,48 @@ fn execute_command(app: &mut App, cmd: &str) {
             }
         }
         // :noh / :nohlsearch — clear search highlights.
+        "sort" | "sort!" => {
+            let reverse = cmd == "sort!";
+            let (start_line, end_line) =
+                if let Some((sel_start, sel_end)) = app.visual_selection_range() {
+                    let sr = app.tab().buffer.char_idx_to_cursor(sel_start).row;
+                    let er = app.tab().buffer.char_idx_to_cursor(sel_end).row;
+                    (sr, er)
+                } else {
+                    (0, app.tab().buffer.line_count().saturating_sub(1))
+                };
+            // Collect lines.
+            let mut lines: Vec<String> = (start_line..=end_line)
+                .filter_map(|i| app.tab().buffer.rope().get_line(i).map(|l| l.to_string()))
+                .collect();
+            if reverse {
+                lines.sort_by(|a, b| b.cmp(a));
+            } else {
+                lines.sort();
+            }
+            // Replace the range.
+            let start_char = app.tab().buffer.rope().line_to_char(start_line);
+            let end_char = if end_line + 1 < app.tab().buffer.line_count() {
+                app.tab().buffer.rope().line_to_char(end_line + 1)
+            } else {
+                app.tab().buffer.rope().len_chars()
+            };
+            let sorted = lines.join("");
+            app.tab_mut()
+                .buffer
+                .delete(start_char, end_char, aura_core::AuthorId::Human);
+            app.tab_mut()
+                .buffer
+                .insert(start_char, &sorted, aura_core::AuthorId::Human);
+            let count = end_line - start_line + 1;
+            app.set_status(format!(
+                "{count} line{} sorted{}",
+                if count == 1 { "" } else { "s" },
+                if reverse { " (reverse)" } else { "" }
+            ));
+            app.mode = Mode::Normal;
+            app.tab_mut().visual_anchor = None;
+        }
         "noh" | "nohlsearch" => {
             app.clear_search();
             app.set_status("Search cleared");
@@ -4362,6 +4406,19 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel_focused = app.debug_panel.visible;
         }
         other => {
+            // :N — jump to line N.
+            if let Ok(line_num) = other.parse::<usize>() {
+                if line_num > 0 {
+                    let target =
+                        (line_num - 1).min(app.tab().buffer.line_count().saturating_sub(1));
+                    app.tab_mut().cursor.row = target;
+                    app.tab_mut().cursor.col = 0;
+                    app.clamp_cursor();
+                    app.set_status(format!("Line {line_num}"));
+                }
+                return;
+            }
+
             // Handle commands with arguments.
             if let Some(name) = other.strip_prefix("follow ") {
                 let name = name.trim();
