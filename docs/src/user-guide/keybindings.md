@@ -459,6 +459,7 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `u` | Unstage selected file |
 | `d` | Discard changes (with `y` confirmation) |
 | `c` | Commit staged changes |
+| `g` | Generate AI commit message |
 | `i` / `Enter` | Edit commit message (on Commit Message section) |
 | `Enter` | Open diff view (on file entry) |
 | `Esc` | Return focus to editor |

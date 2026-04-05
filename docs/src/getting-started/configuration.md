@@ -7,7 +7,7 @@ AURA is configured via `aura.toml`. It searches for configuration in:
 
 If no config file is found, sensible defaults are used.
 
-You can also change common settings interactively with the **Settings modal** (`Ctrl+,` or `:settings`). Changes apply immediately.
+You can also change common settings interactively with the **Settings modal** (`Ctrl+,` or `:settings`). Changes apply immediately and are **persisted to `aura.toml`** automatically, so they survive restarts.
 
 ## Full Example
 

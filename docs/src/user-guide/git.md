@@ -36,6 +36,7 @@ Open the git sidebar with `Ctrl+G` (or click the "Git" tab in the sidebar). The 
 | `u` | Unstage selected file |
 | `d` | Discard changes (with `y` to confirm) |
 | `c` | Commit staged changes |
+| `g` | Generate AI commit message |
 | `i` / `Enter` | Edit commit message |
 | `Enter` (on file) | Open side-by-side diff view |
 
@@ -60,7 +61,7 @@ A sparkle `✨` button appears on the "Commit Message" header when:
 
 Click it to generate a commit message from the staged diff. The AI response streams into the commit message box in real-time — the header shows "(AI...)" while generating. Once complete, review and edit the message, then press `c` to commit.
 
-Also available via `:commit` or `:gc` commands.
+You can also press `g` in the git panel, or use `:commit` / `:gc` commands.
 
 ## Committing
 

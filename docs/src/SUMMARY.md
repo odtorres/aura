@@ -23,6 +23,7 @@
 - [Split Panes](user-guide/split-panes.md)
 - [Collaborative Editing](user-guide/collaborative-editing.md)
 - [Claude Code Integration](user-guide/claude-code.md)
+- [AI Visor](user-guide/ai-visor.md)
 - [Debugger (DAP)](user-guide/debugger.md)
 
 # Architecture

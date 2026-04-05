@@ -4,8 +4,10 @@ AURA includes a fully functional embedded terminal powered by a real PTY (pseudo
 
 ## Opening the Terminal
 
-- `Ctrl+J` or `` Ctrl+` `` — toggle terminal visibility and focus
+- `Ctrl+T` or `` Ctrl+` `` — toggle terminal visibility and focus
 - `:term` or `:terminal` — toggle via command mode
+
+`Ctrl+T` works both ways: press it to open the terminal, press it again to close it — even when the terminal is focused.
 
 When the terminal is focused, all keystrokes are forwarded to the shell.
 
