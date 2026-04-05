@@ -184,6 +184,8 @@ pub enum LspEvent {
     SemanticTokens(Vec<SemanticToken>),
     /// Call hierarchy items (incoming or outgoing calls).
     CallHierarchy(Vec<CallHierarchyItem>),
+    /// Code lens items for the document.
+    CodeLens(Vec<CodeLensItem>),
     /// The server crashed or encountered a fatal error.
     ServerError(String),
 }
@@ -256,6 +258,17 @@ pub struct CallHierarchyItem {
     pub character: u32,
     /// Whether this is an incoming or outgoing call.
     pub is_incoming: bool,
+}
+
+/// A code lens item (virtual text above a line, e.g., reference count).
+#[derive(Debug, Clone)]
+pub struct CodeLensItem {
+    /// Line number (0-based).
+    pub line: u32,
+    /// Display text (e.g., "3 references").
+    pub text: String,
+    /// Optional command to execute when clicked.
+    pub command: Option<String>,
 }
 
 // ── Server configuration ──────────────────────────────────────────
@@ -543,6 +556,18 @@ impl LspClient {
                 "textDocument": { "uri": self.document_uri },
                 "position": { "line": line, "character": character },
                 "context": { "includeDeclaration": true }
+            }),
+        );
+    }
+
+    /// Request code lens for the current document.
+    pub fn request_code_lens(&mut self) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/codeLens",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri }
             }),
         );
     }
@@ -879,6 +904,38 @@ fn reader_thread(
                                     .collect();
                                 if !items.is_empty() {
                                     let _ = tx.send(LspEvent::CallHierarchy(items));
+                                }
+                            }
+                            continue;
+                        }
+                        "textDocument/codeLens" => {
+                            if let Some(arr) = result.as_array() {
+                                let items: Vec<CodeLensItem> = arr
+                                    .iter()
+                                    .filter_map(|v| {
+                                        let range = v.get("range")?;
+                                        let line =
+                                            range.get("start")?.get("line")?.as_u64()? as u32;
+                                        let text = v
+                                            .get("command")
+                                            .and_then(|c| c.get("title"))
+                                            .and_then(|t| t.as_str())
+                                            .unwrap_or("...")
+                                            .to_string();
+                                        let command = v
+                                            .get("command")
+                                            .and_then(|c| c.get("command"))
+                                            .and_then(|c| c.as_str())
+                                            .map(String::from);
+                                        Some(CodeLensItem {
+                                            line,
+                                            text,
+                                            command,
+                                        })
+                                    })
+                                    .collect();
+                                if !items.is_empty() {
+                                    let _ = tx.send(LspEvent::CodeLens(items));
                                 }
                             }
                             continue;

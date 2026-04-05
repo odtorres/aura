@@ -536,6 +536,12 @@ pub struct App {
     pub split_focus_secondary: bool,
     /// Whether split panes synchronize scroll position.
     pub split_scroll_sync: bool,
+    /// Pending block insert/append: (start_row, end_row, column, is_append).
+    /// Set when entering insert mode from visual block I/A.
+    /// When exiting insert mode, the typed text is replicated to all rows.
+    pub block_insert_pending: Option<(usize, usize, usize, bool)>,
+    /// Cursor position when block insert started (to compute inserted text).
+    pub block_insert_start_char: usize,
     /// File tree sidebar.
     pub file_tree: FileTree,
     /// Which sidebar view is active (Files or Git).
@@ -993,6 +999,8 @@ impl App {
             split_tab_idx: 0,
             split_focus_secondary: false,
             split_scroll_sync: false,
+            block_insert_pending: None,
+            block_insert_start_char: 0,
             file_tree: FileTree::new(terminal_cwd),
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
@@ -1332,6 +1340,7 @@ impl App {
                     if let Some(ref mut lsp) = self.tab_mut().lsp_client {
                         lsp.request_inlay_hints(scroll, scroll + viewport);
                         lsp.request_semantic_tokens();
+                        lsp.request_code_lens();
                     }
                 }
                 if self.tab().semantic_dirty {
@@ -3638,6 +3647,9 @@ impl App {
                 }
                 LspEvent::SemanticTokens(tokens) => {
                     self.tab_mut().semantic_tokens = tokens;
+                }
+                LspEvent::CodeLens(items) => {
+                    self.tab_mut().code_lens = items;
                 }
                 LspEvent::CallHierarchy(items) => {
                     if items.is_empty() {

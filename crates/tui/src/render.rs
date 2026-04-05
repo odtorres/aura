@@ -5660,6 +5660,10 @@ fn draw_editor_pane(
     }
     // Rainbow indent guides.
     draw_indent_guides(frame, app, content_area);
+    // Code lens from LSP (reference counts, etc.).
+    if !app.tab().code_lens.is_empty() {
+        draw_code_lens(frame, app, content_area);
+    }
     // Inlay hints from LSP.
     if !app.tab().inlay_hints.is_empty() {
         draw_inlay_hints(frame, app, content_area);
@@ -5862,6 +5866,48 @@ fn draw_semantic_highlights(frame: &mut Frame, app: &App, area: Rect) {
                 );
             }
         }
+    }
+}
+
+/// Draw code lens text at the end of function lines.
+fn draw_code_lens(frame: &mut Frame, app: &App, area: Rect) {
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let visible_rows = area.height as usize;
+    let text_x = area.x + gutter_width;
+    let text_w = area.width.saturating_sub(gutter_width) as usize;
+
+    let style = Style::default()
+        .fg(Color::Rgb(120, 120, 120))
+        .add_modifier(Modifier::ITALIC);
+
+    for lens in &tab.code_lens {
+        let row = lens.line as usize;
+        if row < scroll_row || row >= scroll_row + visible_rows {
+            continue;
+        }
+        let screen_y = area.y + (row - scroll_row) as u16;
+        let line_len = tab
+            .buffer
+            .rope()
+            .get_line(row)
+            .map(|l| l.len_chars().saturating_sub(1))
+            .unwrap_or(0);
+        let col = line_len.saturating_sub(tab.scroll_col) + 2;
+        if col >= text_w {
+            continue;
+        }
+        let display = format!(" {} ", lens.text);
+        let max_len = text_w.saturating_sub(col);
+        let display: String = display.chars().take(max_len).collect();
+        let cell = Rect::new(
+            text_x + col as u16,
+            screen_y,
+            display.len().min(max_len) as u16,
+            1,
+        );
+        frame.render_widget(Paragraph::new(Span::styled(display, style)), cell);
     }
 }
 

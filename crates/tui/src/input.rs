@@ -2719,6 +2719,35 @@ pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     match code {
         KeyCode::Esc => {
+            // Block insert/append: replicate typed text to all lines in the block.
+            if let Some((sr, er, col, _is_append)) = app.block_insert_pending.take() {
+                let start = app.block_insert_start_char;
+                let end = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                if end > start {
+                    let typed: String = app.tab().buffer.rope().slice(start..end).to_string();
+                    // Insert the same text on each remaining row (sr+1..=er).
+                    for row in (sr + 1..=er).rev() {
+                        if row < app.tab().buffer.line_count() {
+                            let line_start = app.tab().buffer.rope().line_to_char(row);
+                            let line_len = app
+                                .tab()
+                                .buffer
+                                .rope()
+                                .line(row)
+                                .len_chars()
+                                .saturating_sub(1);
+                            let insert_col = col.min(line_len);
+                            let insert_pos = line_start + insert_col;
+                            app.tab_mut().buffer.insert(
+                                insert_pos,
+                                &typed,
+                                aura_core::AuthorId::Human,
+                            );
+                        }
+                    }
+                }
+            }
+
             app.mode = Mode::Normal;
             // Clear multi-cursors.
             app.tab_mut().secondary_cursors.clear();
@@ -3393,20 +3422,25 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         // I — block insert (prepend text to each line in block).
         KeyCode::Char('I') if app.mode == Mode::VisualBlock => {
-            if let Some((sr, _er, sc, _ec)) = app.visual_block_rect() {
+            if let Some((sr, er, sc, _ec)) = app.visual_block_rect() {
                 app.tab_mut().cursor.row = sr;
                 app.tab_mut().cursor.col = sc;
+                let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                app.block_insert_pending = Some((sr, er, sc, false));
+                app.block_insert_start_char = char_idx;
                 app.mode = Mode::Insert;
-                // The actual multi-line insertion happens when exiting Insert
-                // mode — for now, just position cursor at block start.
                 app.tab_mut().visual_anchor = None;
             }
         }
         // A — block append (append text after each line in block).
         KeyCode::Char('A') if app.mode == Mode::VisualBlock => {
-            if let Some((sr, _er, _sc, ec)) = app.visual_block_rect() {
+            if let Some((sr, er, _sc, ec)) = app.visual_block_rect() {
+                let col = ec + 1;
                 app.tab_mut().cursor.row = sr;
-                app.tab_mut().cursor.col = ec + 1;
+                app.tab_mut().cursor.col = col;
+                let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                app.block_insert_pending = Some((sr, er, col, true));
+                app.block_insert_start_char = char_idx;
                 app.mode = Mode::Insert;
                 app.tab_mut().visual_anchor = None;
             }

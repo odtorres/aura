@@ -144,6 +144,8 @@ pub struct EditorTab {
     pub inlay_hints: Vec<crate::lsp::InlayHint>,
     /// Cached semantic tokens from LSP.
     pub semantic_tokens: Vec<crate::lsp::SemanticToken>,
+    /// Cached code lens from LSP.
+    pub code_lens: Vec<crate::lsp::CodeLensItem>,
 }
 
 impl EditorTab {
@@ -228,6 +230,7 @@ impl EditorTab {
             pinned: false,
             inlay_hints: Vec::new(),
             semantic_tokens: Vec::new(),
+            code_lens: Vec::new(),
         };
         tab.refresh_semantic_index();
         tab
