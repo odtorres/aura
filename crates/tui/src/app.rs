@@ -666,6 +666,10 @@ pub struct App {
     // --- Bracket matching ---
     /// Position (row, col) of the matching bracket for the char under cursor.
     pub matching_bracket: Option<(usize, usize)>,
+    /// Word under cursor for auto-highlight (cached to avoid recalculating every frame).
+    pub cursor_word: String,
+    /// Positions of all occurrences of the cursor word: (start_char, end_char).
+    pub cursor_word_matches: Vec<(usize, usize)>,
 
     // --- Find & Replace ---
     /// Confirmed search query (after pressing Enter).
@@ -1072,6 +1076,8 @@ impl App {
             debug_panel_rect: Rect::default(),
             panel_resize_drag: None,
             matching_bracket: None,
+            cursor_word: String::new(),
+            cursor_word_matches: Vec::new(),
             search_query: None,
             search_input: String::new(),
             search_active: false,
@@ -5204,6 +5210,16 @@ impl App {
         if let Some(engine) = &mut self.speculative {
             engine.cursor_moved(&cursor);
         }
+
+        // Update word-under-cursor highlight.
+        let word = self.tab().buffer.word_at_cursor(cursor.row, cursor.col);
+        if word.len() >= 2 && word != self.cursor_word {
+            self.cursor_word = word.clone();
+            self.cursor_word_matches = self.tab().buffer.find_all(&word);
+        } else if word.len() < 2 {
+            self.cursor_word.clear();
+            self.cursor_word_matches.clear();
+        }
     }
 
     /// Get the current ghost suggestion for rendering.
@@ -6620,6 +6636,22 @@ impl App {
             if in_gutter {
                 let clicked_row = (row - content_y) as usize;
                 let target_line = self.tab().scroll_row + clicked_row;
+
+                // Click on leftmost gutter column (author marker) = toggle breakpoint.
+                if col == content_x && target_line < self.tab().buffer.line_count() {
+                    use std::collections::btree_map::Entry;
+                    match self.tab_mut().breakpoints.entry(target_line) {
+                        Entry::Occupied(e) => {
+                            e.remove();
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert(None);
+                        }
+                    }
+                    self.sync_breakpoints_to_adapter();
+                    return;
+                }
+
                 let is_folded = self.tab().folded_ranges.contains_key(&target_line);
                 let is_foldable = self.tab().foldable_ranges.contains_key(&target_line);
                 if is_folded {

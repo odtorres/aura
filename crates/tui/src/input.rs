@@ -3174,6 +3174,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("lower", "Convert to lowercase", ""),
     ("trim", "Trim trailing whitespace", ""),
     ("encoding", "Set line endings (lf/crlf)", ""),
+    ("run", "Run current file", ""),
+    ("test", "Run tests", ""),
     ("term", "Toggle terminal", "Ctrl+T"),
     ("term new", "New terminal tab", "Ctrl+Shift+T"),
     ("term close", "Close terminal tab", ""),
@@ -4288,6 +4290,71 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.trim_trailing_whitespace();
             app.mark_highlights_dirty();
             app.set_status("Trailing whitespace trimmed");
+        }
+        "run" => {
+            let ext = app
+                .tab()
+                .buffer
+                .file_path()
+                .and_then(|p| p.extension())
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let file_path = app
+                .tab()
+                .buffer
+                .file_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            let cmd = match ext.as_str() {
+                "rs" => "cargo run".to_string(),
+                "py" => format!("python3 {file_path}"),
+                "js" => format!("node {file_path}"),
+                "ts" => format!("npx tsx {file_path}"),
+                "go" => format!("go run {file_path}"),
+                "rb" => format!("ruby {file_path}"),
+                "sh" | "bash" => format!("bash {file_path}"),
+                "lua" => format!("lua {file_path}"),
+                "zig" => "zig build run".to_string(),
+                "c" | "cpp" | "cc" => format!("gcc -o /tmp/aura_run {file_path} && /tmp/aura_run"),
+                _ => {
+                    app.set_status(format!("Don't know how to run .{ext} files"));
+                    return;
+                }
+            };
+            // Run in the embedded terminal.
+            app.terminal_mut().visible = true;
+            app.terminal_focused = true;
+            app.terminal_mut().send_bytes(cmd.as_bytes());
+            app.terminal_mut().send_enter();
+            app.set_status(format!("Running: {cmd}"));
+        }
+        "test" => {
+            let ext = app
+                .tab()
+                .buffer
+                .file_path()
+                .and_then(|p| p.extension())
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let cmd = match ext.as_str() {
+                "rs" => "cargo test",
+                "py" => "pytest",
+                "js" | "ts" | "jsx" | "tsx" => "npm test",
+                "go" => "go test ./...",
+                "rb" => "bundle exec rspec",
+                "zig" => "zig build test",
+                _ => {
+                    app.set_status(format!("Don't know how to test .{ext} files"));
+                    return;
+                }
+            };
+            app.terminal_mut().visible = true;
+            app.terminal_focused = true;
+            app.terminal_mut().send_bytes(cmd.as_bytes());
+            app.terminal_mut().send_enter();
+            app.set_status(format!("Testing: {cmd}"));
         }
         "duplicate" | "dup" => {
             let row = app.tab().cursor.row;

@@ -5731,6 +5731,10 @@ fn draw_editor_pane(
     if !app.tab().inlay_hints.is_empty() {
         draw_inlay_hints(frame, app, content_area);
     }
+    // Word-under-cursor highlights (dim underline on all occurrences).
+    if !app.cursor_word_matches.is_empty() && app.search_matches.is_empty() {
+        draw_word_highlights(frame, app, content_area);
+    }
     // Search match highlights (drawn as overlay on top of text).
     if !app.search_matches.is_empty() {
         draw_search_highlights(frame, app, content_area);
@@ -6023,6 +6027,54 @@ fn draw_inlay_hints(frame: &mut Frame, app: &App, area: Rect) {
             1,
         );
         frame.render_widget(Paragraph::new(Span::styled(display, style)), cell);
+    }
+}
+
+/// Draw word-under-cursor highlights as dim underline overlays.
+fn draw_word_highlights(frame: &mut Frame, app: &App, area: Rect) {
+    let gutter_width = 6u16;
+    let tab = app.tab();
+    let scroll_row = tab.scroll_row;
+    let scroll_col = tab.scroll_col;
+    let visible_rows = area.height as usize;
+    let text_x = area.x + gutter_width;
+    let text_w = area.width.saturating_sub(gutter_width) as usize;
+    let bg = Color::Rgb(60, 60, 70);
+
+    for &(start, end) in &app.cursor_word_matches {
+        let start_row = tab.buffer.rope().char_to_line(start);
+        if start_row < scroll_row || start_row >= scroll_row + visible_rows {
+            continue;
+        }
+        let line_start_char = tab.buffer.rope().line_to_char(start_row);
+        let col_start = (start - line_start_char).saturating_sub(scroll_col);
+        let col_end = (end - line_start_char)
+            .saturating_sub(scroll_col)
+            .min(text_w);
+        if col_start >= text_w || col_start >= col_end {
+            continue;
+        }
+        let screen_y = area.y + (start_row - scroll_row) as u16;
+        let line = tab.buffer.rope().line(start_row);
+        let display: String = line
+            .chars()
+            .skip(scroll_col + col_start)
+            .take(col_end - col_start)
+            .map(|c| if c == '\n' { ' ' } else { c })
+            .collect();
+        let cell = Rect::new(
+            text_x + col_start as u16,
+            screen_y,
+            display.len().min(col_end - col_start) as u16,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                display,
+                Style::default().bg(bg).add_modifier(Modifier::UNDERLINED),
+            )),
+            cell,
+        );
     }
 }
 

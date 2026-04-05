@@ -397,6 +397,16 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Debug variable expansion** — Enter to expand/collapse variable tree
 - **Split scroll sync** — `:scrollsync`
 
+### New in v0.4.4
+- **`:run`** — run current file (cargo run, python, node, go, etc.)
+- **`:test`** — run tests (cargo test, pytest, npm test, etc.)
+- **Gutter click breakpoint** — click line number to toggle breakpoint
+- **Word highlight** — all occurrences of word under cursor highlighted automatically
+- **`:upper` / `:lower`** — convert selection case
+- **`:trim`** — trim trailing whitespace
+- **`:encoding lf/crlf`** — convert line endings
+- **`:cd` / `:pwd`** — change working directory
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
