@@ -544,6 +544,8 @@ pub struct App {
     pub block_insert_start_char: usize,
     /// File tree sidebar.
     pub file_tree: FileTree,
+    /// Additional workspace root folders (multi-root support).
+    pub workspace_roots: Vec<std::path::PathBuf>,
     /// Which sidebar view is active (Files or Git).
     pub sidebar_view: SidebarView,
     /// Source control panel state.
@@ -1017,6 +1019,7 @@ impl App {
             block_insert_pending: None,
             block_insert_start_char: 0,
             file_tree: FileTree::new(terminal_cwd),
+            workspace_roots: Vec::new(),
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
             source_control_focused: false,
@@ -1585,6 +1588,7 @@ impl App {
                     .cloned()
                     .collect(),
             },
+            workspace_roots: self.workspace_roots.clone(),
         };
 
         if let Err(e) = session::save_session(&session, &path) {
@@ -1742,6 +1746,9 @@ impl App {
 
         // Restore search history.
         self.search_history = session.ui.search_history.clone();
+
+        // Restore workspace roots.
+        self.workspace_roots = session.workspace_roots.clone();
 
         self.set_status(format!(
             "Session restored ({} tab{})",

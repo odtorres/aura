@@ -106,6 +106,9 @@ pub struct Session {
     pub active_tab: usize,
     /// UI panel state.
     pub ui: UiState,
+    /// Additional workspace root folders.
+    #[serde(default)]
+    pub workspace_roots: Vec<PathBuf>,
 }
 
 /// Default session file location: `<project_root>/.aura/session.json`.
@@ -296,6 +299,7 @@ mod tests {
                 macro_registers: HashMap::from([('a', vec!["j".into(), "d".into(), "d".into()])]),
                 search_history: vec!["foo".into(), "bar".into()],
             },
+            workspace_roots: vec![PathBuf::from("/tmp/extra")],
         };
 
         let json = serde_json::to_string_pretty(&session).unwrap();

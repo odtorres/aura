@@ -420,6 +420,7 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **`:open <folder>`** — open folder in file tree sidebar
 - **Test runner** — auto-discover tests (Rust, Python, JS, Go), green ▶ gutter markers, `:test-at` runs test at cursor
 - **`:collab-readonly <peer>`** — toggle read-only mode for collaboration peers
+- **Workspace / multi-root** — `:workspace add/remove/list` for multi-folder projects, persisted in session
 - **`:count` / `:wc`** — document statistics
 - **`:diff`** — diff unsaved changes vs file on disk
 - **Ctrl+A** — select all

@@ -3227,6 +3227,9 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("host", "Start collab hosting", ""),
     ("collab-stop", "Stop collab session", ""),
     ("collab-readonly", "Toggle peer read-only", ""),
+    ("workspace add", "Add folder to workspace", ""),
+    ("workspace remove", "Remove folder from workspace", ""),
+    ("workspace list", "List workspace folders", ""),
     ("unfollow", "Stop following peer", ""),
     ("share-term", "Toggle terminal sharing", ""),
     ("view-term", "View shared terminal", ""),
@@ -4725,6 +4728,46 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel_focused = app.debug_panel.visible;
         }
         other => {
+            // :workspace add/remove/list — multi-root workspace management.
+            if let Some(ws_cmd) = other.strip_prefix("workspace ") {
+                let ws_cmd = ws_cmd.trim();
+                if let Some(folder) = ws_cmd.strip_prefix("add ") {
+                    let folder = folder.trim();
+                    let path = std::path::PathBuf::from(folder);
+                    if path.is_dir() {
+                        if !app.workspace_roots.contains(&path) {
+                            app.workspace_roots.push(path.clone());
+                        }
+                        app.set_status(format!(
+                            "Workspace: {} folder(s)",
+                            app.workspace_roots.len() + 1
+                        ));
+                    } else {
+                        app.set_status(format!("Not a directory: {folder}"));
+                    }
+                } else if let Some(folder) = ws_cmd.strip_prefix("remove ") {
+                    let folder = folder.trim();
+                    let path = std::path::PathBuf::from(folder);
+                    app.workspace_roots.retain(|p| p != &path);
+                    app.set_status(format!(
+                        "Workspace: {} folder(s)",
+                        app.workspace_roots.len() + 1
+                    ));
+                } else if ws_cmd == "list" {
+                    let cwd = std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| ".".into());
+                    let mut roots = vec![cwd];
+                    for r in &app.workspace_roots {
+                        roots.push(r.display().to_string());
+                    }
+                    app.set_status(format!("Workspace roots: {}", roots.join(", ")));
+                } else {
+                    app.set_status("Usage: :workspace add|remove|list <folder>");
+                }
+                return;
+            }
+
             // :collab-readonly <peer> — toggle peer read-only mode.
             if let Some(peer_name) = other.strip_prefix("collab-readonly ") {
                 let peer_name = peer_name.trim();
