@@ -425,6 +425,13 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **`:diff`** — diff unsaved changes vs file on disk
 - **Ctrl+A** — select all
 
+### New in v0.4.9
+- **Persistent settings** — settings modal changes (minimap, line numbers, tab width, etc.) are saved to `aura.toml` and survive restarts
+- **Ctrl+T terminal toggle fix** — `Ctrl+T` / `` Ctrl+` `` now correctly toggles the terminal closed when focused (previously the keystroke was swallowed by the PTY)
+- **Ctrl+G git panel toggle fix** — `Ctrl+G` now properly toggles the source control panel on/off (close branch was unreachable)
+- **`g` shortcut in git panel** — press `g` in the source control panel to generate an AI commit message (like `c` for commit)
+- **Indent guide rendering fix** — rainbow indent guides no longer render on top of code text for languages with mixed/tab indentation; guides use visual-column-aware counting and skip non-whitespace cells
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
