@@ -865,9 +865,16 @@ impl App {
             tracing::warn!("No conversation store available — AI history will not be recorded");
         }
 
-        // Initialize speculative engine (reuses AI config).
-        let speculative =
-            AiConfig::from_env().and_then(|config| SpeculativeEngine::new(config).ok());
+        // Initialize speculative engine (reuses AI config with optional model override).
+        let speculative = AiConfig::from_env().and_then(|ai_config| {
+            let mut engine = SpeculativeEngine::new(ai_config).ok()?;
+            engine.model_override = config.ai.model_for("speculative").to_string();
+            // Clear override if it matches the default (no need to override).
+            if engine.model_override == config.ai.model {
+                engine.model_override.clear();
+            }
+            Some(engine)
+        });
 
         // Load MCP client connections from aura.toml.
         let mcp_clients = buffer
@@ -5554,14 +5561,15 @@ impl App {
             ),
         )];
 
-        let rx = client.stream_completion(&system, messages);
+        let commit_model = self.config.ai.model_for("commit").to_string();
+        let rx = client.stream_completion_with_model(&system, messages, &commit_model);
 
         // Clear the commit message and start streaming into it.
         self.source_control.commit_message.clear();
         self.source_control.editing_commit_message = false;
         self.source_control.focused_section = crate::source_control::GitPanelSection::CommitMessage;
         self.commit_msg_receiver = Some(rx);
-        self.set_status("Generating commit message...");
+        self.set_status(format!("Generating commit message ({commit_model})..."));
     }
 
     /// Poll for streaming AI commit message tokens.
@@ -5764,7 +5772,8 @@ impl App {
                       changed. Be concise (2-4 sentences). Output ONLY the summary."
             .to_string();
         let msgs = vec![Message::text("user", &transcript)];
-        let rx = client.stream_completion(&system, msgs);
+        let summarize_model = self.config.ai.model_for("summarize").to_string();
+        let rx = client.stream_completion_with_model(&system, msgs, &summarize_model);
         self.summarize_receiver = Some((conversation_id.to_string(), rx));
     }
 
@@ -7034,20 +7043,29 @@ impl App {
         };
 
         // Use tools if the backend supports them.
+        // Select model based on feature: agent mode uses agent_model, otherwise chat_model.
+        let feature = if self.agent_mode.is_some() {
+            "agent"
+        } else {
+            "chat"
+        };
+        let model = self.config.ai.model_for(feature).to_string();
+
         if client.supports_tools() {
             let mut tools = editor_tools();
             // Include subagent tools when in agent mode.
             if self.agent_mode.is_some() {
                 tools.extend(aura_ai::agent_tools());
             }
-            let rx = client.stream_completion_with_tools(&system, messages, tools);
+            let rx =
+                client.stream_completion_with_tools_and_model(&system, messages, tools, &model);
             self.chat_receiver = Some(rx);
             self.chat_panel.start_streaming();
             self.chat_panel.in_tool_loop = false;
             self.chat_panel.tool_loop_count = 0;
             self.tool_loop_system_prompt = system;
         } else {
-            let rx = client.stream_completion(&system, messages);
+            let rx = client.stream_completion_with_model(&system, messages, &model);
             self.chat_receiver = Some(rx);
             self.chat_panel.start_streaming();
         }
@@ -7396,7 +7414,13 @@ impl App {
             tools.extend(aura_ai::agent_tools());
         }
         let system = self.tool_loop_system_prompt.clone();
-        let rx = client.stream_completion_with_tools(&system, messages, tools);
+        let feature = if self.agent_mode.is_some() {
+            "agent"
+        } else {
+            "chat"
+        };
+        let model = self.config.ai.model_for(feature).to_string();
+        let rx = client.stream_completion_with_tools_and_model(&system, messages, tools, &model);
         self.chat_receiver = Some(rx);
         self.chat_panel.start_streaming();
     }

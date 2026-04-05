@@ -209,7 +209,7 @@ impl Default for EditorConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AiSettings {
-    /// AI model to use.
+    /// Default AI model (used for chat and general requests).
     pub model: String,
     /// Maximum tokens for AI responses.
     pub max_tokens: u32,
@@ -219,6 +219,42 @@ pub struct AiSettings {
     pub idle_threshold_ms: u64,
     /// Maximum context messages to keep in the chat panel (0 = no limit).
     pub max_context_messages: usize,
+
+    // --- Per-feature model overrides (empty = use default `model`) ---
+    /// Model for commit message generation (e.g., "claude-haiku-4-5-20251001" for speed).
+    #[serde(default)]
+    pub commit_model: String,
+    /// Model for speculative/ghost suggestions.
+    #[serde(default)]
+    pub speculative_model: String,
+    /// Model for agent mode (autonomous tasks).
+    #[serde(default)]
+    pub agent_model: String,
+    /// Model for chat panel conversations.
+    #[serde(default)]
+    pub chat_model: String,
+    /// Model for conversation summarization/compaction.
+    #[serde(default)]
+    pub summarize_model: String,
+}
+
+impl AiSettings {
+    /// Get the model for a specific feature, falling back to the default.
+    pub fn model_for(&self, feature: &str) -> &str {
+        let override_model = match feature {
+            "commit" => &self.commit_model,
+            "speculative" | "ghost" => &self.speculative_model,
+            "agent" => &self.agent_model,
+            "chat" => &self.chat_model,
+            "summarize" | "compact" => &self.summarize_model,
+            _ => &self.model,
+        };
+        if override_model.is_empty() {
+            &self.model
+        } else {
+            override_model
+        }
+    }
 }
 
 impl Default for AiSettings {
@@ -229,6 +265,11 @@ impl Default for AiSettings {
             aggressiveness: "moderate".to_string(),
             idle_threshold_ms: 3000,
             max_context_messages: 40,
+            commit_model: String::new(),
+            speculative_model: String::new(),
+            agent_model: String::new(),
+            chat_model: String::new(),
+            summarize_model: String::new(),
         }
     }
 }

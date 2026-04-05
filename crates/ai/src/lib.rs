@@ -130,6 +130,45 @@ impl AiBackend {
         }
     }
 
+    /// Send a streaming completion with a model override.
+    pub fn stream_completion_with_model(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        model_override: &str,
+    ) -> std::sync::mpsc::Receiver<AiEvent> {
+        match self {
+            AiBackend::Api(client) => {
+                client.stream_completion_with_model(system_prompt, messages, model_override)
+            }
+            AiBackend::ClaudeCode(client) => {
+                // CLI backend doesn't support model override; fall back to default.
+                client.stream_completion(system_prompt, messages)
+            }
+        }
+    }
+
+    /// Send a streaming completion with tools and a model override.
+    pub fn stream_completion_with_tools_and_model(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        model_override: &str,
+    ) -> std::sync::mpsc::Receiver<AiEvent> {
+        match self {
+            AiBackend::Api(client) => client.stream_completion_with_tools_and_model(
+                system_prompt,
+                messages,
+                tools,
+                model_override,
+            ),
+            AiBackend::ClaudeCode(client) => {
+                client.stream_completion_with_tools(system_prompt, messages, tools)
+            }
+        }
+    }
+
     /// Whether this backend supports tool use.
     pub fn supports_tools(&self) -> bool {
         true

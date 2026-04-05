@@ -457,6 +457,27 @@ impl AnthropicClient {
         self.stream_completion_with_tools(system_prompt, messages, Vec::new())
     }
 
+    /// Send a streaming completion with a model override.
+    pub fn stream_completion_with_model(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        model_override: &str,
+    ) -> mpsc::Receiver<AiEvent> {
+        self.stream_inner(system_prompt, messages, Vec::new(), Some(model_override))
+    }
+
+    /// Send a streaming completion with tools and a model override.
+    pub fn stream_completion_with_tools_and_model(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        model_override: &str,
+    ) -> mpsc::Receiver<AiEvent> {
+        self.stream_inner(system_prompt, messages, tools, Some(model_override))
+    }
+
     /// Send a streaming completion request with tool definitions.
     ///
     /// When tools are provided, the AI may respond with tool_use content blocks
@@ -467,10 +488,24 @@ impl AnthropicClient {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> mpsc::Receiver<AiEvent> {
+        self.stream_inner(system_prompt, messages, tools, None)
+    }
+
+    /// Internal streaming implementation with optional model override.
+    fn stream_inner(
+        &self,
+        system_prompt: &str,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        model_override: Option<&str>,
+    ) -> mpsc::Receiver<AiEvent> {
         let (tx, rx) = mpsc::channel();
 
+        let model = model_override
+            .map(String::from)
+            .unwrap_or_else(|| self.config.model.clone());
         let request = MessagesRequest {
-            model: self.config.model.clone(),
+            model,
             max_tokens: self.config.max_tokens,
             system: system_prompt.to_string(),
             messages,

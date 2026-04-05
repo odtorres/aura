@@ -294,6 +294,8 @@ pub enum SpecEvent {
 pub struct SpeculativeEngine {
     /// AI client for background requests.
     ai_client: AnthropicClient,
+    /// Optional model override for speculative requests.
+    pub model_override: String,
     /// Receiver for background analysis results.
     event_rx: Option<mpsc::Receiver<SpecEvent>>,
     /// Cached suggestions keyed by region.
@@ -326,6 +328,7 @@ impl SpeculativeEngine {
         let ai_client = AnthropicClient::new(config)?;
         Ok(Self {
             ai_client,
+            model_override: String::new(),
             event_rx: None,
             cache: HashMap::new(),
             last_cursor: Cursor::origin(),
@@ -493,7 +496,12 @@ impl SpeculativeEngine {
             ),
         )];
 
-        let rx = self.ai_client.stream_completion(&system, messages);
+        let rx = if self.model_override.is_empty() {
+            self.ai_client.stream_completion(&system, messages)
+        } else {
+            self.ai_client
+                .stream_completion_with_model(&system, messages, &self.model_override)
+        };
         let (event_tx, event_rx) = mpsc::channel();
 
         let fp = file_path.clone();
@@ -655,7 +663,12 @@ impl SpeculativeEngine {
             ),
         )];
 
-        let rx = self.ai_client.stream_completion(&system, messages);
+        let rx = if self.model_override.is_empty() {
+            self.ai_client.stream_completion(&system, messages)
+        } else {
+            self.ai_client
+                .stream_completion_with_model(&system, messages, &self.model_override)
+        };
         let (event_tx, event_rx) = mpsc::channel();
 
         std::thread::Builder::new()
