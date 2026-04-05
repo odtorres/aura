@@ -3179,6 +3179,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("git", "Open source control panel", "Ctrl+G"),
     ("term-height", "Set terminal height", ""),
     ("noh", "Clear search highlights", ""),
+    ("cd", "Change working directory", ""),
+    ("pwd", "Show working directory", ""),
     ("sort", "Sort lines", ""),
     ("sort!", "Sort lines (reverse)", ""),
     ("comment", "Toggle line comment", "gc"),
@@ -3510,6 +3512,37 @@ pub fn handle_visual(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             app.mode = Mode::Normal;
             app.tab_mut().visual_anchor = None;
+        }
+
+        // Wrap selection with brackets/quotes.
+        KeyCode::Char(c @ ('(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '<' | '>'))
+            if !modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            if let Some((sel_start, sel_end)) = app.visual_selection_range() {
+                let (open, close) = match c {
+                    '(' | ')' => ('(', ')'),
+                    '[' | ']' => ('[', ']'),
+                    '{' | '}' => ('{', '}'),
+                    '<' | '>' => ('<', '>'),
+                    '"' => ('"', '"'),
+                    '\'' => ('\'', '\''),
+                    '`' => ('`', '`'),
+                    _ => unreachable!(),
+                };
+                app.tab_mut().buffer.insert(
+                    sel_end,
+                    &close.to_string(),
+                    aura_core::AuthorId::Human,
+                );
+                app.tab_mut().buffer.insert(
+                    sel_start,
+                    &open.to_string(),
+                    aura_core::AuthorId::Human,
+                );
+                app.mark_highlights_dirty();
+                app.mode = Mode::Normal;
+                app.tab_mut().visual_anchor = None;
+            }
         }
 
         _ => {}
@@ -4451,6 +4484,113 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel_focused = app.debug_panel.visible;
         }
         other => {
+            // :cd <path> — change working directory.
+            if let Some(path) = other.strip_prefix("cd ") {
+                let path = path.trim();
+                if !path.is_empty() {
+                    let target = if path == "~" {
+                        std::env::var("HOME").unwrap_or_else(|_| ".".into())
+                    } else if let Some(rest) = path.strip_prefix("~/") {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                        format!("{home}/{rest}")
+                    } else {
+                        path.to_string()
+                    };
+                    match std::env::set_current_dir(&target) {
+                        Ok(()) => app.set_status(format!("cd {target}")),
+                        Err(e) => app.set_status(format!("cd failed: {e}")),
+                    }
+                }
+                return;
+            }
+            if other == "pwd" {
+                let cwd = std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "?".into());
+                app.set_status(cwd);
+                return;
+            }
+
+            // :%s/old/new/g — search and replace.
+            if other.starts_with("%s/") || other.starts_with("s/") {
+                let is_global = other.starts_with("%s/");
+                let rest = if is_global { &other[3..] } else { &other[2..] };
+                // Parse /pattern/replacement/flags
+                let parts: Vec<&str> = rest.splitn(3, '/').collect();
+                if parts.len() >= 2 {
+                    let pattern = parts[0];
+                    let replacement = parts[1];
+                    let flags = parts.get(2).unwrap_or(&"");
+                    let global = flags.contains('g');
+
+                    if pattern.is_empty() {
+                        app.set_status("Empty pattern");
+                        return;
+                    }
+
+                    let _content = app.tab().buffer.text();
+                    let (start_line, end_line) = if is_global {
+                        (0, app.tab().buffer.line_count())
+                    } else {
+                        let r = app.tab().cursor.row;
+                        (r, r + 1)
+                    };
+
+                    let mut total_replacements = 0usize;
+                    // Process lines in reverse to avoid index shifts.
+                    for line_idx in (start_line..end_line).rev() {
+                        let line_start = app.tab().buffer.rope().line_to_char(line_idx);
+                        let line = app.tab().buffer.rope().line(line_idx).to_string();
+
+                        let mut new_line = String::new();
+                        let mut last_end = 0;
+                        let mut replaced_this_line = false;
+
+                        let mut search_start = 0;
+                        while let Some(pos) = line[search_start..].find(pattern) {
+                            let abs_pos = search_start + pos;
+                            new_line.push_str(&line[last_end..abs_pos]);
+                            new_line.push_str(replacement);
+                            last_end = abs_pos + pattern.len();
+                            total_replacements += 1;
+                            replaced_this_line = true;
+                            search_start = last_end;
+                            if !global {
+                                break;
+                            }
+                        }
+
+                        if replaced_this_line {
+                            new_line.push_str(&line[last_end..]);
+                            let line_end = line_start + line.len();
+                            app.tab_mut().buffer.delete(
+                                line_start,
+                                line_end,
+                                aura_core::AuthorId::Human,
+                            );
+                            app.tab_mut().buffer.insert(
+                                line_start,
+                                &new_line,
+                                aura_core::AuthorId::Human,
+                            );
+                        }
+                    }
+
+                    if total_replacements > 0 {
+                        app.mark_highlights_dirty();
+                        app.set_status(format!(
+                            "{total_replacements} replacement{}",
+                            if total_replacements == 1 { "" } else { "s" }
+                        ));
+                    } else {
+                        app.set_status(format!("Pattern not found: {pattern}"));
+                    }
+                } else {
+                    app.set_status("Usage: :%s/pattern/replacement/g");
+                }
+                return;
+            }
+
             // :N — jump to line N.
             if let Ok(line_num) = other.parse::<usize>() {
                 if line_num > 0 {

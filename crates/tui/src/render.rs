@@ -6483,12 +6483,35 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         String::new()
     };
+    let total_lines = app.buffer().line_count();
+    let file_size = app
+        .buffer()
+        .file_path()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| {
+            let bytes = m.len();
+            if bytes < 1024 {
+                format!("{bytes}B")
+            } else if bytes < 1024 * 1024 {
+                format!("{}KB", bytes / 1024)
+            } else {
+                format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+            }
+        })
+        .unwrap_or_default();
+    let size_info = if file_size.is_empty() {
+        String::new()
+    } else {
+        format!("{file_size} ")
+    };
+
     let right = format!(
-        "{}{} {}:{} ",
+        "{}{} {}:{} {}{total_lines}L ",
         search_info,
         selection_info,
         app.cursor().row + 1,
         app.cursor().col + 1,
+        size_info,
     );
 
     let padding = area
