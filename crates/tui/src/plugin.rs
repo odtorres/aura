@@ -14,6 +14,14 @@ pub enum PluginAction {
     InsertText(String),
     /// Display a message in the status bar.
     SetStatus(String),
+    /// Read the current buffer content (returned via callback).
+    ReadBuffer,
+    /// Get the cursor position (row, col).
+    GetCursor,
+    /// Replace the entire buffer content.
+    SetBuffer(String),
+    /// Get the current file path.
+    GetFilePath,
     /// No action requested.
     None,
 }
@@ -26,6 +34,12 @@ pub enum PluginAction {
 pub trait Plugin: Send + Sync {
     /// Human-readable name that identifies this plugin.
     fn name(&self) -> &str;
+
+    /// Update the plugin with current editor state.
+    ///
+    /// Called before each event dispatch so plugins have access to buffer
+    /// content, cursor position, etc.
+    fn update_state(&mut self, _state: &PluginEditorState) {}
 
     /// Called once immediately after the plugin is registered.
     ///
@@ -62,6 +76,27 @@ pub trait Plugin: Send + Sync {
 // Lua plugin bridge
 // ---------------------------------------------------------------------------
 
+/// Shared editor state accessible to Lua plugins.
+///
+/// Updated by the plugin manager before each callback invocation.
+#[derive(Debug, Clone, Default)]
+pub struct PluginEditorState {
+    /// Current buffer content.
+    pub buffer_content: String,
+    /// Current file path (empty for scratch buffers).
+    pub file_path: String,
+    /// Cursor row (0-indexed).
+    pub cursor_row: usize,
+    /// Cursor column (0-indexed).
+    pub cursor_col: usize,
+    /// Current editing mode label.
+    pub mode: String,
+    /// Number of lines in the buffer.
+    pub line_count: usize,
+    /// Current line text (under cursor).
+    pub current_line: String,
+}
+
 /// A plugin loaded from a Lua script file.
 ///
 /// Each `LuaPlugin` owns its own Lua VM instance. The Lua script must define
@@ -96,6 +131,27 @@ impl LuaPlugin {
             plugin_name: name,
             lua: std::sync::Mutex::new(lua),
         })
+    }
+
+    /// Update the `editor` global table in Lua with current state.
+    ///
+    /// Plugins can access `editor.buffer`, `editor.file_path`, `editor.cursor_row`,
+    /// `editor.cursor_col`, `editor.mode`, `editor.line_count`, `editor.current_line`.
+    pub fn update_state(&self, state: &PluginEditorState) {
+        let lua = match self.lua.lock() {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        if let Ok(table) = lua.create_table() {
+            let _ = table.set("buffer", state.buffer_content.clone());
+            let _ = table.set("file_path", state.file_path.clone());
+            let _ = table.set("cursor_row", state.cursor_row);
+            let _ = table.set("cursor_col", state.cursor_col);
+            let _ = table.set("mode", state.mode.clone());
+            let _ = table.set("line_count", state.line_count);
+            let _ = table.set("current_line", state.current_line.clone());
+            let _ = lua.globals().set("editor", table);
+        }
     }
 
     /// Call a Lua function with a single string arg, no return.
@@ -145,6 +201,11 @@ impl LuaPlugin {
 impl Plugin for LuaPlugin {
     fn name(&self) -> &str {
         &self.plugin_name
+    }
+
+    fn update_state(&mut self, state: &PluginEditorState) {
+        // Delegate to the inherent method.
+        LuaPlugin::update_state(self, state);
     }
 
     fn on_load(&mut self) -> anyhow::Result<()> {
@@ -245,6 +306,16 @@ impl PluginManager {
     pub fn new() -> Self {
         Self {
             plugins: Vec::new(),
+        }
+    }
+
+    /// Update editor state for all plugins.
+    ///
+    /// Sets the `editor` global table in each Lua plugin so scripts can
+    /// access `editor.buffer`, `editor.cursor_row`, `editor.file_path`, etc.
+    pub fn update_editor_state(&mut self, state: &PluginEditorState) {
+        for plugin in &mut self.plugins {
+            plugin.update_state(state);
         }
     }
 

@@ -74,6 +74,10 @@ pub struct DebugState {
     pub output_lines: Vec<String>,
     /// Scroll offset for output view.
     pub output_scroll: usize,
+    /// Watch expressions: (expression, last evaluated value).
+    pub watch_expressions: Vec<(String, String)>,
+    /// Currently selected watch expression index.
+    pub selected_watch: usize,
 }
 
 impl Default for DebugState {
@@ -90,11 +94,42 @@ impl Default for DebugState {
             selected_var: 0,
             output_lines: Vec::new(),
             output_scroll: 0,
+            watch_expressions: Vec::new(),
+            selected_watch: 0,
         }
     }
 }
 
 impl DebugState {
+    /// Add a watch expression.
+    pub fn add_watch(&mut self, expression: &str) {
+        if !expression.is_empty() && !self.watch_expressions.iter().any(|(e, _)| e == expression) {
+            self.watch_expressions
+                .push((expression.to_string(), "?".to_string()));
+        }
+    }
+
+    /// Remove a watch expression by index.
+    pub fn remove_watch(&mut self, idx: usize) {
+        if idx < self.watch_expressions.len() {
+            self.watch_expressions.remove(idx);
+            if self.selected_watch >= self.watch_expressions.len() {
+                self.selected_watch = self.watch_expressions.len().saturating_sub(1);
+            }
+        }
+    }
+
+    /// Update the value of a watch expression.
+    pub fn update_watch_value(&mut self, expression: &str, value: &str) {
+        if let Some(entry) = self
+            .watch_expressions
+            .iter_mut()
+            .find(|(e, _)| e == expression)
+        {
+            entry.1 = value.to_string();
+        }
+    }
+
     /// Reset all state for a new session.
     pub fn reset(&mut self) {
         *self = Self::default();

@@ -3149,6 +3149,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("stepin", "Debug step in", ""),
     ("stepout", "Debug step out", ""),
     ("debug stop", "Stop debugger", ""),
+    ("watch", "Add watch expression", ""),
+    ("unwatch", "Remove watch expression", ""),
     ("debug panel", "Toggle debug panel", ""),
     ("set relativenumber", "Relative line numbers ON", ""),
     ("set norelativenumber", "Relative line numbers OFF", ""),
@@ -4295,6 +4297,32 @@ fn execute_command(app: &mut App, cmd: &str) {
                 let addr = parts[0];
                 let token = parts.get(1).map(|t| t.trim());
                 app.join_collab_with_token(addr, token);
+            } else if let Some(expr) = other.strip_prefix("watch ") {
+                let expr = expr.trim();
+                if !expr.is_empty() {
+                    app.debug_panel.state.add_watch(expr);
+                    app.set_status(format!("Watch added: {expr}"));
+                }
+            } else if let Some(idx_str) = other.strip_prefix("unwatch ") {
+                if let Ok(idx) = idx_str.trim().parse::<usize>() {
+                    app.debug_panel.state.remove_watch(idx);
+                    app.set_status("Watch removed");
+                } else {
+                    // Remove by expression name.
+                    let expr = idx_str.trim();
+                    let pos = app
+                        .debug_panel
+                        .state
+                        .watch_expressions
+                        .iter()
+                        .position(|(e, _)| e == expr);
+                    if let Some(idx) = pos {
+                        app.debug_panel.state.remove_watch(idx);
+                        app.set_status("Watch removed");
+                    } else {
+                        app.set_status("Watch expression not found");
+                    }
+                }
             } else if let Some(cond) = other
                 .strip_prefix("breakpoint if ")
                 .or_else(|| other.strip_prefix("bp if "))
