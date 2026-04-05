@@ -1361,6 +1361,8 @@ impl App {
                         lsp.request_semantic_tokens();
                         lsp.request_code_lens();
                     }
+                    // Discover tests in the buffer.
+                    self.discover_tests();
                 }
                 if self.tab().semantic_dirty {
                     self.refresh_semantic_index();
@@ -9840,6 +9842,126 @@ impl App {
         self.mark_highlights_dirty();
         self.mode = Mode::Normal;
         self.tab_mut().visual_anchor = None;
+    }
+
+    /// Discover test functions in the current buffer.
+    ///
+    /// Scans buffer lines for language-specific test patterns and stores
+    /// (line, name) pairs in `tab.test_lines`.
+    pub fn discover_tests(&mut self) {
+        let ext = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let mut tests = Vec::new();
+        let line_count = self.tab().buffer.line_count();
+
+        for i in 0..line_count {
+            let line = self
+                .tab()
+                .buffer
+                .rope()
+                .get_line(i)
+                .map(|l| l.to_string())
+                .unwrap_or_default();
+            let trimmed = line.trim();
+
+            let test_name = match ext.as_str() {
+                "rs" => {
+                    // #[test] or #[tokio::test] on previous line, fn name on this line
+                    if trimmed.starts_with("fn ") && i > 0 {
+                        let prev = self
+                            .tab()
+                            .buffer
+                            .rope()
+                            .get_line(i - 1)
+                            .map(|l| l.to_string())
+                            .unwrap_or_default();
+                        if prev.trim().contains("#[test]") || prev.trim().contains("#[tokio::test]")
+                        {
+                            trimmed
+                                .strip_prefix("fn ")
+                                .and_then(|s| s.split('(').next())
+                                .map(|s| s.trim().to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                "py" => {
+                    if trimmed.starts_with("def test_") || trimmed.starts_with("async def test_") {
+                        trimmed
+                            .strip_prefix("def ")
+                            .or_else(|| trimmed.strip_prefix("async def "))
+                            .and_then(|s| s.split('(').next())
+                            .map(|s| s.trim().to_string())
+                    } else {
+                        None
+                    }
+                }
+                "js" | "ts" | "jsx" | "tsx" => {
+                    if trimmed.starts_with("it(")
+                        || trimmed.starts_with("test(")
+                        || trimmed.starts_with("describe(")
+                    {
+                        let name = trimmed.split('(').nth(0).unwrap_or("test").to_string();
+                        Some(name)
+                    } else {
+                        None
+                    }
+                }
+                "go" => {
+                    if trimmed.starts_with("func Test") {
+                        trimmed
+                            .strip_prefix("func ")
+                            .and_then(|s| s.split('(').next())
+                            .map(|s| s.trim().to_string())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+
+            if let Some(name) = test_name {
+                tests.push((i, name));
+            }
+        }
+
+        self.tab_mut().test_lines = tests;
+    }
+
+    /// Run a specific test by name.
+    pub fn run_test_by_name(&mut self, name: &str) {
+        let ext = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let cmd = match ext.as_str() {
+            "rs" => format!("cargo test {name}"),
+            "py" => format!("pytest -k {name}"),
+            "go" => format!("go test -run {name}"),
+            "js" | "ts" => format!("npm test -- --grep {name}"),
+            _ => format!("echo 'Cannot run test: {name}'"),
+        };
+
+        self.terminal_mut().visible = true;
+        self.terminal_focused = true;
+        self.terminal_mut().send_bytes(cmd.as_bytes());
+        self.terminal_mut().send_enter();
+        self.set_status(format!("Running test: {name}"));
     }
 
     /// Move the current line down one position.

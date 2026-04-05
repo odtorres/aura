@@ -589,6 +589,8 @@ pub struct CollabSession {
     disconnected_peers: HashMap<u64, (HashMap<u64, SyncState>, std::time::Instant)>,
     /// Authentication token for this session (host only, for display).
     pub auth_token: Option<String>,
+    /// Peer IDs that are in read-only mode (cannot edit, host only).
+    pub read_only_peers: std::collections::HashSet<u64>,
     /// Shutdown flag shared with threads.
     shutdown: Arc<Mutex<bool>>,
 }
@@ -769,6 +771,7 @@ impl CollabSession {
             reconnect_attempt: 0,
             disconnected_peers: HashMap::new(),
             auth_token: tls_auth.auth_token.clone(),
+            read_only_peers: std::collections::HashSet::new(),
             shutdown,
         })
     }
@@ -902,6 +905,7 @@ impl CollabSession {
             reconnect_attempt: 0,
             disconnected_peers: HashMap::new(),
             auth_token: None,
+            read_only_peers: std::collections::HashSet::new(),
             shutdown,
         })
     }

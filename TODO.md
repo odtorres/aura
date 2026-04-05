@@ -541,7 +541,7 @@ Organized by priority: features to add, existing features to improve.
 - [x] **Search history** — Recall previous `/` and `:search` queries with Up/Down arrows.
 - [x] **File encoding detection** — Show current encoding in status bar, allow changing (UTF-8, Latin-1, etc.).
 - [x] **EditorConfig support** — Read `.editorconfig` files for per-project indent style, line endings, trim whitespace.
-- [ ] **Test runner integration** — Discover tests via LSP/tree-sitter, run from UI, show pass/fail/duration.
+- [x] **Test runner integration** — Discover tests via LSP/tree-sitter, run from UI, show pass/fail/duration.
 - [x] **Code lens** — Render reference counts, test status, etc. above functions using LSP code lens.
 
 ### 12.3 New Features — Lower Priority
@@ -567,7 +567,7 @@ Organized by priority: features to add, existing features to improve.
 
 - [x] **File watcher** — Replace polling with OS-native file watching (fsevents on macOS, inotify on Linux) for instant external change detection.
 - [x] **Signature help formatting** — Rich formatting with highlighted active parameter, multi-line overloads.
-- [ ] **Collaboration permissions** — Add read-only mode for peers, per-file lock support.
+- [x] **Collaboration permissions** — Add read-only mode for peers, per-file lock support.
 - [x] **Debug variable inspection** — Wire `request_variables` for lazy-loading expandable variable tree in debug panel.
 - [x] **Search result preview** — Syntax-highlighted preview with more context in project search results.
 - [x] **Chat context window** — Replace hardcoded 40-message limit with sliding window + AI summarization of older messages.

@@ -5392,6 +5392,8 @@ fn draw_editor(
                 } else {
                     Span::styled("I", Style::default().fg(theme.info))
                 }
+            } else if tab.test_lines.iter().any(|(l, _)| *l == line_idx) {
+                Span::styled("▶", Style::default().fg(Color::Green))
             } else if app.show_conversations && app.line_has_conversation(line_idx) {
                 Span::styled("C", Style::default().fg(Color::Magenta))
             } else if let Some(gs) = git_status.get(&line_idx) {

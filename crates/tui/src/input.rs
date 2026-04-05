@@ -3196,6 +3196,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("encoding", "Set line endings (lf/crlf)", ""),
     ("run", "Run current file", ""),
     ("test", "Run tests", ""),
+    ("test-at", "Run test at cursor", ""),
     ("recent", "Show recent files", ""),
     ("count", "Document stats (words/lines/chars)", ""),
     ("diff", "Diff unsaved changes", ""),
@@ -3225,6 +3226,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("compact", "Compact AI conversations", ""),
     ("host", "Start collab hosting", ""),
     ("collab-stop", "Stop collab session", ""),
+    ("collab-readonly", "Toggle peer read-only", ""),
     ("unfollow", "Stop following peer", ""),
     ("share-term", "Toggle terminal sharing", ""),
     ("view-term", "View shared terminal", ""),
@@ -4384,6 +4386,28 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.terminal_mut().send_enter();
             app.set_status(format!("Testing: {cmd}"));
         }
+        "test-at" | "test-cursor" => {
+            // Run the test at or nearest above the cursor.
+            app.discover_tests();
+            let cursor_row = app.tab().cursor.row;
+            let test = app
+                .tab()
+                .test_lines
+                .iter()
+                .rev()
+                .find(|(line, _)| *line <= cursor_row)
+                .map(|(_, name)| name.clone());
+            if let Some(name) = test {
+                app.run_test_by_name(&name);
+            } else {
+                app.set_status("No test found at or above cursor");
+            }
+        }
+        "discover-tests" => {
+            app.discover_tests();
+            let count = app.tab().test_lines.len();
+            app.set_status(format!("{count} test(s) discovered"));
+        }
         "recent" => {
             if app.recent_files.is_empty() {
                 app.set_status("No recent files");
@@ -4701,6 +4725,33 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel_focused = app.debug_panel.visible;
         }
         other => {
+            // :collab-readonly <peer> — toggle peer read-only mode.
+            if let Some(peer_name) = other.strip_prefix("collab-readonly ") {
+                let peer_name = peer_name.trim();
+                if let Some(ref mut session) = app.collab {
+                    // Find peer by name.
+                    let peer_id = session
+                        .peers
+                        .iter()
+                        .find(|(_, info)| info.name == peer_name)
+                        .map(|(&id, _)| id);
+                    if let Some(id) = peer_id {
+                        if session.read_only_peers.contains(&id) {
+                            session.read_only_peers.remove(&id);
+                            app.set_status(format!("{peer_name} can now edit"));
+                        } else {
+                            session.read_only_peers.insert(id);
+                            app.set_status(format!("{peer_name} is now read-only"));
+                        }
+                    } else {
+                        app.set_status(format!("Peer not found: {peer_name}"));
+                    }
+                } else {
+                    app.set_status("No collab session active");
+                }
+                return;
+            }
+
             // :open <folder> — open folder in file tree.
             if let Some(folder) = other.strip_prefix("open ") {
                 let folder = folder.trim();

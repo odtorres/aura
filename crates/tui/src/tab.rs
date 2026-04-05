@@ -148,6 +148,8 @@ pub struct EditorTab {
     pub code_lens: Vec<crate::lsp::CodeLensItem>,
     /// Active signature help (displayed as popup near cursor).
     pub signature_help: Option<crate::lsp::SignatureHelpResult>,
+    /// Discovered test function lines (0-indexed).
+    pub test_lines: Vec<(usize, String)>,
 }
 
 impl EditorTab {
@@ -234,6 +236,7 @@ impl EditorTab {
             semantic_tokens: Vec::new(),
             code_lens: Vec::new(),
             signature_help: None,
+            test_lines: Vec::new(),
         };
         tab.refresh_semantic_index();
         tab
