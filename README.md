@@ -406,6 +406,14 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **`:trim`** — trim trailing whitespace
 - **`:encoding lf/crlf`** — convert line endings
 - **`:cd` / `:pwd`** — change working directory
+- **`:run`** — smart run current file by language
+- **`:test`** — smart test by language
+- **`:recent`** — show recently opened files
+- **`:set number/nonumber`** — toggle line numbers
+- **`:set minimap/nominimap`** — toggle minimap
+- **Ctrl+Z** — undo in any mode
+- **Gutter click** — toggle breakpoint on line number
+- **Word highlight** — auto-highlight all occurrences of word under cursor
 
 ## Documentation
 

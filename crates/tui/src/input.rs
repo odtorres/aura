@@ -2291,7 +2291,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             // gg → go to top, gd → go to definition.
             app.g_pending = true;
         }
-        KeyCode::Char('z') => {
+        KeyCode::Char('z') if !modifiers.contains(KeyModifiers::CONTROL) => {
             // za → toggle fold, zc → close, zo → open, zM → close all, zR → open all.
             app.z_pending = true;
         }
@@ -2587,6 +2587,16 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 Ok(_) => app.set_status("Saved"),
                 Err(e) => app.set_status(format!("Error saving: {}", e)),
             }
+        }
+
+        // Ctrl+Z — undo (works in any mode).
+        KeyCode::Char('z')
+            if modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            app.tab_mut().buffer.undo();
+            app.mark_highlights_dirty();
+            app.clamp_cursor();
         }
 
         // Ctrl+D — add cursor at next occurrence of word under cursor.
@@ -3176,6 +3186,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("encoding", "Set line endings (lf/crlf)", ""),
     ("run", "Run current file", ""),
     ("test", "Run tests", ""),
+    ("recent", "Show recent files", ""),
     ("term", "Toggle terminal", "Ctrl+T"),
     ("term new", "New terminal tab", "Ctrl+Shift+T"),
     ("term close", "Close terminal tab", ""),
@@ -3239,10 +3250,14 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("watch", "Add watch expression", ""),
     ("unwatch", "Remove watch expression", ""),
     ("debug panel", "Toggle debug panel", ""),
+    ("set number", "Line numbers ON", ""),
+    ("set nonumber", "Line numbers OFF", ""),
     ("set relativenumber", "Relative line numbers ON", ""),
     ("set norelativenumber", "Relative line numbers OFF", ""),
     ("set wrap", "Word wrap ON", ""),
     ("set nowrap", "Word wrap OFF", ""),
+    ("set minimap", "Show minimap", ""),
+    ("set nominimap", "Hide minimap", ""),
     ("accept-current", "Accept current in conflict", ""),
     ("accept-incoming", "Accept incoming in conflict", ""),
     ("accept-both", "Accept both in conflict", ""),
@@ -4356,6 +4371,25 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.terminal_mut().send_enter();
             app.set_status(format!("Testing: {cmd}"));
         }
+        "recent" => {
+            if app.recent_files.is_empty() {
+                app.set_status("No recent files");
+            } else {
+                let list: Vec<String> = app
+                    .recent_files
+                    .iter()
+                    .rev()
+                    .take(10)
+                    .map(|p| {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("?")
+                            .to_string()
+                    })
+                    .collect();
+                app.set_status(format!("Recent: {}", list.join(", ")));
+            }
+        }
         "duplicate" | "dup" => {
             let row = app.tab().cursor.row;
             if let Some(line) = app.tab().buffer.line_text(row) {
@@ -4516,6 +4550,22 @@ fn execute_command(app: &mut App, cmd: &str) {
             }
         }
         // --- Set commands ---
+        "set number" | "set nu" => {
+            app.config.editor.line_numbers = true;
+            app.set_status("Line numbers ON");
+        }
+        "set nonumber" | "set nonu" => {
+            app.config.editor.line_numbers = false;
+            app.set_status("Line numbers OFF");
+        }
+        "set minimap" => {
+            app.config.editor.show_minimap = true;
+            app.set_status("Minimap ON");
+        }
+        "set nominimap" => {
+            app.config.editor.show_minimap = false;
+            app.set_status("Minimap OFF");
+        }
         "set relativenumber" | "set rnu" => {
             app.config.editor.relative_line_numbers = true;
             app.set_status("Relative line numbers ON");

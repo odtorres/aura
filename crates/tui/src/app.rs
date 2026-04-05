@@ -666,6 +666,8 @@ pub struct App {
     // --- Bracket matching ---
     /// Position (row, col) of the matching bracket for the char under cursor.
     pub matching_bracket: Option<(usize, usize)>,
+    /// Recently opened file paths (most recent last, max 20).
+    pub recent_files: Vec<std::path::PathBuf>,
     /// Word under cursor for auto-highlight (cached to avoid recalculating every frame).
     pub cursor_word: String,
     /// Positions of all occurrences of the cursor word: (start_char, end_char).
@@ -1076,6 +1078,7 @@ impl App {
             debug_panel_rect: Rect::default(),
             panel_resize_drag: None,
             matching_bracket: None,
+            recent_files: Vec::new(),
             cursor_word: String::new(),
             cursor_word_matches: Vec::new(),
             search_query: None,
@@ -8517,6 +8520,12 @@ impl App {
             self.set_status(format!("Opened {}", path.display()));
         } else {
             self.set_status(format!("Switched to {}", path.display()));
+        }
+        // Track in recent files.
+        self.recent_files.retain(|p| p != &path);
+        self.recent_files.push(path);
+        if self.recent_files.len() > 20 {
+            self.recent_files.remove(0);
         }
         // Detect inline conflict markers.
         self.detect_inline_conflicts();
