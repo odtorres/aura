@@ -336,6 +336,67 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 
 <!-- ANCHOR: techstack-end -->
 
+## New in v0.4 (Phase 12)
+
+### AI & Agent System
+- **Autonomous agent mode** with subagents, planning phases, trust levels (`:agent <task>`)
+- **Per-feature AI model config** — use haiku for commits, sonnet for chat (`commit_model`, `agent_model`, etc.)
+- **Agent diff review** — review all changes after agent completes (`:agent diff`)
+- **Chat context sliding window** with automatic summarization
+
+### LSP Intelligence
+- **Inlay hints** — inline type annotations and parameter names
+- **Semantic highlighting** — 23 token type colors from LSP semantic tokens
+- **Code lens** — reference counts at end of function lines
+- **Call hierarchy** — show incoming callers (`:calls`)
+- **Signature help** — active parameter highlighting on `(` and `,`
+- **Cross-file rename** — updates all open tab buffers
+
+### Editing Features
+- **Toggle comment** — `gc` or `:comment` (language-aware: `//` `#` `--` etc.)
+- **Move line** — `Alt+j`/`Alt+k` moves current line
+- **Visual wrap** — select text, type `(` `"` `[` to wrap in brackets/quotes
+- **`:%s/old/new/g`** — vim-style search and replace
+- **`:sort` / `:sort!`** — sort lines alphabetically or reverse
+- **`:upper` / `:lower`** — convert selection case
+- **`:duplicate`** — duplicate current line
+- **`:trim`** — trim trailing whitespace
+- **`:encoding lf/crlf`** — convert line endings
+- **Block visual I/A** — insert/append text to all selected lines
+- **`ge` / `gE`** — backward word/WORD end motions
+- **`J` with count** — `3J` joins 3 lines
+- **`:N`** — jump to line N
+
+### UI & Navigation
+- **Enhanced minimap** — 12-column code preview with scrollbar
+- **Rainbow indent guides** — colored by nesting depth
+- **Incremental search** — live match highlighting as you type
+- **Search history** — Up/Down arrows, persisted across sessions
+- **Command palette shortcuts** — keyboard shortcuts shown beside commands
+- **File size + line count** in status bar
+- **Selection word count** — `3L 12W 87C` in visual mode
+- **Pinned tabs** — `:pin` / `:unpin`, protected from close
+- **Tab reordering** — `:tabmove left/right`
+- **Status bar click** — opens command palette
+- **Diagnostic hints** — shows `<leader>f to fix` in popup
+
+### Configuration & Workflow
+- **Settings hot-reload** — `aura.toml` changes apply without restart
+- **EditorConfig** — `.editorconfig` support for indent, line endings
+- **Auto-format on save** — `format_on_save = true` (rustfmt, prettier, etc.)
+- **Auto-save** — `auto_save_seconds = 30`
+- **Auto clipboard sync** — yank copies to system clipboard
+- **Named sessions** — `:session save/load/list/delete`
+- **`:cd` / `:pwd`** — change working directory
+- **Snippet variables** — `$TM_FILENAME`, `$CURRENT_DATE`, etc.
+
+### Terminal & Debug
+- **Terminal search** — `Ctrl+F` searches scrollback
+- **Conditional breakpoints** — `:breakpoint if <condition>`
+- **Watch expressions** — `:watch <expr>` / `:unwatch`
+- **Debug variable expansion** — Enter to expand/collapse variable tree
+- **Split scroll sync** — `:scrollsync`
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site

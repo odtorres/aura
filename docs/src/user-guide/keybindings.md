@@ -471,6 +471,99 @@ Type a trigger word (e.g., `fn`, `if`, `for`, `def`, `class`) then press Tab to 
 | `j` / `Down` | Scroll down |
 | `k` / `Up` | Scroll up |
 
+## New Commands (v0.3+)
+
+### Editing Commands
+
+| Command | Description |
+|---------|-------------|
+| `:sort` | Sort selected or all lines alphabetically |
+| `:sort!` | Sort lines in reverse |
+| `:comment` | Toggle line comment (also `gc` in normal/visual) |
+| `:duplicate` / `:dup` | Duplicate current line |
+| `:upper` | Convert selection to UPPERCASE |
+| `:lower` | Convert selection to lowercase |
+| `:trim` | Trim trailing whitespace from all lines |
+| `:encoding lf` | Convert line endings to LF |
+| `:encoding crlf` | Convert line endings to CRLF |
+| `:%s/old/new/g` | Search and replace (global) |
+| `:s/old/new` | Search and replace (current line) |
+| `:N` (number) | Jump to line N (e.g., `:42`) |
+
+### Navigation & Panels
+
+| Command / Key | Description |
+|---------------|-------------|
+| `:cd <path>` | Change working directory |
+| `:pwd` | Show working directory |
+| `:calls` | Show incoming callers (LSP call hierarchy) |
+| `:session save <name>` | Save named session |
+| `:session load <name>` | Load named session |
+| `:session list` | List saved sessions |
+| `:session delete <name>` | Delete named session |
+| `:pin` / `:unpin` | Pin/unpin current tab |
+| `:tabmove left/right` | Reorder tabs |
+| `:scrollsync` | Toggle split pane scroll sync |
+| `:watch <expr>` | Add debug watch expression |
+| `:unwatch <expr>` | Remove watch expression |
+
+### Agent Commands
+
+| Command | Description |
+|---------|-------------|
+| `:agent <task>` | Start autonomous agent |
+| `:agent plan <task>` | Start agent with planning phase |
+| `:agent pause` | Pause running agent |
+| `:agent resume` | Resume paused agent |
+| `:agent trust read\|write\|full` | Set agent trust level |
+| `:agent diff` | Review agent changes |
+| `:agent timeline` | Toggle agent activity timeline |
+
+### New Keybindings
+
+| Key | Mode | Description |
+|-----|------|-------------|
+| `Alt+j` | Normal | Move line down |
+| `Alt+k` | Normal | Move line up |
+| `gc` | Normal/Visual | Toggle line comment |
+| `ge` | Normal | Backward to end of previous word |
+| `gE` | Normal | Backward to end of previous WORD |
+| `Ctrl+P` | Chat (agent) | Pause/resume agent |
+| `Ctrl+F` | Terminal | Search terminal scrollback |
+| `( [ { " ' <` | Visual | Wrap selection in brackets/quotes |
+
+### Breakpoints
+
+| Command | Description |
+|---------|-------------|
+| `:breakpoint` / `:bp` | Toggle breakpoint at cursor |
+| `:breakpoint if <cond>` | Set conditional breakpoint |
+| `Enter` | Expand/collapse debug variable |
+
+## Configuration (aura.toml)
+
+### Per-Feature AI Models
+
+```toml
+[ai]
+model = "claude-sonnet-4-20250514"              # default
+commit_model = "claude-haiku-4-5-20251001"      # fast commit messages
+speculative_model = "claude-haiku-4-5-20251001" # ghost suggestions
+agent_model = "claude-sonnet-4-20250514"        # agent tasks
+chat_model = ""                                  # empty = use default
+summarize_model = "claude-haiku-4-5-20251001"   # conversation compaction
+```
+
+### Editor Settings
+
+```toml
+[editor]
+format_on_save = false     # Run formatter on save
+auto_save_seconds = 0      # Auto-save interval (0 = disabled)
+clipboard_sync = true      # Sync yank to system clipboard
+show_minimap = true        # Show code minimap
+```
+
 ## Customization
 
 Keybindings can be customized in `aura.toml`. See [Configuration](../getting-started/configuration.md#keybinding-customization).
