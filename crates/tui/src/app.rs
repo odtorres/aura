@@ -9714,6 +9714,142 @@ impl App {
         }
     }
 
+    /// Toggle line comments for the current line or visual selection.
+    pub fn toggle_comment(&mut self) {
+        // Detect comment prefix from file extension.
+        let ext = self
+            .tab()
+            .buffer
+            .file_path()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let prefix = match ext.as_str() {
+            "rs" | "js" | "jsx" | "ts" | "tsx" | "go" | "c" | "cpp" | "cc" | "h" | "hpp"
+            | "java" | "kt" | "scala" | "swift" | "dart" | "zig" | "cs" => "//",
+            "py" | "rb" | "sh" | "bash" | "zsh" | "yml" | "yaml" | "toml" | "cfg" | "ini" | "r"
+            | "pl" | "pm" => "#",
+            "lua" | "sql" | "hs" => "--",
+            "html" | "xml" | "svg" => "<!--",
+            "css" | "scss" => "/*",
+            "vim" => "\"",
+            "lisp" | "clj" | "el" => ";",
+            _ => "//",
+        };
+
+        let (start_row, end_row) = if let Some((sel_start, sel_end)) = self.visual_selection_range()
+        {
+            let sr = self.tab().buffer.char_idx_to_cursor(sel_start).row;
+            let er = self.tab().buffer.char_idx_to_cursor(sel_end).row;
+            (sr, er)
+        } else {
+            let r = self.tab().cursor.row;
+            (r, r)
+        };
+
+        // Check if all lines are already commented.
+        let all_commented = (start_row..=end_row).all(|row| {
+            self.tab()
+                .buffer
+                .line_text(row)
+                .map(|l| l.trim_start().starts_with(prefix))
+                .unwrap_or(false)
+        });
+
+        for row in (start_row..=end_row).rev() {
+            let line = match self.tab().buffer.line_text(row) {
+                Some(l) => l,
+                None => continue,
+            };
+            let line_start = self.tab().buffer.rope().line_to_char(row);
+
+            if all_commented {
+                // Remove comment prefix.
+                let indent = line.len() - line.trim_start().len();
+                let prefix_start = line_start + indent;
+                let prefix_end = prefix_start + prefix.len();
+                // Also remove a trailing space after the prefix.
+                let extra = if self
+                    .tab()
+                    .buffer
+                    .get_char(prefix_end)
+                    .map(|c| c == ' ')
+                    .unwrap_or(false)
+                {
+                    1
+                } else {
+                    0
+                };
+                self.tab_mut().buffer.delete(
+                    prefix_start,
+                    prefix_end + extra,
+                    aura_core::AuthorId::Human,
+                );
+            } else {
+                // Add comment prefix after leading whitespace.
+                let indent = line.len() - line.trim_start().len();
+                let insert_pos = line_start + indent;
+                let insert_text = format!("{prefix} ");
+                self.tab_mut()
+                    .buffer
+                    .insert(insert_pos, &insert_text, aura_core::AuthorId::Human);
+            }
+        }
+        self.mark_highlights_dirty();
+        self.mode = Mode::Normal;
+        self.tab_mut().visual_anchor = None;
+    }
+
+    /// Move the current line down one position.
+    pub fn move_line_down(&mut self) {
+        let row = self.tab().cursor.row;
+        if row + 1 >= self.tab().buffer.line_count() {
+            return;
+        }
+        let line_start = self.tab().buffer.rope().line_to_char(row);
+        let line_end = self.tab().buffer.rope().line_to_char(row + 1);
+        let line_text: String = self.tab().buffer.rope().slice(line_start..line_end).into();
+        self.tab_mut()
+            .buffer
+            .delete(line_start, line_end, aura_core::AuthorId::Human);
+        // Insert after the next line (which is now at row).
+        let insert_pos = if row < self.tab().buffer.line_count() {
+            self.tab().buffer.rope().line_to_char(row + 1)
+        } else {
+            self.tab().buffer.rope().len_chars()
+        };
+        self.tab_mut()
+            .buffer
+            .insert(insert_pos, &line_text, aura_core::AuthorId::Human);
+        self.tab_mut().cursor.row = row + 1;
+        self.mark_highlights_dirty();
+    }
+
+    /// Move the current line up one position.
+    pub fn move_line_up(&mut self) {
+        let row = self.tab().cursor.row;
+        if row == 0 {
+            return;
+        }
+        let line_start = self.tab().buffer.rope().line_to_char(row);
+        let line_end = if row + 1 < self.tab().buffer.line_count() {
+            self.tab().buffer.rope().line_to_char(row + 1)
+        } else {
+            self.tab().buffer.rope().len_chars()
+        };
+        let line_text: String = self.tab().buffer.rope().slice(line_start..line_end).into();
+        self.tab_mut()
+            .buffer
+            .delete(line_start, line_end, aura_core::AuthorId::Human);
+        let insert_pos = self.tab().buffer.rope().line_to_char(row - 1);
+        self.tab_mut()
+            .buffer
+            .insert(insert_pos, &line_text, aura_core::AuthorId::Human);
+        self.tab_mut().cursor.row = row - 1;
+        self.mark_highlights_dirty();
+    }
+
     /// Set the yank register and optionally sync to system clipboard.
     pub fn set_yank(&mut self, text: String) {
         if self.config.editor.clipboard_sync && !text.is_empty() {

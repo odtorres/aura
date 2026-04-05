@@ -1853,6 +1853,11 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.clamp_cursor();
                 return;
             }
+            KeyCode::Char('c') => {
+                // gc — toggle comment.
+                app.toggle_comment();
+                return;
+            }
             KeyCode::Char('t') => {
                 app.tabs.next();
                 return;
@@ -2253,6 +2258,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.tab_mut().hover_info = None;
             app.notify_cursor_moved();
         }
+        // Alt+j/k — move line down/up (VS Code style).
+        KeyCode::Char('j') if modifiers.contains(KeyModifiers::ALT) => {
+            app.move_line_down();
+        }
+        KeyCode::Char('k') if modifiers.contains(KeyModifiers::ALT) => {
+            app.move_line_up();
+        }
         KeyCode::Char('k') | KeyCode::Up => {
             let tab = app.tab_mut();
             tab.cursor.row = tab.cursor.row.saturating_sub(count);
@@ -2382,8 +2394,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         // J — join current line with next.
         KeyCode::Char('J') => {
+            // Join lines with count support.
             let row = app.tab().cursor.row;
-            app.tab_mut().buffer.join_lines(row, AuthorId::human());
+            for _ in 0..count {
+                if row + 1 < app.tab().buffer.line_count() {
+                    app.tab_mut().buffer.join_lines(row, AuthorId::human());
+                }
+            }
             app.mark_highlights_dirty();
         }
         // ~ — toggle case of character under cursor.
@@ -3164,6 +3181,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("noh", "Clear search highlights", ""),
     ("sort", "Sort lines", ""),
     ("sort!", "Sort lines (reverse)", ""),
+    ("comment", "Toggle line comment", "gc"),
+    ("duplicate", "Duplicate line", ""),
     ("version", "Show AURA version", ""),
     ("update", "Check for updates", ""),
     ("vsplit", "Vertical split", ""),
@@ -4188,6 +4207,32 @@ fn execute_command(app: &mut App, cmd: &str) {
             ));
             app.mode = Mode::Normal;
             app.tab_mut().visual_anchor = None;
+        }
+        "comment" | "toggle-comment" => {
+            app.toggle_comment();
+        }
+        "duplicate" | "dup" => {
+            let row = app.tab().cursor.row;
+            if let Some(line) = app.tab().buffer.line_text(row) {
+                let line = line.clone();
+                let insert_pos = if row + 1 < app.tab().buffer.line_count() {
+                    app.tab().buffer.rope().line_to_char(row + 1)
+                } else {
+                    let len = app.tab().buffer.rope().len_chars();
+                    // Ensure trailing newline.
+                    if len > 0 && app.tab().buffer.rope().char(len - 1) != '\n' {
+                        app.tab_mut()
+                            .buffer
+                            .insert(len, "\n", aura_core::AuthorId::Human);
+                    }
+                    app.tab().buffer.rope().len_chars()
+                };
+                app.tab_mut()
+                    .buffer
+                    .insert(insert_pos, &line, aura_core::AuthorId::Human);
+                app.tab_mut().cursor.row = row + 1;
+                app.mark_highlights_dirty();
+            }
         }
         "noh" | "nohlsearch" => {
             app.clear_search();
