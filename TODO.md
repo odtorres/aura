@@ -523,7 +523,7 @@ Organized by priority: features to add, existing features to improve.
 - [x] **Minimap** — Visual code overview sidebar for quick navigation (like VS Code/Zed). Render a scaled-down view of the buffer on the right edge.
 - [x] **Scrollbar** — Visual scroll position indicator in the editor gutter.
 - [x] **Inlay hints** — Request inlay hints from LSP and render inline (type annotations, parameter names).
-- [ ] **Semantic highlighting** — Use LSP semantic tokens for meaning-based coloring on top of tree-sitter syntax.
+- [x] **Semantic highlighting** — Use LSP semantic tokens for meaning-based coloring on top of tree-sitter syntax.
 - [x] **Incremental search** — Live-updating match highlights as the user types in `/` search mode.
 - [x] **Multiple terminal tabs** — Support more than one terminal instance (`:term new`, `:term close`, `:term next/prev` — commands exist, need actual multi-instance backend).
 - [x] **Auto-save** — Save files on configurable interval or focus-loss. Add `auto_save` option to `aura.toml`.
@@ -533,51 +533,51 @@ Organized by priority: features to add, existing features to improve.
 
 ### 12.2 New Features — Medium Priority
 
-- [ ] **Call hierarchy** — LSP `callHierarchy/incomingCalls` and `outgoingCalls` displayed in a tree panel.
+- [x] **Call hierarchy** — LSP `callHierarchy/incomingCalls` and `outgoingCalls` displayed in a tree panel.
 - [x] **Rainbow indent guides** — Color indent guide lines by nesting depth (like bracket pair colorization).
 - [ ] **Workspace / multi-root** — Open multiple project folders as one session, with per-folder settings.
 - [x] **Conditional breakpoints** — Break only when a user-specified expression evaluates to true.
-- [ ] **Watch expressions** — Monitor variable values during debug sessions, persisted across steps.
+- [x] **Watch expressions** — Monitor variable values during debug sessions, persisted across steps.
 - [x] **Search history** — Recall previous `/` and `:search` queries with Up/Down arrows.
 - [x] **File encoding detection** — Show current encoding in status bar, allow changing (UTF-8, Latin-1, etc.).
 - [x] **EditorConfig support** — Read `.editorconfig` files for per-project indent style, line endings, trim whitespace.
 - [ ] **Test runner integration** — Discover tests via LSP/tree-sitter, run from UI, show pass/fail/duration.
-- [ ] **Code lens** — Render reference counts, test status, etc. above functions using LSP code lens.
+- [x] **Code lens** — Render reference counts, test status, etc. above functions using LSP code lens.
 
 ### 12.3 New Features — Lower Priority
 
-- [ ] **Peek definition** — Inline definition preview popup without opening a new tab (like VS Code Alt+F12).
+- [x] **Peek definition** — Inline definition preview popup without opening a new tab (like VS Code Alt+F12).
 - [x] **Pinned / grouped tabs** — Pin important tabs so they can't be accidentally closed, group related files.
-- [ ] **Tab reordering** — Move tabs left/right via command or drag.
+- [x] **Tab reordering** — Move tabs left/right via command or drag.
 - [ ] **Interactive rebase UI** — Visual `git rebase -i` with drag-to-reorder commits.
 - [ ] **Remote development (SSH)** — Edit files on remote machines via SSH connection.
-- [ ] **Multiple named sessions** — Save/switch between session profiles (e.g., "frontend", "backend").
+- [x] **Multiple named sessions** — Save/switch between session profiles (e.g., "frontend", "backend").
 - [ ] **Plugin marketplace** — Discover, install, and update plugins from within the editor.
 - [x] **Snippet variables** — Support `$TM_FILENAME`, `$TM_LINE_NUMBER`, `$CURRENT_DATE`, etc. in snippet expansions.
 
 ### 12.4 Existing Features — Critical Improvements
 
 - [x] **Terminal tabs** — Wire actual multi-instance terminal backend (commands already parsed, need EmbeddedTerminal vec + tab state).
-- [ ] **Plugin buffer API** — Expose buffer read/write, cursor, diagnostics to Lua plugins so they can actually do useful work.
+- [x] **Plugin buffer API** — Expose buffer read/write, cursor, diagnostics to Lua plugins so they can actually do useful work.
 - [x] **Agent diff review** — Complete the stubbed `:agent diff` panel: show before/after file diffs when agent finishes, with accept/revert per file.
-- [ ] **Git graph** — Replace basic ASCII graph with interactive branch visualization (scrollable, clickable commits).
+- [x] **Git graph** — Replace basic ASCII graph with interactive branch visualization (scrollable, clickable commits).
 - [x] **Theme hot-reload** — Apply theme changes from `aura.toml` without restarting.
 
 ### 12.5 Existing Features — Important Improvements
 
-- [ ] **File watcher** — Replace polling with OS-native file watching (fsevents on macOS, inotify on Linux) for instant external change detection.
-- [ ] **Signature help formatting** — Rich formatting with highlighted active parameter, multi-line overloads.
+- [x] **File watcher** — Replace polling with OS-native file watching (fsevents on macOS, inotify on Linux) for instant external change detection.
+- [x] **Signature help formatting** — Rich formatting with highlighted active parameter, multi-line overloads.
 - [ ] **Collaboration permissions** — Add read-only mode for peers, per-file lock support.
-- [ ] **Debug variable inspection** — Wire `request_variables` for lazy-loading expandable variable tree in debug panel.
-- [ ] **Search result preview** — Syntax-highlighted preview with more context in project search results.
+- [x] **Debug variable inspection** — Wire `request_variables` for lazy-loading expandable variable tree in debug panel.
+- [x] **Search result preview** — Syntax-highlighted preview with more context in project search results.
 - [x] **Chat context window** — Replace hardcoded 40-message limit with sliding window + AI summarization of older messages.
 - [x] **Command palette shortcuts** — Show keyboard shortcuts beside each command in Ctrl+Shift+P palette (already done for `:` commands).
 
 ### 12.6 Existing Features — Polish
 
-- [ ] **Hover info rendering** — Better markdown formatting, syntax-highlighted code blocks in hover popups.
-- [ ] **Completion doc preview** — Show documentation preview beside completion menu items.
-- [ ] **Block visual mode** — Fix edge cases in block insert/replace/delete operations.
+- [x] **Hover info rendering** — Better markdown formatting, syntax-highlighted code blocks in hover popups.
+- [x] **Completion doc preview** — Show documentation preview beside completion menu items.
+- [x] **Block visual mode** — Fix edge cases in block insert/replace/delete operations.
 - [x] **`ge` motion** — Add backward-to-word-end vim motion.
 - [x] **Cross-file rename** — Use LSP workspace edit for rename refactoring across multiple files.
 - [x] **Auto conversation compaction** — Automatically compact long AI conversations using summarization.

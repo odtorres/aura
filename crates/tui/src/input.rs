@@ -3170,6 +3170,10 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("pin", "Pin current tab", ""),
     ("unpin", "Unpin current tab", ""),
     ("scrollsync", "Toggle split pane scroll sync", ""),
+    ("upper", "Convert to UPPERCASE", ""),
+    ("lower", "Convert to lowercase", ""),
+    ("trim", "Trim trailing whitespace", ""),
+    ("encoding", "Set line endings (lf/crlf)", ""),
     ("term", "Toggle terminal", "Ctrl+T"),
     ("term new", "New terminal tab", "Ctrl+Shift+T"),
     ("term close", "Close terminal tab", ""),
@@ -4244,6 +4248,47 @@ fn execute_command(app: &mut App, cmd: &str) {
         "comment" | "toggle-comment" => {
             app.toggle_comment();
         }
+        "upper" | "uppercase" => {
+            if let Some((start, end)) = app.visual_selection_range() {
+                let text = app.tab().buffer.rope().slice(start..end).to_string();
+                let upper = text.to_uppercase();
+                app.tab_mut()
+                    .buffer
+                    .delete(start, end, aura_core::AuthorId::Human);
+                app.tab_mut()
+                    .buffer
+                    .insert(start, &upper, aura_core::AuthorId::Human);
+                app.mark_highlights_dirty();
+                app.set_status("Converted to UPPERCASE");
+            } else {
+                app.set_status("Select text first (visual mode)");
+            }
+            app.mode = Mode::Normal;
+            app.tab_mut().visual_anchor = None;
+        }
+        "lower" | "lowercase" => {
+            if let Some((start, end)) = app.visual_selection_range() {
+                let text = app.tab().buffer.rope().slice(start..end).to_string();
+                let lower = text.to_lowercase();
+                app.tab_mut()
+                    .buffer
+                    .delete(start, end, aura_core::AuthorId::Human);
+                app.tab_mut()
+                    .buffer
+                    .insert(start, &lower, aura_core::AuthorId::Human);
+                app.mark_highlights_dirty();
+                app.set_status("Converted to lowercase");
+            } else {
+                app.set_status("Select text first (visual mode)");
+            }
+            app.mode = Mode::Normal;
+            app.tab_mut().visual_anchor = None;
+        }
+        "trim" | "trim-whitespace" => {
+            app.trim_trailing_whitespace();
+            app.mark_highlights_dirty();
+            app.set_status("Trailing whitespace trimmed");
+        }
         "duplicate" | "dup" => {
             let row = app.tab().cursor.row;
             if let Some(line) = app.tab().buffer.line_text(row) {
@@ -4484,6 +4529,51 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel_focused = app.debug_panel.visible;
         }
         other => {
+            // :encoding lf / :encoding crlf — change line endings.
+            if let Some(enc) = other.strip_prefix("encoding ") {
+                let enc = enc.trim().to_lowercase();
+                match enc.as_str() {
+                    "lf" => {
+                        // Convert CRLF to LF.
+                        let content = app.tab().buffer.text();
+                        if content.contains("\r\n") {
+                            let fixed = content.replace("\r\n", "\n");
+                            let len = app.tab().buffer.rope().len_chars();
+                            app.tab_mut()
+                                .buffer
+                                .delete(0, len, aura_core::AuthorId::Human);
+                            app.tab_mut()
+                                .buffer
+                                .insert(0, &fixed, aura_core::AuthorId::Human);
+                            app.mark_highlights_dirty();
+                            app.set_status("Line endings: LF");
+                        } else {
+                            app.set_status("Already using LF");
+                        }
+                    }
+                    "crlf" => {
+                        // Convert LF to CRLF.
+                        let content = app.tab().buffer.text();
+                        if !content.contains("\r\n") {
+                            let fixed = content.replace('\n', "\r\n");
+                            let len = app.tab().buffer.rope().len_chars();
+                            app.tab_mut()
+                                .buffer
+                                .delete(0, len, aura_core::AuthorId::Human);
+                            app.tab_mut()
+                                .buffer
+                                .insert(0, &fixed, aura_core::AuthorId::Human);
+                            app.mark_highlights_dirty();
+                            app.set_status("Line endings: CRLF");
+                        } else {
+                            app.set_status("Already using CRLF");
+                        }
+                    }
+                    _ => app.set_status("Usage: :encoding lf | :encoding crlf"),
+                }
+                return;
+            }
+
             // :cd <path> — change working directory.
             if let Some(path) = other.strip_prefix("cd ") {
                 let path = path.trim();
