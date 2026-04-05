@@ -414,6 +414,10 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Ctrl+Z** — undo in any mode
 - **Gutter click** — toggle breakpoint on line number
 - **Word highlight** — auto-highlight all occurrences of word under cursor
+- **`:count` / `:wc`** — document stats (lines, words, chars, size)
+- **`:diff`** — diff unsaved changes vs file on disk
+- **Ctrl+A** — select all (visual line mode)
+- **`:open <folder>`** — open folder in file tree sidebar
 
 ## Documentation
 

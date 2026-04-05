@@ -2160,7 +2160,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.mode = Mode::Insert;
             app.status_message = None;
         }
-        KeyCode::Char('a') => {
+        KeyCode::Char('a') if !modifiers.contains(KeyModifiers::CONTROL) => {
             app.tab_mut().cursor.col += 1;
             app.clamp_cursor();
             app.mode = Mode::Insert;
@@ -2596,6 +2596,16 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         {
             app.tab_mut().buffer.undo();
             app.mark_highlights_dirty();
+            app.clamp_cursor();
+        }
+
+        // Ctrl+A — select all (enter visual line mode, select entire buffer).
+        KeyCode::Char('a') if modifiers.contains(KeyModifiers::CONTROL) => {
+            let last_line = app.tab().buffer.line_count().saturating_sub(1);
+            app.tab_mut().visual_anchor = Some(aura_core::Cursor { row: 0, col: 0 });
+            app.tab_mut().cursor.row = last_line;
+            app.tab_mut().cursor.col = 0;
+            app.mode = Mode::VisualLine;
             app.clamp_cursor();
         }
 
@@ -3187,6 +3197,9 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("run", "Run current file", ""),
     ("test", "Run tests", ""),
     ("recent", "Show recent files", ""),
+    ("count", "Document stats (words/lines/chars)", ""),
+    ("diff", "Diff unsaved changes", ""),
+    ("open", "Open folder in file tree", ""),
     ("term", "Toggle terminal", "Ctrl+T"),
     ("term new", "New terminal tab", "Ctrl+Shift+T"),
     ("term close", "Close terminal tab", ""),
@@ -4390,6 +4403,48 @@ fn execute_command(app: &mut App, cmd: &str) {
                 app.set_status(format!("Recent: {}", list.join(", ")));
             }
         }
+        "count" | "wc" | "stats" => {
+            let text = app.tab().buffer.text();
+            let lines = app.tab().buffer.line_count();
+            let chars = text.len();
+            let words = text.split_whitespace().count();
+            let bytes = text.len();
+            let size = if bytes < 1024 {
+                format!("{bytes}B")
+            } else if bytes < 1024 * 1024 {
+                format!("{}KB", bytes / 1024)
+            } else {
+                format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+            };
+            app.set_status(format!(
+                "{lines} lines, {words} words, {chars} chars, {size}"
+            ));
+        }
+        "diff" | "changes" => {
+            // Show diff between buffer content and saved file on disk.
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                match std::fs::read_to_string(&path) {
+                    Ok(saved) => {
+                        let current = app.tab().buffer.text();
+                        if saved == current {
+                            app.set_status("No unsaved changes");
+                        } else {
+                            let lines = crate::git::aligned_diff_lines(&saved, &current);
+                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                            app.diff_view = Some(crate::diff_view::DiffView::new(
+                                format!("{name} (unsaved changes)"),
+                                lines,
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        app.set_status("File not yet saved to disk");
+                    }
+                }
+            } else {
+                app.set_status("Scratch buffer — no file on disk");
+            }
+        }
         "duplicate" | "dup" => {
             let row = app.tab().cursor.row;
             if let Some(line) = app.tab().buffer.line_text(row) {
@@ -4646,6 +4701,32 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel_focused = app.debug_panel.visible;
         }
         other => {
+            // :open <folder> — open folder in file tree.
+            if let Some(folder) = other.strip_prefix("open ") {
+                let folder = folder.trim();
+                if !folder.is_empty() {
+                    let target = if folder == "~" {
+                        std::env::var("HOME").unwrap_or_else(|_| ".".into())
+                    } else if let Some(rest) = folder.strip_prefix("~/") {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                        format!("{home}/{rest}")
+                    } else {
+                        folder.to_string()
+                    };
+                    let path = std::path::PathBuf::from(&target);
+                    if path.is_dir() {
+                        app.file_tree = crate::file_tree::FileTree::new(path);
+                        app.file_tree.toggle(); // ensure visible
+                        app.set_status(format!("Opened folder: {target}"));
+                    } else if path.is_file() {
+                        let _ = app.open_file(path);
+                    } else {
+                        app.set_status(format!("Not found: {target}"));
+                    }
+                }
+                return;
+            }
+
             // :encoding lf / :encoding crlf — change line endings.
             if let Some(enc) = other.strip_prefix("encoding ") {
                 let enc = enc.trim().to_lowercase();
