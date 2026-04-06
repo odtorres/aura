@@ -444,6 +444,10 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 ### New in v0.4.12
 - **File tree scroll fix** — expanding a folder no longer jumps the viewport; scroll offset is now persistent and only adjusts when the selection goes off-screen
 
+### New in v0.4.13
+- **Config moved to `.aura/aura.toml`** — configuration now lives inside the `.aura/` folder; legacy `aura.toml` in project root is still supported
+- **Crash fix** — opening `aura.toml` after changing settings no longer panics (ropey char-index-out-of-bounds); buffer is reloaded and cursor clamped after config save
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
