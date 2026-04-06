@@ -39,6 +39,9 @@ pub struct AuraConfig {
     /// Project tasks (build, test, lint, etc.).
     #[serde(default)]
     pub tasks: HashMap<String, TaskConfig>,
+    /// Plugin marketplace settings.
+    #[serde(default)]
+    pub plugins: PluginConfig,
 }
 
 impl Default for AuraConfig {
@@ -54,6 +57,26 @@ impl Default for AuraConfig {
             conversations: ConversationConfig::default(),
             debuggers: HashMap::new(),
             tasks: HashMap::new(),
+            plugins: PluginConfig::default(),
+        }
+    }
+}
+
+/// Plugin marketplace settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PluginConfig {
+    /// Registry URL for fetching the plugin index.
+    pub registry: String,
+    /// Whether to auto-update plugins on startup.
+    pub auto_update: bool,
+}
+
+impl Default for PluginConfig {
+    fn default() -> Self {
+        Self {
+            registry: crate::marketplace::DEFAULT_REGISTRY.to_string(),
+            auto_update: false,
         }
     }
 }

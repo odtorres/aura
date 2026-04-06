@@ -1574,6 +1574,68 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Route keys to the marketplace modal when visible.
+    if app.marketplace.visible {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => app.marketplace.close(),
+            KeyCode::Char('j') | KeyCode::Down => app.marketplace.select_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.marketplace.select_up(),
+            KeyCode::Enter => {
+                // Install or update the selected plugin.
+                if let Some(listing) = app.marketplace.selected_listing().cloned() {
+                    match crate::marketplace::install_plugin(&listing) {
+                        Ok(()) => {
+                            app.marketplace.status =
+                                format!("Installed: {} v{}", listing.name, listing.version);
+                            app.marketplace.installed = crate::marketplace::list_installed();
+                        }
+                        Err(e) => {
+                            app.marketplace.status = format!("Install failed: {e}");
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                // Uninstall the selected plugin.
+                if let Some(listing) = app.marketplace.selected_listing() {
+                    let name = listing.name.clone();
+                    if app.marketplace.is_installed(&name) {
+                        match crate::marketplace::uninstall_plugin(&name) {
+                            Ok(()) => {
+                                app.marketplace.status = format!("Uninstalled: {}", name);
+                                app.marketplace.installed = crate::marketplace::list_installed();
+                            }
+                            Err(e) => {
+                                app.marketplace.status = format!("Uninstall failed: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                // Refresh registry.
+                let url = app.config.plugins.registry.clone();
+                match crate::marketplace::fetch_registry(&url) {
+                    Ok(registry) => {
+                        let count = registry.len();
+                        app.marketplace.registry = registry;
+                        app.marketplace.filter();
+                        app.marketplace.status = format!("Registry refreshed: {} plugins", count);
+                    }
+                    Err(e) => {
+                        app.marketplace.status = format!("Fetch failed: {e}");
+                    }
+                }
+            }
+            KeyCode::Backspace => app.marketplace.backspace(),
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                app.marketplace.type_char(c);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Route keys to the branch picker when visible.
     if app.branch_picker.visible {
         match code {
@@ -3237,6 +3299,10 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("experiment", "Enter experiment mode", ""),
     ("code-action", "LSP code actions", ""),
     ("plugins", "List loaded plugins", ""),
+    ("plugin search", "Plugin marketplace", ""),
+    ("plugin install", "Install a plugin", ""),
+    ("plugin uninstall", "Uninstall a plugin", ""),
+    ("plugin update", "Update all plugins", ""),
     ("help", "Open help overlay", ""),
     ("files", "Fuzzy file picker", "Ctrl+P"),
     ("tabnew", "Open new scratch tab", ""),
@@ -4076,6 +4142,99 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "graph" | "git-graph" => {
             app.open_git_graph();
+        }
+        // :plugin — marketplace commands.
+        _ if cmd.trim() == "plugin" || cmd.trim().starts_with("plugin ") => {
+            let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+            let sub = parts.get(1).copied().unwrap_or("list");
+            let arg = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
+            match sub {
+                "list" | "ls" => {
+                    let installed = crate::marketplace::list_installed();
+                    if installed.is_empty() {
+                        app.set_status("No plugins installed. Use :plugin search to browse.");
+                    } else {
+                        let names: Vec<String> = installed
+                            .iter()
+                            .map(|p| {
+                                if p.version.is_empty() {
+                                    p.name.clone()
+                                } else {
+                                    format!("{} v{}", p.name, p.version)
+                                }
+                            })
+                            .collect();
+                        app.set_status(format!("Plugins: {}", names.join(", ")));
+                    }
+                }
+                "search" | "browse" => {
+                    // Load cached registry or fetch.
+                    if app.marketplace.registry.is_empty() {
+                        app.marketplace.registry = crate::marketplace::load_cached_registry();
+                    }
+                    if !arg.is_empty() {
+                        app.marketplace.query = arg;
+                    }
+                    app.marketplace.open();
+                }
+                "install" | "add" => {
+                    if arg.is_empty() {
+                        app.set_status("Usage: :plugin install <name>");
+                    } else {
+                        // Try to find in registry.
+                        if app.marketplace.registry.is_empty() {
+                            app.marketplace.registry = crate::marketplace::load_cached_registry();
+                        }
+                        let listing = app
+                            .marketplace
+                            .registry
+                            .iter()
+                            .find(|p| p.name == arg)
+                            .cloned();
+                        if let Some(listing) = listing {
+                            match crate::marketplace::install_plugin(&listing) {
+                                Ok(()) => app.set_status(format!("Installed plugin: {}", arg)),
+                                Err(e) => app.set_status(format!("Install failed: {e}")),
+                            }
+                        } else {
+                            app.set_status(format!("Plugin '{}' not found in registry", arg));
+                        }
+                    }
+                }
+                "uninstall" | "remove" | "rm" => {
+                    if arg.is_empty() {
+                        app.set_status("Usage: :plugin uninstall <name>");
+                    } else {
+                        match crate::marketplace::uninstall_plugin(&arg) {
+                            Ok(()) => app.set_status(format!("Uninstalled plugin: {}", arg)),
+                            Err(e) => app.set_status(format!("Uninstall failed: {e}")),
+                        }
+                    }
+                }
+                "update" => {
+                    let url = app.config.plugins.registry.clone();
+                    match crate::marketplace::fetch_registry(&url) {
+                        Ok(registry) => {
+                            let installed = crate::marketplace::list_installed();
+                            let mut updated = 0;
+                            for inst in &installed {
+                                if let Some(listing) = registry.iter().find(|r| r.name == inst.name)
+                                {
+                                    if !inst.version.is_empty() && inst.version != listing.version {
+                                        if crate::marketplace::install_plugin(listing).is_ok() {
+                                            updated += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            app.marketplace.registry = registry;
+                            app.set_status(format!("Updated {} plugins", updated));
+                        }
+                        Err(e) => app.set_status(format!("Update failed: {e}")),
+                    }
+                }
+                _ => app.set_status(format!("Unknown plugin command: {sub}")),
+            }
         }
         // :rebase N — interactive rebase last N commits (default 10).
         _ if cmd.trim() == "rebase" || cmd.trim().starts_with("rebase ") => {

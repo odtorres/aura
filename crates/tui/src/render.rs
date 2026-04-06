@@ -384,6 +384,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_rebase_modal(frame, &app.rebase_modal, area);
         }
 
+        // Render plugin marketplace modal if visible.
+        if app.marketplace.visible {
+            draw_marketplace_modal(frame, &app.marketplace, area);
+        }
+
         // Render undo tree modal if visible.
         if app.undo_tree.is_some() {
             draw_undo_tree_modal(frame, app, area);
@@ -4760,6 +4765,132 @@ fn draw_rebase_modal(
     let status_text: String = modal.status.chars().take(w).collect();
     frame.render_widget(
         Paragraph::new(format!(" {}", status_text)).style(Style::default().fg(Color::DarkGray)),
+        Rect::new(inner.x, status_y, inner.width, 1),
+    );
+}
+
+/// Draw the plugin marketplace modal.
+fn draw_marketplace_modal(
+    frame: &mut Frame,
+    modal: &crate::marketplace::MarketplaceModal,
+    area: Rect,
+) {
+    let width = area.width.min(70);
+    let height = area.height.min(25);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Plugin Marketplace ")
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    if inner.height < 4 {
+        return;
+    }
+
+    let w = inner.width as usize;
+
+    // Search bar.
+    let search_text = if modal.query.is_empty() {
+        " Search plugins... (r: refresh, Enter: install, d: uninstall)".to_string()
+    } else {
+        format!(" > {}", modal.query)
+    };
+    let search_style = if modal.query.is_empty() {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    frame.render_widget(
+        Paragraph::new(search_text.chars().take(w).collect::<String>()).style(search_style),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    // Plugin list.
+    let list_height = inner.height.saturating_sub(3) as usize;
+    let scroll = if modal.selected >= list_height {
+        modal.selected - list_height + 1
+    } else {
+        0
+    };
+
+    for (i, &idx) in modal
+        .filtered
+        .iter()
+        .skip(scroll)
+        .take(list_height)
+        .enumerate()
+    {
+        let listing = &modal.registry[idx];
+        let is_selected = scroll + i == modal.selected;
+        let installed = modal.is_installed(&listing.name);
+        let has_update = modal.has_update(&listing.name);
+
+        let tag = if has_update {
+            "[update]"
+        } else if installed {
+            "[installed]"
+        } else {
+            ""
+        };
+
+        let line = format!(
+            " {} v{} {} — {}",
+            listing.name, listing.version, tag, listing.description
+        );
+        let line: String = line.chars().take(w).collect();
+
+        let color = if has_update {
+            Color::Yellow
+        } else if installed {
+            Color::Green
+        } else {
+            Color::White
+        };
+
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(color)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+
+        let row_y = inner.y + 1 + i as u16;
+        frame.render_widget(
+            Paragraph::new(line).style(style),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+
+    if modal.filtered.is_empty() && !modal.registry.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  No matching plugins").style(Style::default().fg(Color::DarkGray)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+    } else if modal.registry.is_empty() {
+        frame.render_widget(
+            Paragraph::new("  Press 'r' to fetch the plugin registry")
+                .style(Style::default().fg(Color::DarkGray)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+    }
+
+    // Status line.
+    let status_y = inner.y + inner.height.saturating_sub(1);
+    frame.render_widget(
+        Paragraph::new(format!(" {}", modal.status)).style(Style::default().fg(Color::DarkGray)),
         Rect::new(inner.x, status_y, inner.width, 1),
     );
 }

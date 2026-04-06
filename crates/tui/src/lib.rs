@@ -29,6 +29,7 @@ pub mod help;
 pub mod highlight;
 pub mod input;
 pub mod lsp;
+pub mod marketplace;
 pub mod mcp_client;
 pub mod mcp_server;
 pub mod merge_view;

@@ -526,6 +526,8 @@ pub struct App {
     pub rebase_modal: crate::rebase_modal::InteractiveRebaseModal,
     /// Remote SSH specs for open tabs, keyed by local cache path.
     pub remote_specs: std::collections::HashMap<PathBuf, crate::remote::RemoteSpec>,
+    /// Plugin marketplace modal.
+    pub marketplace: crate::marketplace::MarketplaceModal,
     /// Claude Code activity watcher.
     pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
@@ -1027,6 +1029,7 @@ impl App {
             git_graph: crate::git_graph::GitGraphModal::new(),
             rebase_modal: crate::rebase_modal::InteractiveRebaseModal::new(),
             remote_specs: std::collections::HashMap::new(),
+            marketplace: crate::marketplace::MarketplaceModal::new(),
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,

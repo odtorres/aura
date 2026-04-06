@@ -552,7 +552,7 @@ Organized by priority: features to add, existing features to improve.
 - [x] **Interactive rebase UI** — Visual `git rebase -i` with drag-to-reorder commits.
 - [x] **Remote development (SSH)** — Edit files on remote machines via SSH connection.
 - [x] **Multiple named sessions** — Save/switch between session profiles (e.g., "frontend", "backend").
-- [ ] **Plugin marketplace** — Discover, install, and update plugins from within the editor.
+- [x] **Plugin marketplace** — Discover, install, and update plugins from within the editor.
 - [x] **Snippet variables** — Support `$TM_FILENAME`, `$TM_LINE_NUMBER`, `$CURRENT_DATE`, etc. in snippet expansions.
 
 ### 12.4 Existing Features — Critical Improvements
