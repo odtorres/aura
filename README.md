@@ -437,6 +437,10 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **AI Visor documentation** — new docs page covering all 6 visor tabs (Overview, Settings, Skills, Hooks, Plugins, Agents)
 - **Updated docs** — terminal, git, keybindings, and configuration pages updated with v0.4.9 features
 
+### New in v0.4.11
+- **Update notification `u` key** — press `u` to accept the update notification (click still works)
+- **`.aura` folder visible** — removed from file tree skip list so all dotfolders are browsable
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
