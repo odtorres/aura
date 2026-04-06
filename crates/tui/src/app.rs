@@ -522,6 +522,8 @@ pub struct App {
     pub branch_picker: crate::branch_picker::BranchPicker,
     /// Git graph modal.
     pub git_graph: crate::git_graph::GitGraphModal,
+    /// Interactive rebase modal.
+    pub rebase_modal: crate::rebase_modal::InteractiveRebaseModal,
     /// Claude Code activity watcher.
     pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
@@ -1021,6 +1023,7 @@ impl App {
             command_palette: crate::command_palette::CommandPalette::new(),
             branch_picker: crate::branch_picker::BranchPicker::new(),
             git_graph: crate::git_graph::GitGraphModal::new(),
+            rebase_modal: crate::rebase_modal::InteractiveRebaseModal::new(),
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,
@@ -5921,6 +5924,55 @@ impl App {
         } else {
             self.set_status("Not a git repository");
         }
+    }
+
+    /// Open the interactive rebase modal.
+    ///
+    /// Shows the last `count` commits from HEAD with editable rebase
+    /// actions (pick, reword, edit, squash, fixup, drop).
+    pub fn open_interactive_rebase(&mut self, count: usize) {
+        if let Some(repo) = &self.git_repo {
+            match repo.graph_log(count + 1) {
+                Ok(commits) => {
+                    if commits.is_empty() {
+                        self.set_status("No commits to rebase");
+                        return;
+                    }
+                    self.rebase_modal.open(commits, count);
+                }
+                Err(e) => self.set_status(format!("Rebase failed: {e}")),
+            }
+        } else {
+            self.set_status("Not a git repository");
+        }
+    }
+
+    /// Execute the interactive rebase plan.
+    ///
+    /// Generates a todo script and runs `git rebase -i` with
+    /// `GIT_SEQUENCE_EDITOR` set to write the todo file.
+    pub fn execute_rebase(&mut self) {
+        let todo = self.rebase_modal.generate_todo();
+        let base = self.rebase_modal.base_ref().to_string();
+        self.rebase_modal.close();
+
+        // Write the todo to a temp file and use it as the sequence editor.
+        let tmp = std::env::temp_dir().join("aura-rebase-todo");
+        if let Err(e) = std::fs::write(&tmp, &todo) {
+            self.set_status(format!("Failed to write rebase todo: {e}"));
+            return;
+        }
+        let tmp_path = tmp.display().to_string();
+        // GIT_SEQUENCE_EDITOR='cp <tmp> "$1"' replaces the editor with our todo.
+        let cmd = format!(
+            "GIT_SEQUENCE_EDITOR='cp {} \"$1\"' git rebase -i {}",
+            tmp_path, base
+        );
+        self.set_status("Rebasing...");
+        self.terminal_mut().visible = true;
+        self.terminal_focused = true;
+        self.terminal_mut()
+            .send_bytes(format!("{}\n", cmd).as_bytes());
     }
 
     /// Open the AI conversation linked to the selected git graph commit.

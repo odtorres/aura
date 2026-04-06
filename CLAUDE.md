@@ -158,6 +158,7 @@ aura-editor/
     │       ├── undo_tree.rs           # Visual undo history modal with time-travel
     │       ├── ai_visor.rs            # Claude Code config browser (.claude/ folder viewer)
     │       ├── project_search.rs     # Project-wide search/replace panel
+    │       ├── rebase_modal.rs      # Interactive rebase UI (visual git rebase -i)
     │       └── acp_server.rs         # ACP (Agent Client Protocol) server
     ├── ai/
     │   └── src/

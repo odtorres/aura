@@ -1548,6 +1548,32 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // Route keys to the interactive rebase modal when visible.
+    if app.rebase_modal.visible {
+        use crate::rebase_modal::RebaseAction;
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => app.rebase_modal.close(),
+            // Alt+j/k — reorder commits (must be checked before plain j/k).
+            KeyCode::Char('j') if modifiers.contains(KeyModifiers::ALT) => {
+                app.rebase_modal.move_down();
+            }
+            KeyCode::Char('k') if modifiers.contains(KeyModifiers::ALT) => {
+                app.rebase_modal.move_up();
+            }
+            KeyCode::Char('j') | KeyCode::Down => app.rebase_modal.select_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.rebase_modal.select_up(),
+            KeyCode::Char('p') => app.rebase_modal.set_action(RebaseAction::Pick),
+            KeyCode::Char('r') => app.rebase_modal.set_action(RebaseAction::Reword),
+            KeyCode::Char('e') => app.rebase_modal.set_action(RebaseAction::Edit),
+            KeyCode::Char('s') => app.rebase_modal.set_action(RebaseAction::Squash),
+            KeyCode::Char('f') => app.rebase_modal.set_action(RebaseAction::Fixup),
+            KeyCode::Char('d') => app.rebase_modal.set_action(RebaseAction::Drop),
+            KeyCode::Char('w') | KeyCode::Enter => app.execute_rebase(),
+            _ => {}
+        }
+        return;
+    }
+
     // Route keys to the branch picker when visible.
     if app.branch_picker.visible {
         match code {
@@ -3204,6 +3230,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("commit", "Generate AI commit message", ""),
     ("branches", "Open branch picker", "Ctrl+B"),
     ("graph", "Visual git graph", "Ctrl+Shift+G"),
+    ("rebase", "Interactive rebase", ""),
     ("blame", "Toggle git blame", ""),
     ("log", "Show Aura git log", ""),
     ("experiment", "Enter experiment mode", ""),
@@ -4030,6 +4057,12 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "graph" | "git-graph" => {
             app.open_git_graph();
+        }
+        // :rebase N — interactive rebase last N commits (default 10).
+        _ if cmd.trim() == "rebase" || cmd.trim().starts_with("rebase ") => {
+            let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+            let count = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
+            app.open_interactive_rebase(count);
         }
         _ if cmd.trim().starts_with("checkout ") => {
             let branch = cmd.trim().strip_prefix("checkout ").unwrap_or("").trim();

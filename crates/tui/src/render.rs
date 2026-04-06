@@ -379,6 +379,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_git_graph_modal(frame, &app.git_graph, area);
         }
 
+        // Render interactive rebase modal if visible.
+        if app.rebase_modal.visible {
+            draw_rebase_modal(frame, &app.rebase_modal, area);
+        }
+
         // Render undo tree modal if visible.
         if app.undo_tree.is_some() {
             draw_undo_tree_modal(frame, app, area);
@@ -4665,6 +4670,97 @@ fn draw_git_graph_modal(frame: &mut Frame, modal: &crate::git_graph::GitGraphMod
             Style::default().fg(Color::DarkGray),
         )),
         Rect::new(rect.x + 1, footer_y, rect.width.saturating_sub(2), 1),
+    );
+}
+
+/// Draw the interactive rebase modal.
+fn draw_rebase_modal(
+    frame: &mut Frame,
+    modal: &crate::rebase_modal::InteractiveRebaseModal,
+    area: Rect,
+) {
+    use crate::rebase_modal::RebaseAction;
+
+    let width = area.width.min(80);
+    let height = area.height.min(30);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let rect = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta))
+        .title(" Interactive Rebase ")
+        .title_style(
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        );
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    if inner.height < 3 {
+        return;
+    }
+
+    // Reserve last 2 lines for status.
+    let list_height = inner.height.saturating_sub(2) as usize;
+    let w = inner.width as usize;
+
+    // Scroll to keep selected visible.
+    let scroll = if modal.selected >= list_height {
+        modal.selected - list_height + 1
+    } else {
+        0
+    };
+
+    for (i, entry) in modal
+        .entries
+        .iter()
+        .skip(scroll)
+        .take(list_height)
+        .enumerate()
+    {
+        let abs_idx = scroll + i;
+        let is_selected = abs_idx == modal.selected;
+
+        let action_color = match entry.action {
+            RebaseAction::Pick => Color::Green,
+            RebaseAction::Reword => Color::Cyan,
+            RebaseAction::Edit => Color::Yellow,
+            RebaseAction::Squash => Color::Magenta,
+            RebaseAction::Fixup => Color::Blue,
+            RebaseAction::Drop => Color::Red,
+        };
+
+        let action_label = format!("{:<7}", entry.action.label());
+        let commit_text = format!("{} {}", entry.commit.short, entry.commit.summary);
+        let line_text = format!(" {} {} ", action_label, commit_text);
+        let line_text: String = line_text.chars().take(w).collect();
+
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(action_color)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(action_color)
+        };
+
+        let row_y = inner.y + i as u16;
+        frame.render_widget(
+            Paragraph::new(line_text).style(style),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+
+    // Status line at bottom.
+    let status_y = inner.y + inner.height.saturating_sub(1);
+    let status_text: String = modal.status.chars().take(w).collect();
+    frame.render_widget(
+        Paragraph::new(format!(" {}", status_text)).style(Style::default().fg(Color::DarkGray)),
+        Rect::new(inner.x, status_y, inner.width, 1),
     );
 }
 
