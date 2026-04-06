@@ -7685,7 +7685,7 @@ fn draw_update_notification(frame: &mut Frame, app: &mut App, area: Rect) {
         _ => return,
     };
 
-    let text = format!(" \u{2191} v{} available  [u]pdate  [click] ", version);
+    let text = format!(" \u{2191} v{} available  [u]pdate ", version);
     let width = (text.len() as u16 + 2).min(area.width);
     let height = 3u16;
     let x = area.x + area.width.saturating_sub(width + 1);
