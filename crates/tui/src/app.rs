@@ -1,6 +1,49 @@
 //! Application state and main event loop.
 
 use crate::chat_panel::ChatPanel;
+
+/// A pending file tree action requiring text input.
+#[derive(Debug, Clone)]
+pub enum FileTreeAction {
+    /// Rename a file/directory. Stores the original path and the input buffer.
+    Rename {
+        /// Original file path.
+        original: PathBuf,
+        /// Current text input for the new name.
+        input: String,
+    },
+    /// Create a new file in the selected directory.
+    NewFile {
+        /// Parent directory path.
+        parent: PathBuf,
+        /// Current text input for the file name.
+        input: String,
+    },
+    /// Create a new directory in the selected directory.
+    NewDir {
+        /// Parent directory path.
+        parent: PathBuf,
+        /// Current text input for the directory name.
+        input: String,
+    },
+    /// Confirm deletion of a file/directory.
+    ConfirmDelete {
+        /// Path to delete.
+        path: PathBuf,
+        /// Whether the target is a directory.
+        is_dir: bool,
+    },
+    /// Copy a file — stores source path (paste with `p`).
+    Copied {
+        /// Source file path.
+        path: PathBuf,
+    },
+    /// Cut a file — stores source path (paste with `p`).
+    Cut {
+        /// Source file path.
+        path: PathBuf,
+    },
+}
 use crate::chat_panel::ToolCallStatus;
 use crate::chat_tools;
 use crate::config::{AuraConfig, Theme};
@@ -510,6 +553,8 @@ pub struct App {
     pub terminal_focused: bool,
     /// Whether the file tree sidebar has keyboard focus.
     pub file_tree_focused: bool,
+    /// Pending file tree action requiring text input (rename, new file, etc.).
+    pub file_tree_input: Option<FileTreeAction>,
     /// Fuzzy file picker overlay.
     pub file_picker: FilePicker,
     /// In-editor help overlay.
@@ -1021,6 +1066,7 @@ impl App {
             active_terminal: 0,
             terminal_focused: false,
             file_tree_focused: false,
+            file_tree_input: None,
             file_picker: FilePicker::new(terminal_cwd.clone()),
             help: HelpOverlay::new(),
             settings_modal: crate::settings_modal::SettingsModal::new(),

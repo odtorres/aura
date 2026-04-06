@@ -995,8 +995,125 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // When a file tree text-input action is active (rename, new file, etc.).
+    if let Some(ref action) = app.file_tree_input.clone() {
+        use crate::app::FileTreeAction;
+        match action {
+            FileTreeAction::Rename { original, input } => match code {
+                KeyCode::Esc => {
+                    app.file_tree_input = None;
+                    app.set_status("Rename cancelled");
+                }
+                KeyCode::Enter => {
+                    let new_path = original.parent().unwrap_or(original).join(input);
+                    match std::fs::rename(original, &new_path) {
+                        Ok(()) => {
+                            app.file_tree.refresh();
+                            app.set_status(format!("Renamed to {}", new_path.display()));
+                        }
+                        Err(e) => app.set_status(format!("Rename failed: {e}")),
+                    }
+                    app.file_tree_input = None;
+                }
+                KeyCode::Backspace => {
+                    if let Some(FileTreeAction::Rename { input, .. }) = &mut app.file_tree_input {
+                        input.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(FileTreeAction::Rename { input, .. }) = &mut app.file_tree_input {
+                        input.push(c);
+                    }
+                }
+                _ => {}
+            },
+            FileTreeAction::NewFile { parent, input }
+            | FileTreeAction::NewDir { parent, input } => {
+                let is_dir = matches!(action, FileTreeAction::NewDir { .. });
+                match code {
+                    KeyCode::Esc => {
+                        app.file_tree_input = None;
+                        app.set_status("Cancelled");
+                    }
+                    KeyCode::Enter => {
+                        let new_path = parent.join(input);
+                        let result = if is_dir {
+                            std::fs::create_dir_all(&new_path)
+                        } else {
+                            if let Some(p) = new_path.parent() {
+                                let _ = std::fs::create_dir_all(p);
+                            }
+                            std::fs::File::create(&new_path).map(|_| ())
+                        };
+                        match result {
+                            Ok(()) => {
+                                app.file_tree.refresh();
+                                let kind = if is_dir { "directory" } else { "file" };
+                                app.set_status(format!("Created {kind}: {}", new_path.display()));
+                            }
+                            Err(e) => app.set_status(format!("Create failed: {e}")),
+                        }
+                        app.file_tree_input = None;
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(
+                            FileTreeAction::NewFile { input, .. }
+                            | FileTreeAction::NewDir { input, .. },
+                        ) = &mut app.file_tree_input
+                        {
+                            input.pop();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if let Some(
+                            FileTreeAction::NewFile { input, .. }
+                            | FileTreeAction::NewDir { input, .. },
+                        ) = &mut app.file_tree_input
+                        {
+                            input.push(c);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            FileTreeAction::ConfirmDelete { path, is_dir } => match code {
+                KeyCode::Char('y') => {
+                    let result = if *is_dir {
+                        std::fs::remove_dir_all(path)
+                    } else {
+                        std::fs::remove_file(path)
+                    };
+                    match result {
+                        Ok(()) => {
+                            app.file_tree.refresh();
+                            app.set_status(format!("Deleted: {}", path.display()));
+                        }
+                        Err(e) => app.set_status(format!("Delete failed: {e}")),
+                    }
+                    app.file_tree_input = None;
+                }
+                _ => {
+                    app.file_tree_input = None;
+                    app.set_status("Delete cancelled");
+                }
+            },
+            FileTreeAction::Copied { .. } | FileTreeAction::Cut { .. } => {
+                // These don't need text input — they're handled below.
+                app.file_tree_input = None;
+            }
+        }
+        return;
+    }
+
     // When the file tree sidebar is focused, route navigation keys to it.
     if app.file_tree_focused {
+        // Get selected entry info for action keys.
+        let selected_entry = app
+            .file_tree
+            .entries
+            .get(app.file_tree.selected)
+            .map(|e| (e.path.clone(), e.is_dir, e.name.clone()));
+
         match code {
             KeyCode::Char('j') | KeyCode::Down => {
                 app.file_tree.select_down();
@@ -1015,7 +1132,6 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     if entry.is_dir && entry.expanded {
                         app.file_tree.toggle_expand();
                     } else if entry.depth > 0 {
-                        // Jump up to the parent directory entry.
                         let target_depth = entry.depth - 1;
                         let mut i = idx;
                         while i > 0 {
@@ -1027,6 +1143,132 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                                 break;
                             }
                         }
+                    }
+                }
+            }
+            // r — rename selected file/directory.
+            KeyCode::Char('r') => {
+                if let Some((path, _, name)) = selected_entry {
+                    app.file_tree_input = Some(crate::app::FileTreeAction::Rename {
+                        original: path,
+                        input: name,
+                    });
+                    app.set_status("Rename: type new name, Enter to confirm, Esc to cancel");
+                }
+            }
+            // d / Delete — delete selected file/directory (with y confirmation).
+            KeyCode::Char('D') | KeyCode::Delete => {
+                if let Some((path, is_dir, name)) = selected_entry {
+                    let kind = if is_dir { "directory" } else { "file" };
+                    app.set_status(format!("Delete {kind} '{name}'? (y to confirm)"));
+                    app.file_tree_input =
+                        Some(crate::app::FileTreeAction::ConfirmDelete { path, is_dir });
+                }
+            }
+            // a — new file in selected directory (or parent of selected file).
+            KeyCode::Char('a') => {
+                if let Some((path, is_dir, _)) = selected_entry {
+                    let parent = if is_dir {
+                        path
+                    } else {
+                        path.parent().unwrap_or(&path).to_path_buf()
+                    };
+                    app.file_tree_input = Some(crate::app::FileTreeAction::NewFile {
+                        parent,
+                        input: String::new(),
+                    });
+                    app.set_status("New file: type name, Enter to create, Esc to cancel");
+                }
+            }
+            // A — new directory in selected directory (or parent of selected file).
+            KeyCode::Char('A') => {
+                if let Some((path, is_dir, _)) = selected_entry {
+                    let parent = if is_dir {
+                        path
+                    } else {
+                        path.parent().unwrap_or(&path).to_path_buf()
+                    };
+                    app.file_tree_input = Some(crate::app::FileTreeAction::NewDir {
+                        parent,
+                        input: String::new(),
+                    });
+                    app.set_status("New directory: type name, Enter to create, Esc to cancel");
+                }
+            }
+            // y — copy (yank) selected file path.
+            KeyCode::Char('y') => {
+                if let Some((path, _, name)) = selected_entry {
+                    app.file_tree_input = Some(crate::app::FileTreeAction::Copied { path });
+                    app.set_status(format!("Copied: {name} — press 'p' to paste"));
+                }
+            }
+            // x — cut selected file.
+            KeyCode::Char('x') => {
+                if let Some((path, _, name)) = selected_entry {
+                    app.file_tree_input = Some(crate::app::FileTreeAction::Cut { path });
+                    app.set_status(format!("Cut: {name} — press 'p' to paste"));
+                }
+            }
+            // p — paste copied/cut file into selected directory.
+            KeyCode::Char('p') => {
+                let action = app.file_tree_input.take();
+                if let Some((dest_dir, is_dir, _)) = selected_entry {
+                    let dest_parent = if is_dir {
+                        dest_dir
+                    } else {
+                        dest_dir.parent().unwrap_or(&dest_dir).to_path_buf()
+                    };
+                    match action {
+                        Some(crate::app::FileTreeAction::Copied { path }) => {
+                            let file_name = path.file_name().unwrap_or_default();
+                            let dest = dest_parent.join(file_name);
+                            match std::fs::copy(&path, &dest) {
+                                Ok(_) => {
+                                    app.file_tree.refresh();
+                                    app.set_status(format!("Copied to {}", dest.display()));
+                                }
+                                Err(e) => app.set_status(format!("Copy failed: {e}")),
+                            }
+                        }
+                        Some(crate::app::FileTreeAction::Cut { path }) => {
+                            let file_name = path.file_name().unwrap_or_default();
+                            let dest = dest_parent.join(file_name);
+                            match std::fs::rename(&path, &dest) {
+                                Ok(()) => {
+                                    app.file_tree.refresh();
+                                    app.set_status(format!("Moved to {}", dest.display()));
+                                }
+                                Err(e) => app.set_status(format!("Move failed: {e}")),
+                            }
+                        }
+                        _ => {
+                            app.set_status("Nothing to paste — use 'y' to copy or 'x' to cut first")
+                        }
+                    }
+                }
+            }
+            // . — reveal in Finder (macOS) or file manager.
+            KeyCode::Char('.') => {
+                if let Some((path, is_dir, _)) = selected_entry {
+                    let target = if is_dir {
+                        path
+                    } else {
+                        path.parent().unwrap_or(&path).to_path_buf()
+                    };
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = std::process::Command::new("open").arg(&target).spawn();
+                        app.set_status(format!("Opened in Finder: {}", target.display()));
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
+                        app.set_status(format!("Opened in file manager: {}", target.display()));
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("explorer").arg(&target).spawn();
+                        app.set_status(format!("Opened in Explorer: {}", target.display()));
                     }
                 }
             }
