@@ -1676,6 +1676,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.settings_modal.apply_to_config(&mut app.config);
                 app.show_authorship = app.config.editor.show_authorship;
                 app.chat_panel.max_context_messages = app.config.conversations.max_context_messages;
+                app.theme = crate::config::resolve_theme(&app.config.theme, None);
                 app.save_settings();
             }
             KeyCode::Left | KeyCode::Char('h') => {
@@ -1683,6 +1684,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.settings_modal.apply_to_config(&mut app.config);
                 app.show_authorship = app.config.editor.show_authorship;
                 app.chat_panel.max_context_messages = app.config.conversations.max_context_messages;
+                app.theme = crate::config::resolve_theme(&app.config.theme, None);
                 app.save_settings();
             }
             _ => {}

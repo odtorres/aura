@@ -551,6 +551,265 @@ pub fn theme_monokai() -> Theme {
     }
 }
 
+/// Built-in Dracula theme.
+pub fn theme_dracula() -> Theme {
+    Theme {
+        name: "dracula".to_string(),
+        bg: Color::Rgb(40, 42, 54),
+        fg: Color::Rgb(248, 248, 242),
+        gutter_fg: Color::Rgb(98, 114, 164),
+        status_bg: Color::Rgb(68, 71, 90),
+        status_fg: Color::Rgb(248, 248, 242),
+        mode_normal: Color::Rgb(139, 233, 253),
+        mode_insert: Color::Rgb(80, 250, 123),
+        mode_command: Color::Rgb(241, 250, 140),
+        mode_visual: Color::Rgb(189, 147, 249),
+        mode_intent: Color::Rgb(139, 233, 253),
+        mode_review: Color::Rgb(255, 121, 198),
+        selection_bg: Color::Rgb(68, 71, 90),
+        selection_fg: Color::Rgb(248, 248, 242),
+        git_added: Color::Rgb(80, 250, 123),
+        git_modified: Color::Rgb(241, 250, 140),
+        git_deleted: Color::Rgb(255, 85, 85),
+        error: Color::Rgb(255, 85, 85),
+        warning: Color::Rgb(241, 250, 140),
+        info: Color::Rgb(139, 233, 253),
+        keyword: Color::Rgb(255, 121, 198),
+        string: Color::Rgb(241, 250, 140),
+        comment: Color::Rgb(98, 114, 164),
+        function: Color::Rgb(80, 250, 123),
+        type_name: Color::Rgb(139, 233, 253),
+        number: Color::Rgb(189, 147, 249),
+        ghost: Color::Rgb(98, 114, 164),
+        author_human: Color::Rgb(80, 250, 123),
+        author_ai: Color::Rgb(189, 147, 249),
+    }
+}
+
+/// Built-in Nord theme.
+pub fn theme_nord() -> Theme {
+    Theme {
+        name: "nord".to_string(),
+        bg: Color::Rgb(46, 52, 64),
+        fg: Color::Rgb(216, 222, 233),
+        gutter_fg: Color::Rgb(76, 86, 106),
+        status_bg: Color::Rgb(59, 66, 82),
+        status_fg: Color::Rgb(216, 222, 233),
+        mode_normal: Color::Rgb(136, 192, 208),
+        mode_insert: Color::Rgb(163, 190, 140),
+        mode_command: Color::Rgb(235, 203, 139),
+        mode_visual: Color::Rgb(180, 142, 173),
+        mode_intent: Color::Rgb(136, 192, 208),
+        mode_review: Color::Rgb(191, 97, 106),
+        selection_bg: Color::Rgb(67, 76, 94),
+        selection_fg: Color::Rgb(229, 233, 240),
+        git_added: Color::Rgb(163, 190, 140),
+        git_modified: Color::Rgb(235, 203, 139),
+        git_deleted: Color::Rgb(191, 97, 106),
+        error: Color::Rgb(191, 97, 106),
+        warning: Color::Rgb(235, 203, 139),
+        info: Color::Rgb(136, 192, 208),
+        keyword: Color::Rgb(129, 161, 193),
+        string: Color::Rgb(163, 190, 140),
+        comment: Color::Rgb(76, 86, 106),
+        function: Color::Rgb(136, 192, 208),
+        type_name: Color::Rgb(129, 161, 193),
+        number: Color::Rgb(180, 142, 173),
+        ghost: Color::Rgb(76, 86, 106),
+        author_human: Color::Rgb(163, 190, 140),
+        author_ai: Color::Rgb(136, 192, 208),
+    }
+}
+
+/// Built-in One Dark theme (Atom-inspired).
+pub fn theme_one_dark() -> Theme {
+    Theme {
+        name: "one-dark".to_string(),
+        bg: Color::Rgb(40, 44, 52),
+        fg: Color::Rgb(171, 178, 191),
+        gutter_fg: Color::Rgb(76, 82, 99),
+        status_bg: Color::Rgb(33, 37, 43),
+        status_fg: Color::Rgb(171, 178, 191),
+        mode_normal: Color::Rgb(97, 175, 239),
+        mode_insert: Color::Rgb(152, 195, 121),
+        mode_command: Color::Rgb(229, 192, 123),
+        mode_visual: Color::Rgb(198, 120, 221),
+        mode_intent: Color::Rgb(97, 175, 239),
+        mode_review: Color::Rgb(224, 108, 117),
+        selection_bg: Color::Rgb(62, 68, 81),
+        selection_fg: Color::Rgb(171, 178, 191),
+        git_added: Color::Rgb(152, 195, 121),
+        git_modified: Color::Rgb(229, 192, 123),
+        git_deleted: Color::Rgb(224, 108, 117),
+        error: Color::Rgb(224, 108, 117),
+        warning: Color::Rgb(229, 192, 123),
+        info: Color::Rgb(97, 175, 239),
+        keyword: Color::Rgb(198, 120, 221),
+        string: Color::Rgb(152, 195, 121),
+        comment: Color::Rgb(92, 99, 112),
+        function: Color::Rgb(97, 175, 239),
+        type_name: Color::Rgb(229, 192, 123),
+        number: Color::Rgb(209, 154, 102),
+        ghost: Color::Rgb(92, 99, 112),
+        author_human: Color::Rgb(152, 195, 121),
+        author_ai: Color::Rgb(97, 175, 239),
+    }
+}
+
+/// Built-in Catppuccin Mocha theme.
+pub fn theme_catppuccin() -> Theme {
+    Theme {
+        name: "catppuccin".to_string(),
+        bg: Color::Rgb(30, 30, 46),
+        fg: Color::Rgb(205, 214, 244),
+        gutter_fg: Color::Rgb(108, 112, 134),
+        status_bg: Color::Rgb(24, 24, 37),
+        status_fg: Color::Rgb(205, 214, 244),
+        mode_normal: Color::Rgb(137, 180, 250),
+        mode_insert: Color::Rgb(166, 227, 161),
+        mode_command: Color::Rgb(249, 226, 175),
+        mode_visual: Color::Rgb(203, 166, 247),
+        mode_intent: Color::Rgb(137, 180, 250),
+        mode_review: Color::Rgb(243, 139, 168),
+        selection_bg: Color::Rgb(69, 71, 90),
+        selection_fg: Color::Rgb(205, 214, 244),
+        git_added: Color::Rgb(166, 227, 161),
+        git_modified: Color::Rgb(249, 226, 175),
+        git_deleted: Color::Rgb(243, 139, 168),
+        error: Color::Rgb(243, 139, 168),
+        warning: Color::Rgb(249, 226, 175),
+        info: Color::Rgb(137, 180, 250),
+        keyword: Color::Rgb(203, 166, 247),
+        string: Color::Rgb(166, 227, 161),
+        comment: Color::Rgb(108, 112, 134),
+        function: Color::Rgb(137, 180, 250),
+        type_name: Color::Rgb(249, 226, 175),
+        number: Color::Rgb(250, 179, 135),
+        ghost: Color::Rgb(108, 112, 134),
+        author_human: Color::Rgb(166, 227, 161),
+        author_ai: Color::Rgb(137, 180, 250),
+    }
+}
+
+/// Built-in Gruvbox Dark theme.
+pub fn theme_gruvbox() -> Theme {
+    Theme {
+        name: "gruvbox".to_string(),
+        bg: Color::Rgb(40, 40, 40),
+        fg: Color::Rgb(235, 219, 178),
+        gutter_fg: Color::Rgb(124, 111, 100),
+        status_bg: Color::Rgb(50, 48, 47),
+        status_fg: Color::Rgb(235, 219, 178),
+        mode_normal: Color::Rgb(131, 165, 152),
+        mode_insert: Color::Rgb(184, 187, 38),
+        mode_command: Color::Rgb(250, 189, 47),
+        mode_visual: Color::Rgb(211, 134, 155),
+        mode_intent: Color::Rgb(131, 165, 152),
+        mode_review: Color::Rgb(251, 73, 52),
+        selection_bg: Color::Rgb(80, 73, 69),
+        selection_fg: Color::Rgb(235, 219, 178),
+        git_added: Color::Rgb(184, 187, 38),
+        git_modified: Color::Rgb(250, 189, 47),
+        git_deleted: Color::Rgb(251, 73, 52),
+        error: Color::Rgb(251, 73, 52),
+        warning: Color::Rgb(250, 189, 47),
+        info: Color::Rgb(131, 165, 152),
+        keyword: Color::Rgb(251, 73, 52),
+        string: Color::Rgb(184, 187, 38),
+        comment: Color::Rgb(146, 131, 116),
+        function: Color::Rgb(131, 165, 152),
+        type_name: Color::Rgb(250, 189, 47),
+        number: Color::Rgb(211, 134, 155),
+        ghost: Color::Rgb(146, 131, 116),
+        author_human: Color::Rgb(184, 187, 38),
+        author_ai: Color::Rgb(131, 165, 152),
+    }
+}
+
+/// Built-in Tokyo Night theme.
+pub fn theme_tokyo_night() -> Theme {
+    Theme {
+        name: "tokyo-night".to_string(),
+        bg: Color::Rgb(26, 27, 38),
+        fg: Color::Rgb(169, 177, 214),
+        gutter_fg: Color::Rgb(59, 66, 97),
+        status_bg: Color::Rgb(22, 22, 30),
+        status_fg: Color::Rgb(169, 177, 214),
+        mode_normal: Color::Rgb(122, 162, 247),
+        mode_insert: Color::Rgb(158, 206, 106),
+        mode_command: Color::Rgb(224, 175, 104),
+        mode_visual: Color::Rgb(187, 154, 247),
+        mode_intent: Color::Rgb(122, 162, 247),
+        mode_review: Color::Rgb(247, 118, 142),
+        selection_bg: Color::Rgb(41, 46, 66),
+        selection_fg: Color::Rgb(192, 202, 245),
+        git_added: Color::Rgb(158, 206, 106),
+        git_modified: Color::Rgb(224, 175, 104),
+        git_deleted: Color::Rgb(247, 118, 142),
+        error: Color::Rgb(247, 118, 142),
+        warning: Color::Rgb(224, 175, 104),
+        info: Color::Rgb(122, 162, 247),
+        keyword: Color::Rgb(187, 154, 247),
+        string: Color::Rgb(158, 206, 106),
+        comment: Color::Rgb(86, 95, 137),
+        function: Color::Rgb(122, 162, 247),
+        type_name: Color::Rgb(42, 195, 222),
+        number: Color::Rgb(255, 158, 100),
+        ghost: Color::Rgb(86, 95, 137),
+        author_human: Color::Rgb(158, 206, 106),
+        author_ai: Color::Rgb(122, 162, 247),
+    }
+}
+
+/// Built-in Solarized Dark theme.
+pub fn theme_solarized_dark() -> Theme {
+    Theme {
+        name: "solarized-dark".to_string(),
+        bg: Color::Rgb(0, 43, 54),
+        fg: Color::Rgb(131, 148, 150),
+        gutter_fg: Color::Rgb(88, 110, 117),
+        status_bg: Color::Rgb(7, 54, 66),
+        status_fg: Color::Rgb(147, 161, 161),
+        mode_normal: Color::Rgb(38, 139, 210),
+        mode_insert: Color::Rgb(133, 153, 0),
+        mode_command: Color::Rgb(181, 137, 0),
+        mode_visual: Color::Rgb(108, 113, 196),
+        mode_intent: Color::Rgb(38, 139, 210),
+        mode_review: Color::Rgb(220, 50, 47),
+        selection_bg: Color::Rgb(7, 54, 66),
+        selection_fg: Color::Rgb(147, 161, 161),
+        git_added: Color::Rgb(133, 153, 0),
+        git_modified: Color::Rgb(181, 137, 0),
+        git_deleted: Color::Rgb(220, 50, 47),
+        error: Color::Rgb(220, 50, 47),
+        warning: Color::Rgb(181, 137, 0),
+        info: Color::Rgb(38, 139, 210),
+        keyword: Color::Rgb(133, 153, 0),
+        string: Color::Rgb(42, 161, 152),
+        comment: Color::Rgb(88, 110, 117),
+        function: Color::Rgb(38, 139, 210),
+        type_name: Color::Rgb(181, 137, 0),
+        number: Color::Rgb(108, 113, 196),
+        ghost: Color::Rgb(88, 110, 117),
+        author_human: Color::Rgb(133, 153, 0),
+        author_ai: Color::Rgb(38, 139, 210),
+    }
+}
+
+/// List of all built-in theme names.
+pub const BUILTIN_THEMES: &[&str] = &[
+    "dark",
+    "light",
+    "monokai",
+    "dracula",
+    "nord",
+    "one-dark",
+    "catppuccin",
+    "gruvbox",
+    "tokyo-night",
+    "solarized-dark",
+];
+
 /// Parse a color string (name or "#RRGGBB") into a ratatui Color.
 fn parse_color(s: &str) -> Option<Color> {
     match s.to_lowercase().as_str() {
@@ -626,6 +885,13 @@ pub fn resolve_theme(name: &str, config_table: Option<&toml::Table>) -> Theme {
         "dark" | "default" => theme_dark(),
         "light" => theme_light(),
         "monokai" => theme_monokai(),
+        "dracula" => theme_dracula(),
+        "nord" => theme_nord(),
+        "one-dark" => theme_one_dark(),
+        "catppuccin" => theme_catppuccin(),
+        "gruvbox" => theme_gruvbox(),
+        "tokyo-night" => theme_tokyo_night(),
+        "solarized-dark" => theme_solarized_dark(),
         custom => {
             // Try to load from config's [theme.custom] section.
             if let Some(table) = config_table {
@@ -738,6 +1004,9 @@ pub fn save_config(path: &Path, config: &AuraConfig) {
             toml::Value::Boolean(config.update.check_for_updates),
         );
     }
+
+    // theme (top-level key)
+    table.insert("theme".into(), toml::Value::String(config.theme.clone()));
 
     // Ensure parent directory exists (e.g. .aura/).
     if let Some(parent) = path.parent() {

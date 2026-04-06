@@ -5175,6 +5175,7 @@ fn draw_settings_modal(
             SettingValue::Bool(true) => "[x]".to_string(),
             SettingValue::Bool(false) => "[ ]".to_string(),
             SettingValue::Number { current, .. } => format!("< {current} >"),
+            SettingValue::Select { current, .. } => format!("< {current} >"),
         };
 
         let label_width = inner.width.saturating_sub(value_str.len() as u16 + 2) as usize;
@@ -5200,9 +5201,11 @@ fn draw_settings_modal(
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
                         SettingValue::Bool(false) => Style::default().fg(Color::DarkGray),
-                        SettingValue::Number { .. } => Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
+                        SettingValue::Number { .. } | SettingValue::Select { .. } => {
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                        }
                     }
                 } else {
                     Style::default().fg(Color::DarkGray)

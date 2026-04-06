@@ -29,6 +29,13 @@ pub enum SettingValue {
         /// Maximum allowed value.
         max: u64,
     },
+    /// Selection from a list of options.
+    Select {
+        /// Currently selected option.
+        current: String,
+        /// All available options.
+        options: Vec<String>,
+    },
 }
 
 /// The settings modal state.
@@ -111,6 +118,17 @@ impl SettingsModal {
                 key: "update.check_for_updates".to_string(),
                 value: SettingValue::Bool(config.update.check_for_updates),
             },
+            SettingEntry {
+                label: "Theme".to_string(),
+                key: "theme".to_string(),
+                value: SettingValue::Select {
+                    current: config.theme.clone(),
+                    options: crate::config::BUILTIN_THEMES
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                },
+            },
         ];
         self.selected = 0;
         self.visible = true;
@@ -133,7 +151,7 @@ impl SettingsModal {
         self.selected = self.selected.saturating_sub(1);
     }
 
-    /// Toggle or increment the selected setting.
+    /// Toggle, increment, or cycle forward the selected setting.
     pub fn toggle_selected(&mut self) {
         if let Some(entry) = self.entries.get_mut(self.selected) {
             match &mut entry.value {
@@ -141,15 +159,30 @@ impl SettingsModal {
                 SettingValue::Number { current, max, .. } => {
                     *current = (*current + 1).min(*max);
                 }
+                SettingValue::Select { current, options } => {
+                    if let Some(idx) = options.iter().position(|o| o == current) {
+                        let next = (idx + 1) % options.len();
+                        *current = options[next].clone();
+                    }
+                }
             }
         }
     }
 
-    /// Decrement the selected numeric setting.
+    /// Decrement or cycle backward the selected setting.
     pub fn decrement_selected(&mut self) {
         if let Some(entry) = self.entries.get_mut(self.selected) {
-            if let SettingValue::Number { current, min, .. } = &mut entry.value {
-                *current = current.saturating_sub(1).max(*min);
+            match &mut entry.value {
+                SettingValue::Number { current, min, .. } => {
+                    *current = current.saturating_sub(1).max(*min);
+                }
+                SettingValue::Select { current, options } => {
+                    if let Some(idx) = options.iter().position(|o| o == current) {
+                        let prev = if idx == 0 { options.len() - 1 } else { idx - 1 };
+                        *current = options[prev].clone();
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -184,6 +217,9 @@ impl SettingsModal {
                 }
                 ("update.check_for_updates", SettingValue::Bool(v)) => {
                     config.update.check_for_updates = *v;
+                }
+                ("theme", SettingValue::Select { current, .. }) => {
+                    config.theme = current.clone();
                 }
                 _ => {}
             }
