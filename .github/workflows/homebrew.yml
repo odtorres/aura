@@ -1,0 +1,90 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for release assets
+        run: sleep 30
+
+      - name: Get release info
+        id: release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download SHA256 checksums
+        run: |
+          BASE="https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag }}"
+          curl -sLf "$BASE/aura-aarch64-apple-darwin.tar.xz.sha256" -o aarch64-macos.sha256
+          curl -sLf "$BASE/aura-x86_64-apple-darwin.tar.xz.sha256" -o x86_64-macos.sha256
+          curl -sLf "$BASE/aura-aarch64-unknown-linux-gnu.tar.xz.sha256" -o aarch64-linux.sha256
+          curl -sLf "$BASE/aura-x86_64-unknown-linux-gnu.tar.xz.sha256" -o x86_64-linux.sha256
+
+      - name: Parse hashes
+        id: hashes
+        run: |
+          echo "aarch64_macos=$(awk '{print $1}' aarch64-macos.sha256)" >> "$GITHUB_OUTPUT"
+          echo "x86_64_macos=$(awk '{print $1}' x86_64-macos.sha256)" >> "$GITHUB_OUTPUT"
+          echo "aarch64_linux=$(awk '{print $1}' aarch64-linux.sha256)" >> "$GITHUB_OUTPUT"
+          echo "x86_64_linux=$(awk '{print $1}' x86_64-linux.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-aura
+        uses: actions/checkout@v4
+        with:
+          repository: odtorres/homebrew-aura
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update formula
+        run: |
+          cat > Formula/aura.rb << 'FORMULA'
+          class Aura < Formula
+            desc "AI-native terminal text editor for human + AI co-authoring"
+            homepage "https://github.com/odtorres/aura"
+            version "${{ steps.release.outputs.version }}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/odtorres/aura/releases/download/v#{version}/aura-aarch64-apple-darwin.tar.xz"
+                sha256 "${{ steps.hashes.outputs.aarch64_macos }}"
+              elsif Hardware::CPU.intel?
+                url "https://github.com/odtorres/aura/releases/download/v#{version}/aura-x86_64-apple-darwin.tar.xz"
+                sha256 "${{ steps.hashes.outputs.x86_64_macos }}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/odtorres/aura/releases/download/v#{version}/aura-aarch64-unknown-linux-gnu.tar.xz"
+                sha256 "${{ steps.hashes.outputs.aarch64_linux }}"
+              elsif Hardware::CPU.intel?
+                url "https://github.com/odtorres/aura/releases/download/v#{version}/aura-x86_64-unknown-linux-gnu.tar.xz"
+                sha256 "${{ steps.hashes.outputs.x86_64_linux }}"
+              end
+            end
+
+            def install
+              bin.install "aura"
+            end
+
+            test do
+              assert_match "AURA", shell_output("#{bin}/aura --version 2>&1", 1)
+            end
+          end
+          FORMULA
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' Formula/aura.rb
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/aura.rb
+          git commit -m "aura ${{ steps.release.outputs.version }}"
+          git push
