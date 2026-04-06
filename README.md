@@ -483,6 +483,11 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 ### New in v0.4.21
 - **Ctrl+T / Ctrl+N toggle fix** — panel toggle shortcuts now properly close panels on second press (state was cleared before checking, making the close branch unreachable)
 
+### New in v0.4.22
+- **Theme picker in settings** — 10 built-in themes selectable from the settings modal (`Ctrl+,`): Dark, Light, Monokai, Dracula, Nord, One Dark, Catppuccin, Gruvbox, Tokyo Night, Solarized Dark
+- Themes apply live and persist to `aura.toml`
+- Use Left/Right arrows or Enter to cycle through themes
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
