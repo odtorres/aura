@@ -441,6 +441,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Update notification `u` key** — press `u` to accept the update notification (click still works)
 - **`.aura` folder visible** — removed from file tree skip list so all dotfolders are browsable
 
+### New in v0.4.12
+- **File tree scroll fix** — expanding a folder no longer jumps the viewport; scroll offset is now persistent and only adjusts when the selection goes off-screen
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
