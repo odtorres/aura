@@ -550,7 +550,7 @@ Organized by priority: features to add, existing features to improve.
 - [x] **Pinned / grouped tabs** — Pin important tabs so they can't be accidentally closed, group related files.
 - [x] **Tab reordering** — Move tabs left/right via command or drag.
 - [x] **Interactive rebase UI** — Visual `git rebase -i` with drag-to-reorder commits.
-- [ ] **Remote development (SSH)** — Edit files on remote machines via SSH connection.
+- [x] **Remote development (SSH)** — Edit files on remote machines via SSH connection.
 - [x] **Multiple named sessions** — Save/switch between session profiles (e.g., "frontend", "backend").
 - [ ] **Plugin marketplace** — Discover, install, and update plugins from within the editor.
 - [x] **Snippet variables** — Support `$TM_FILENAME`, `$TM_LINE_NUMBER`, `$CURRENT_DATE`, etc. in snippet expansions.

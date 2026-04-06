@@ -524,6 +524,8 @@ pub struct App {
     pub git_graph: crate::git_graph::GitGraphModal,
     /// Interactive rebase modal.
     pub rebase_modal: crate::rebase_modal::InteractiveRebaseModal,
+    /// Remote SSH specs for open tabs, keyed by local cache path.
+    pub remote_specs: std::collections::HashMap<PathBuf, crate::remote::RemoteSpec>,
     /// Claude Code activity watcher.
     pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
@@ -1024,6 +1026,7 @@ impl App {
             branch_picker: crate::branch_picker::BranchPicker::new(),
             git_graph: crate::git_graph::GitGraphModal::new(),
             rebase_modal: crate::rebase_modal::InteractiveRebaseModal::new(),
+            remote_specs: std::collections::HashMap::new(),
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,
@@ -8594,6 +8597,68 @@ impl App {
         }
         // Detect inline conflict markers.
         self.detect_inline_conflicts();
+        Ok(())
+    }
+
+    /// Open a remote file via SSH.
+    ///
+    /// Fetches the file content via `ssh host cat path`, creates a local
+    /// cache, and opens it in a new tab. The remote spec is tracked so
+    /// saves go back to the remote host.
+    pub fn open_remote_file(&mut self, spec_str: &str) -> Result<(), String> {
+        let spec = crate::remote::RemoteSpec::parse(spec_str)
+            .ok_or_else(|| format!("Invalid remote path: {spec_str}"))?;
+
+        self.set_status(format!("Connecting to {}...", spec.display()));
+
+        let content = crate::remote::ssh_read(&spec).map_err(|e| format!("SSH: {e}"))?;
+
+        let cache_path = spec.local_cache_path();
+        // Ensure cache directory exists.
+        if let Some(parent) = cache_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // Write to local cache for Buffer to reference.
+        std::fs::write(&cache_path, &content).map_err(|e| format!("Cache write failed: {e}"))?;
+
+        let buf = Buffer::from_text(&content, cache_path.clone())
+            .map_err(|e| format!("Buffer error: {e}"))?;
+
+        let conversation_store = self.conversation_store.as_ref();
+        let theme = self.theme.clone();
+        let tab = EditorTab::new(buf, conversation_store, &theme);
+        self.tabs.open(tab);
+
+        // Track the remote spec so we can save back.
+        self.remote_specs.insert(cache_path, spec.clone());
+
+        self.set_status(format!("Opened remote: {}", spec.display()));
+        Ok(())
+    }
+
+    /// Save the current tab's buffer back to the remote host if it's a
+    /// remote file, or to local disk otherwise.
+    pub fn save_current_file(&mut self) -> Result<(), String> {
+        let path = self.tab().buffer.file_path().map(|p| p.to_path_buf());
+        if let Some(ref path) = path {
+            if let Some(spec) = self.remote_specs.get(path).cloned() {
+                // Save to remote via SSH.
+                let content = self.tab().buffer.rope().to_string();
+                crate::remote::ssh_write(&spec, &content)
+                    .map_err(|e| format!("SSH save failed: {e}"))?;
+                // Also update local cache.
+                let _ = std::fs::write(path, &content);
+                self.tab_mut().buffer.clear_modified();
+                self.set_status(format!("Saved remote: {}", spec.display()));
+                return Ok(());
+            }
+        }
+        // Fall through to normal local save.
+        self.tab_mut()
+            .buffer
+            .save()
+            .map_err(|e| format!("Save failed: {e}"))?;
+        self.set_status("Saved");
         Ok(())
     }
 

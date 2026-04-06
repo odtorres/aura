@@ -35,6 +35,7 @@ pub mod merge_view;
 pub mod plugin;
 pub mod project_search;
 pub mod rebase_modal;
+pub mod remote;
 pub mod render;
 pub mod semantic_index;
 pub mod session;

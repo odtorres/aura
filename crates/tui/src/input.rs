@@ -3231,6 +3231,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("branches", "Open branch picker", "Ctrl+B"),
     ("graph", "Visual git graph", "Ctrl+Shift+G"),
     ("rebase", "Interactive rebase", ""),
+    ("ssh", "Open remote file via SSH", ""),
     ("blame", "Toggle git blame", ""),
     ("log", "Show Aura git log", ""),
     ("experiment", "Enter experiment mode", ""),
@@ -3931,19 +3932,37 @@ fn execute_command(app: &mut App, cmd: &str) {
             if app.config.editor.format_on_save {
                 app.format_current_buffer();
             }
-            match app.tab_mut().buffer.save() {
-                Ok(_) => {
-                    app.set_status("Written");
-                    if app.sidebar_view == SidebarView::Git {
-                        app.refresh_source_control();
+            // Check if this is a remote file — save via SSH if so.
+            let is_remote = app
+                .tab()
+                .buffer
+                .file_path()
+                .and_then(|p| app.remote_specs.get(p))
+                .is_some();
+            if is_remote {
+                match app.save_current_file() {
+                    Ok(_) => {
+                        if app.sidebar_view == SidebarView::Git {
+                            app.refresh_source_control();
+                        }
                     }
-                    // Notify plugins of the save.
-                    if let Some(path) = app.tab().buffer.file_path() {
-                        let path_str = path.display().to_string();
-                        app.plugin_manager.notify_save(&path_str);
-                    }
+                    Err(e) => app.set_status(e),
                 }
-                Err(e) => app.set_status(format!("Error: {}", e)),
+            } else {
+                match app.tab_mut().buffer.save() {
+                    Ok(_) => {
+                        app.set_status("Written");
+                        if app.sidebar_view == SidebarView::Git {
+                            app.refresh_source_control();
+                        }
+                        // Notify plugins of the save.
+                        if let Some(path) = app.tab().buffer.file_path() {
+                            let path_str = path.display().to_string();
+                            app.plugin_manager.notify_save(&path_str);
+                        }
+                    }
+                    Err(e) => app.set_status(format!("Error: {}", e)),
+                }
             }
         }
         "q" => {
@@ -4063,6 +4082,13 @@ fn execute_command(app: &mut App, cmd: &str) {
             let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
             let count = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
             app.open_interactive_rebase(count);
+        }
+        // :ssh user@host:/path — open a remote file via SSH.
+        _ if cmd.trim().starts_with("ssh ") => {
+            let spec = cmd.trim().strip_prefix("ssh ").unwrap_or("").trim();
+            if let Err(e) = app.open_remote_file(spec) {
+                app.set_status(e);
+            }
         }
         _ if cmd.trim().starts_with("checkout ") => {
             let branch = cmd.trim().strip_prefix("checkout ").unwrap_or("").trim();

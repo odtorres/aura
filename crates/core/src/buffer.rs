@@ -121,6 +121,27 @@ impl Buffer {
         Ok(())
     }
 
+    /// Create a buffer from a string with an associated file path.
+    ///
+    /// Used for remote files fetched via SSH where the content is
+    /// already available as a string.
+    pub fn from_text(text: &str, path: std::path::PathBuf) -> anyhow::Result<Self> {
+        let rope = Rope::from_str(text);
+        let line_count = rope.len_lines();
+        let crdt =
+            CrdtDoc::with_text(text).map_err(|e| anyhow::anyhow!("CRDT init failed: {e}"))?;
+        Ok(Self {
+            rope,
+            crdt,
+            file_path: Some(path),
+            modified: false,
+            history: Vec::new(),
+            history_pos: 0,
+            line_authors: vec![AuthorId::human(); line_count],
+            last_edit: None,
+        })
+    }
+
     /// Insert text at a character position, tagged with an author.
     pub fn insert(&mut self, char_idx: usize, text: &str, author: AuthorId) {
         let clamped = char_idx.min(self.rope.len_chars());
@@ -551,6 +572,11 @@ impl Buffer {
     /// Whether the buffer has unsaved changes.
     pub fn is_modified(&self) -> bool {
         self.modified
+    }
+
+    /// Mark the buffer as not modified (e.g., after a remote save).
+    pub fn clear_modified(&mut self) {
+        self.modified = false;
     }
 
     /// The file path associated with this buffer, if any.
