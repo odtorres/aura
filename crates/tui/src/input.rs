@@ -1081,7 +1081,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             return;
         }
 
-        // Handle pending discard confirmation.
+        // Handle pending discard confirmation (unstaged).
         if app.source_control.pending_discard.is_some() {
             match code {
                 KeyCode::Char('y') => {
@@ -1090,6 +1090,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 }
                 _ => {
                     app.source_control.pending_discard = None;
+                    app.set_status("Discard cancelled");
+                }
+            }
+            return;
+        }
+
+        // Handle pending discard confirmation (staged — unstage then discard).
+        if app.source_control.pending_discard_staged.is_some() {
+            match code {
+                KeyCode::Char('y') => {
+                    app.sc_discard_staged_selected();
+                    app.set_status("Staged changes unstaged and discarded");
+                }
+                _ => {
+                    app.source_control.pending_discard_staged = None;
                     app.set_status("Discard cancelled");
                 }
             }
@@ -1123,8 +1138,21 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     if let Some(entry) = app.source_control.changed.get(app.source_control.selected)
                     {
                         let path = entry.rel_path.clone();
-                        app.set_status(format!("Discard changes to {}? (y to confirm)", path));
+                        app.set_status(format!(
+                            "Discard unstaged changes to {}? (y to confirm)",
+                            path
+                        ));
                         app.source_control.pending_discard = Some(path);
+                    }
+                } else if app.source_control.focused_section == GitPanelSection::StagedFiles {
+                    if let Some(entry) = app.source_control.staged.get(app.source_control.selected)
+                    {
+                        let path = entry.rel_path.clone();
+                        app.set_status(format!(
+                            "Unstage and discard changes to {}? (y to confirm)",
+                            path
+                        ));
+                        app.source_control.pending_discard_staged = Some(path);
                     }
                 } else if app.source_control.focused_section == GitPanelSection::Stashes {
                     // Drop the selected stash.

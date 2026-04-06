@@ -6501,6 +6501,13 @@ impl App {
         }
     }
 
+    /// Unstage and discard the selected staged file.
+    pub fn sc_discard_staged_selected(&mut self) {
+        if let Some(repo) = &self.git_repo {
+            self.source_control.discard_staged_selected(repo);
+        }
+    }
+
     /// Commit staged changes from the source control panel.
     pub fn sc_commit(&mut self) {
         if let Some(repo) = &self.git_repo {

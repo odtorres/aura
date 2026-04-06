@@ -97,9 +97,10 @@ pub struct SourceControlPanel {
     pub width: u16,
     /// Whether the user is actively editing the commit message.
     pub editing_commit_message: bool,
-    /// When `Some`, the user pressed `d` and we're waiting for confirmation.
-    /// Holds the relative path of the file to discard.
+    /// When `Some`, the user pressed `d` on an unstaged file and we're waiting for confirmation.
     pub pending_discard: Option<String>,
+    /// When `Some`, the user pressed `d` on a staged file — unstage then discard.
+    pub pending_discard_staged: Option<String>,
     /// Current branch name.
     pub branch: Option<String>,
     /// Number of commits ahead of upstream.
@@ -122,6 +123,7 @@ impl SourceControlPanel {
             width,
             editing_commit_message: false,
             pending_discard: None,
+            pending_discard_staged: None,
             branch: None,
             ahead: 0,
             behind: 0,
@@ -309,6 +311,22 @@ impl SourceControlPanel {
             if let Err(e) = git_repo.discard_file(&path) {
                 tracing::warn!("Failed to discard {}: {}", path, e);
                 return;
+            }
+            self.refresh(git_repo);
+        }
+    }
+
+    /// Unstage and discard changes for the currently selected staged file.
+    pub fn discard_staged_selected(&mut self, git_repo: &GitRepo) {
+        if let Some(path) = self.pending_discard_staged.take() {
+            // First unstage the file.
+            if let Err(e) = git_repo.unstage_file(&path) {
+                tracing::warn!("Failed to unstage {}: {}", path, e);
+                return;
+            }
+            // Then discard the working tree changes.
+            if let Err(e) = git_repo.discard_file(&path) {
+                tracing::warn!("Failed to discard {}: {}", path, e);
             }
             self.refresh(git_repo);
         }

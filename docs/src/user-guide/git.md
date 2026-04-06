@@ -34,7 +34,7 @@ Open the git sidebar with `Ctrl+G` (or click the "Git" tab in the sidebar). The 
 | `s` | Stage selected file |
 | `S` | Stage all changed files |
 | `u` | Unstage selected file |
-| `d` | Discard changes (with `y` to confirm) |
+| `d` | Discard changes / unstage+discard staged (with `y` to confirm) |
 | `c` | Commit staged changes |
 | `g` | Generate AI commit message |
 | `i` / `Enter` | Edit commit message |
