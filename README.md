@@ -464,6 +464,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - Registry configurable in `aura.toml` via `[plugins] registry = "..."`
 - Color-coded: green=installed, yellow=update available, white=new
 
+### New in v0.4.17
+- **Discard staged changes** — press `d` on staged files to unstage and discard with `y` confirmation (previously only worked on unstaged changes)
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
