@@ -8753,7 +8753,15 @@ impl App {
         };
 
         let lines = crate::git::aligned_diff_lines(&old_content, &new_content);
-        self.diff_view = Some(DiffView::new(rel_path.to_string(), lines));
+        let diff = DiffView::new(rel_path.to_string(), lines);
+
+        // Open as a new tab with the diff attached.
+        let buf = aura_core::Buffer::new();
+        let theme = self.theme.clone();
+        let conversation_store = self.conversation_store.as_ref();
+        let mut tab = EditorTab::new(buf, conversation_store, &theme);
+        tab.diff = Some(diff);
+        self.tabs.open(tab);
         self.mode = Mode::Diff;
     }
 

@@ -176,8 +176,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     }
 
-    // If diff view is active, render it instead of the normal editor.
-    if app.diff_view.is_some() {
+    // If diff view is active (old-style overlay or tab-based), render it.
+    if app.diff_view.is_some() || app.tab().diff.is_some() {
         draw_diff_view(frame, app, editor_area);
 
         if has_terminal {
@@ -1030,7 +1030,8 @@ fn draw_merge_panel_lines(
 }
 
 fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
-    let dv = match &app.diff_view {
+    // Use tab-based diff if available, otherwise fall back to old overlay.
+    let dv = match app.tab().diff.as_ref().or(app.diff_view.as_ref()) {
         Some(dv) => dv,
         None => return,
     };

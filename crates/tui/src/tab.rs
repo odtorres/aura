@@ -150,6 +150,8 @@ pub struct EditorTab {
     pub signature_help: Option<crate::lsp::SignatureHelpResult>,
     /// Discovered test function lines (0-indexed).
     pub test_lines: Vec<(usize, String)>,
+    /// Side-by-side diff view attached to this tab (None for normal editing).
+    pub diff: Option<crate::diff_view::DiffView>,
 }
 
 impl EditorTab {
@@ -237,6 +239,7 @@ impl EditorTab {
             code_lens: Vec::new(),
             signature_help: None,
             test_lines: Vec::new(),
+            diff: None,
         };
         tab.refresh_semantic_index();
         tab
@@ -251,8 +254,11 @@ impl EditorTab {
             .unwrap_or("[scratch]")
     }
 
-    /// Return a display title: filename + `*` when modified.
+    /// Return a display title: filename + `*` when modified, `[diff]` for diff tabs.
     pub fn title(&self) -> String {
+        if let Some(ref dv) = self.diff {
+            return format!("[diff] {}", dv.file_path);
+        }
         let name = self.file_name();
         if self.buffer.is_modified() {
             format!("{} *", name)

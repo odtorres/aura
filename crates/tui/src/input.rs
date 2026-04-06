@@ -5712,44 +5712,72 @@ fn execute_command(app: &mut App, cmd: &str) {
 pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            // Close diff view, return to source control panel.
+            // Close diff view — close the tab if it's tab-based.
+            if app.tab().diff.is_some() {
+                app.tabs.close_active();
+            }
             app.diff_view = None;
             app.mode = Mode::Normal;
             app.source_control_focused = true;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            if let Some(dv) = &mut app.diff_view {
-                dv.scroll_down(1, 20); // viewport height updated at render time
+            let has_tab_diff = app.tab().diff.is_some();
+            if has_tab_diff {
+                app.tab_mut().diff.as_mut().unwrap().scroll_down(1, 20);
+            } else if let Some(dv) = &mut app.diff_view {
+                dv.scroll_down(1, 20);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            if let Some(dv) = &mut app.diff_view {
+            let has_tab_diff = app.tab().diff.is_some();
+            if has_tab_diff {
+                app.tab_mut().diff.as_mut().unwrap().scroll_up(1);
+            } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_up(1);
             }
         }
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
-            if let Some(dv) = &mut app.diff_view {
+            let has_tab_diff = app.tab().diff.is_some();
+            if has_tab_diff {
+                app.tab_mut().diff.as_mut().unwrap().scroll_down(10, 20);
+            } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_down(10, 20);
             }
         }
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
-            if let Some(dv) = &mut app.diff_view {
+            let has_tab_diff = app.tab().diff.is_some();
+            if has_tab_diff {
+                app.tab_mut().diff.as_mut().unwrap().scroll_up(10);
+            } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_up(10);
             }
         }
         KeyCode::Char('G') => {
-            if let Some(dv) = &mut app.diff_view {
+            let has_tab_diff = app.tab().diff.is_some();
+            if has_tab_diff {
+                app.tab_mut().diff.as_mut().unwrap().scroll_to_bottom(20);
+            } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_to_bottom(20);
             }
         }
         KeyCode::Char('g') => {
-            if let Some(dv) = &mut app.diff_view {
+            let has_tab_diff = app.tab().diff.is_some();
+            if has_tab_diff {
+                app.tab_mut().diff.as_mut().unwrap().scroll_to_top();
+            } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_to_top();
             }
         }
         KeyCode::Enter | KeyCode::Char('o') => {
             // Open the file for editing.
-            let rel_path = app.diff_view.as_ref().map(|dv| dv.file_path.clone());
+            let rel_path = if app.tab().diff.is_some() {
+                app.tab().diff.as_ref().map(|dv| dv.file_path.clone())
+            } else {
+                app.diff_view.as_ref().map(|dv| dv.file_path.clone())
+            };
+            if app.tab().diff.is_some() {
+                app.tabs.close_active();
+            }
             app.diff_view = None;
             app.mode = Mode::Normal;
             app.source_control_focused = false;
