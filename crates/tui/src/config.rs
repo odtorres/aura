@@ -716,6 +716,11 @@ pub fn save_config(path: &Path, config: &AuraConfig) {
         );
     }
 
+    // Ensure parent directory exists (e.g. .aura/).
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
     // Write back.
     let serialized = table.to_string();
     if let Err(e) = std::fs::write(path, &serialized) {

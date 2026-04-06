@@ -748,12 +748,23 @@ struct PendingToolCall {
 impl App {
     /// Create a new app. Attempts to initialise the AI client from env.
     pub fn new(buffer: Buffer) -> Self {
-        // Load configuration from aura.toml.
-        let config_path = buffer
-            .file_path()
-            .and_then(|p| p.parent())
-            .map(|dir| dir.join("aura.toml"))
-            .unwrap_or_else(|| std::path::PathBuf::from("aura.toml"));
+        // Load configuration from .aura/aura.toml (preferred) or aura.toml (legacy).
+        let config_path = {
+            let project_dir = buffer
+                .file_path()
+                .and_then(|p| p.parent())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let new_path = project_dir.join(".aura/aura.toml");
+            let legacy_path = project_dir.join("aura.toml");
+            if new_path.exists() {
+                new_path
+            } else if legacy_path.exists() {
+                legacy_path
+            } else {
+                // Default to new location for fresh installs.
+                new_path
+            }
+        };
         let config = crate::config::load_config(&config_path);
         let config_table = crate::config::load_config_table(&config_path);
         let theme = crate::config::resolve_theme(&config.theme, config_table.as_ref());
@@ -9004,8 +9015,22 @@ impl App {
     }
 
     /// Save the current configuration to `aura.toml`.
-    pub fn save_settings(&self) {
+    ///
+    /// If the config file is open in a tab, reload its buffer and clamp
+    /// the cursor so we never access stale char indices.
+    pub fn save_settings(&mut self) {
         crate::config::save_config(&self.config_path, &self.config);
+
+        // Reload the buffer if aura.toml is open in any tab.
+        let config_path = self.config_path.clone();
+        for tab in self.tabs.tabs_mut() {
+            if tab.buffer.file_path() == Some(config_path.as_path()) {
+                if let Ok(buf) = aura_core::Buffer::from_file(&config_path) {
+                    tab.buffer = buf;
+                }
+            }
+        }
+        self.clamp_cursor();
     }
 
     /// Manually compact the conversation database.
