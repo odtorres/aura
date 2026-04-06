@@ -477,6 +477,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
   - `y` copy, `x` cut, `p` paste — vim-style clipboard for files
   - `.` reveal in Finder (macOS) / file manager (Linux) / Explorer (Windows)
 
+### New in v0.4.20
+- **Diff view as tabs** — opening a diff from the git panel now creates a real tab (`[diff] filename`), so you can switch between files and come back to the diff; close with `Esc`/`q` or the tab close button
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
