@@ -28,6 +28,9 @@ pub struct FileTree {
     pub entries: Vec<FileTreeEntry>,
     /// Currently selected index.
     pub selected: usize,
+    /// Scroll offset (first visible entry index). Persisted across frames
+    /// so the viewport stays stable when expanding/collapsing folders.
+    pub scroll_offset: usize,
     /// Root directory.
     root: PathBuf,
     /// Width of the tree panel in columns.
@@ -39,12 +42,13 @@ impl FileTree {
     ///
     /// Directories are listed before files, both sorted alphabetically.
     /// Hidden directories and common noise directories (`.git`, `target`,
-    /// `node_modules`, `.aura`) are omitted.
+    /// `node_modules`) are omitted.
     pub fn new(root: PathBuf) -> Self {
         let mut tree = Self {
             visible: false,
             entries: Vec::new(),
             selected: 0,
+            scroll_offset: 0,
             root,
             width: 30,
         };
@@ -69,6 +73,19 @@ impl FileTree {
     pub fn select_down(&mut self) {
         if !self.entries.is_empty() {
             self.selected = (self.selected + 1).min(self.entries.len() - 1);
+        }
+    }
+
+    /// Adjust `scroll_offset` so that `selected` is visible within
+    /// `visible_height` rows, scrolling the minimum amount needed.
+    pub fn ensure_visible(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        if self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        } else if self.selected >= self.scroll_offset + visible_height {
+            self.scroll_offset = self.selected - visible_height + 1;
         }
     }
 

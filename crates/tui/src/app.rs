@@ -6604,17 +6604,10 @@ impl App {
             } else {
                 self.file_tree_focused = true;
                 self.source_control_focused = false;
-                // Map the click row to a file tree entry.
+                // Map the click row to a file tree entry using the persisted scroll offset.
                 if row >= entries_start_y {
-                    let visible_height = self.file_tree_rect.height.saturating_sub(3) as usize; // border top + tab header + border bottom
-                    let selected = self.file_tree.selected;
-                    let scroll_offset = if selected >= visible_height && visible_height > 0 {
-                        selected.saturating_sub(visible_height - 1)
-                    } else {
-                        0
-                    };
                     let clicked_row = (row - entries_start_y) as usize;
-                    let clicked_idx = scroll_offset + clicked_row;
+                    let clicked_idx = self.file_tree.scroll_offset + clicked_row;
                     if clicked_idx < self.file_tree.entries.len() {
                         self.file_tree.selected = clicked_idx;
                         self.open_file_tree_selection();

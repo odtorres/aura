@@ -1934,7 +1934,7 @@ fn draw_shared_terminal(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw the file tree sidebar.
-fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_file_tree(frame: &mut Frame, app: &mut App, area: Rect) {
     let (title, border_color) = if app.file_tree_focused {
         (" Files [focused] ", Color::Yellow)
     } else {
@@ -1987,12 +1987,9 @@ fn draw_file_tree(frame: &mut Frame, app: &App, area: Rect) {
     let visible_height = tree_inner.height as usize;
     let selected = app.file_tree.selected;
 
-    // Compute scroll offset so the selected entry is always visible.
-    let scroll_offset = if selected >= visible_height {
-        selected.saturating_sub(visible_height - 1)
-    } else {
-        0
-    };
+    // Adjust scroll only if the selected entry is off-screen.
+    app.file_tree.ensure_visible(visible_height);
+    let scroll_offset = app.file_tree.scroll_offset;
 
     let entries = app
         .file_tree
