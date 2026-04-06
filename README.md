@@ -471,6 +471,12 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 ### New in v0.4.18
 - **Homebrew distribution** — `brew tap odtorres/aura && brew install aura` now works with prebuilt binaries for macOS (ARM/Intel) and Linux (ARM/x86)
 
+### New in v0.4.19
+- **File tree actions** — full file management in the sidebar:
+  - `r` rename, `D`/Delete delete (with `y` confirm), `a` new file, `A` new directory
+  - `y` copy, `x` cut, `p` paste — vim-style clipboard for files
+  - `.` reveal in Finder (macOS) / file manager (Linux) / Explorer (Windows)
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
