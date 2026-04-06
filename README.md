@@ -452,6 +452,11 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Interactive rebase UI** — `:rebase` or `:rebase N` opens a visual `git rebase -i` modal with per-commit actions (pick/reword/edit/squash/fixup/drop), Alt+j/k to reorder, `w` to execute
 - Color-coded actions: green=pick, cyan=reword, yellow=edit, magenta=squash, blue=fixup, red=drop
 
+### New in v0.4.15
+- **Remote SSH editing** — `:ssh user@host:/path/to/file` opens and edits files on remote machines via SSH; saves go back to the remote host automatically
+- Uses your existing SSH config, keys, and known hosts — no extra setup needed
+- `Buffer::from_text()` and `Buffer::clear_modified()` added to core for remote file support
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
