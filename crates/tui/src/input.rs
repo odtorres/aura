@@ -331,9 +331,9 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         let handled = match code {
             // Ctrl+T / Ctrl+` — toggle terminal.
             KeyCode::Char('t') | KeyCode::Char('`') => {
-                // Unfocus whatever panel is focused.
+                let was_terminal_focused = app.terminal_focused && app.terminal().visible;
                 unfocus_all_panels(app);
-                if app.terminal().visible && app.terminal_focused {
+                if was_terminal_focused {
                     app.terminal_mut().visible = false;
                     app.terminal_focused = false;
                 } else {
@@ -364,8 +364,11 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             }
             // Ctrl+N — toggle file tree sidebar.
             KeyCode::Char('n') => {
+                let was_tree_focused = app.file_tree_focused
+                    && app.file_tree.visible
+                    && app.sidebar_view == SidebarView::Files;
                 unfocus_all_panels(app);
-                if app.file_tree.visible && app.file_tree_focused {
+                if was_tree_focused {
                     app.file_tree_focused = false;
                     app.file_tree.toggle();
                 } else {
