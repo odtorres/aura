@@ -457,6 +457,13 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - Uses your existing SSH config, keys, and known hosts — no extra setup needed
 - `Buffer::from_text()` and `Buffer::clear_modified()` added to core for remote file support
 
+### New in v0.4.16
+- **Plugin marketplace** — `:plugin search` opens a modal to browse, install, and uninstall plugins from a git-based registry
+- `:plugin install/uninstall/update/list` commands for CLI-style management
+- Plugins use `plugin.toml` for metadata (name, version, description, author)
+- Registry configurable in `aura.toml` via `[plugins] registry = "..."`
+- Color-coded: green=installed, yellow=update available, white=new
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
