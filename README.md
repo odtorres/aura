@@ -480,6 +480,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 ### New in v0.4.20
 - **Diff view as tabs** — opening a diff from the git panel now creates a real tab (`[diff] filename`), so you can switch between files and come back to the diff; close with `Esc`/`q` or the tab close button
 
+### New in v0.4.21
+- **Ctrl+T / Ctrl+N toggle fix** — panel toggle shortcuts now properly close panels on second press (state was cleared before checking, making the close branch unreachable)
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
