@@ -213,9 +213,15 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
-    // Dismiss update notification on any key press.
+    // Update notification: 'u' accepts (opens update modal), any other key dismisses.
     if app.update_notification_visible {
-        app.update_notification_visible = false;
+        if code == KeyCode::Char('u') {
+            app.update_notification_visible = false;
+            app.show_update_modal();
+        } else {
+            app.update_notification_visible = false;
+        }
+        return;
     }
 
     // When search bar is active, route keys to search input.

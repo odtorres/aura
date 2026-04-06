@@ -7688,7 +7688,7 @@ fn draw_update_notification(frame: &mut Frame, app: &mut App, area: Rect) {
         _ => return,
     };
 
-    let text = format!(" Update v{} available — click to update ", version);
+    let text = format!(" \u{2191} v{} available  [u]pdate  [click] ", version);
     let width = (text.len() as u16 + 2).min(area.width);
     let height = 3u16;
     let x = area.x + area.width.saturating_sub(width + 1);
@@ -7718,7 +7718,8 @@ fn draw_update_notification(frame: &mut Frame, app: &mut App, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" [click] ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" [u]", Style::default().fg(Color::Green)),
+        Span::styled("pdate ", Style::default().fg(Color::DarkGray)),
     ]);
     frame.render_widget(Paragraph::new(line), inner);
 }
