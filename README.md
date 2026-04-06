@@ -448,6 +448,10 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Config moved to `.aura/aura.toml`** — configuration now lives inside the `.aura/` folder; legacy `aura.toml` in project root is still supported
 - **Crash fix** — opening `aura.toml` after changing settings no longer panics (ropey char-index-out-of-bounds); buffer is reloaded and cursor clamped after config save
 
+### New in v0.4.14
+- **Interactive rebase UI** — `:rebase` or `:rebase N` opens a visual `git rebase -i` modal with per-commit actions (pick/reword/edit/squash/fixup/drop), Alt+j/k to reorder, `w` to execute
+- Color-coded actions: green=pick, cyan=reword, yellow=edit, magenta=squash, blue=fixup, red=drop
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
