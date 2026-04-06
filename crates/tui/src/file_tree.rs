@@ -137,7 +137,7 @@ impl FileTree {
             };
 
             // Skip common noise directories (but show dotfiles like .env, .gitignore).
-            if name == "target" || name == "node_modules" || name == ".git" || name == ".aura" {
+            if name == "target" || name == "node_modules" || name == ".git" {
                 continue;
             }
 
