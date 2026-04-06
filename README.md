@@ -31,10 +31,11 @@ See [TODO.md](TODO.md) for the full roadmap and phase history.
 
 ## Installation
 
-### Homebrew (coming soon)
+### Homebrew (macOS & Linux)
 
 ```bash
-# brew install aura-editor/tap/aura
+brew tap odtorres/aura
+brew install aura
 ```
 
 ### Shell installer (macOS / Linux)
@@ -466,6 +467,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 
 ### New in v0.4.17
 - **Discard staged changes** — press `d` on staged files to unstage and discard with `y` confirmation (previously only worked on unstaged changes)
+
+### New in v0.4.18
+- **Homebrew distribution** — `brew tap odtorres/aura && brew install aura` now works with prebuilt binaries for macOS (ARM/Intel) and Linux (ARM/x86)
 
 ## Documentation
 

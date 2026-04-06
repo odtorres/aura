@@ -32,11 +32,14 @@ This clones, compiles, and installs the `aura` binary into `~/.cargo/bin/`.
 
 **Requirements:** Rust 1.75+ and a C compiler (for tree-sitter grammars and SQLite).
 
-## Homebrew (coming soon)
+## Homebrew (macOS & Linux)
 
 ```bash
-# brew install odtorres/aura/aura
+brew tap odtorres/aura
+brew install aura
 ```
+
+Installs the latest pre-built binary. Updates with `brew upgrade aura`.
 
 ## Building from Source
 

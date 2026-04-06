@@ -303,9 +303,9 @@ The AI thinks ahead. The human reviews when ready.
 - [x] detect in the app a new version and show there is a new version available
 
 ### 8.5 Distribution — Remaining Manual Steps
-- [ ] Create `odtorres/homebrew-aura` repo on GitHub
-- [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
-- [ ] Verify GitHub Release pipeline works on tag push
+- [x] Create `odtorres/homebrew-aura` repo on GitHub
+- [x] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
+- [x] Verify GitHub Release pipeline works on tag push
 - ~~Publish to crates.io~~ — Not viable (include_str! paths outside crate dirs). Use `cargo install --git` instead.
 
 
@@ -506,9 +506,9 @@ Based on competitive analysis vs Cursor, Zed, VS Code Copilot, Windsurf, Helix, 
 - [x] **Macro editing** — Edit macro contents before replaying.
 
 ### 11.8 Distribution
-- [ ] Create `aura-editor/homebrew-tap` repo on GitHub
-- [ ] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
-- [ ] Verify GitHub Release pipeline works on tag push
+- [x] Create `aura-editor/homebrew-tap` repo on GitHub
+- [x] Add `HOMEBREW_TAP_TOKEN` secret to the aura repo
+- [x] Verify GitHub Release pipeline works on tag push
 - ~~Publish to crates.io~~ — Not viable. Use `cargo install --git` instead.
 
 ---
