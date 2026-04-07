@@ -3566,6 +3566,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("undo-tree", "Visual undo history", ""),
     ("commit", "Generate AI commit message", ""),
     ("branches", "Open branch picker", "Ctrl+B"),
+    ("zen", "Toggle zen mode", ""),
     ("graph", "Visual git graph", "Ctrl+Shift+G"),
     ("rebase", "Interactive rebase", ""),
     ("ssh", "Open remote file via SSH", ""),
@@ -4414,6 +4415,26 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "branches" | "br" => {
             app.open_branch_picker();
+        }
+        "zen" => {
+            app.zen_mode = !app.zen_mode;
+            if app.zen_mode {
+                // Hide all chrome.
+                app.file_tree.visible = false;
+                app.file_tree_focused = false;
+                app.terminal_mut().visible = false;
+                app.terminal_focused = false;
+                app.source_control_focused = false;
+                app.chat_panel.visible = false;
+                app.chat_panel_focused = false;
+                app.conversation_history.visible = false;
+                app.conversation_history_focused = false;
+                app.ai_visor.visible = false;
+                app.ai_visor_focused = false;
+                app.set_status("Zen mode — :zen or Esc to exit");
+            } else {
+                app.set_status("Zen mode off");
+            }
         }
         "graph" | "git-graph" => {
             app.open_git_graph();

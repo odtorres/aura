@@ -435,6 +435,8 @@ pub struct App {
     pub register: Option<String>,
     /// Whether to show authorship markers in the gutter.
     pub show_authorship: bool,
+    /// Whether zen mode is active (hide all chrome for distraction-free editing).
+    pub zen_mode: bool,
     /// Leader key pending (Space was pressed, waiting for next key).
     pub leader_pending: bool,
     /// Pending operator waiting for a motion (operator-pending mode).
@@ -1014,6 +1016,7 @@ impl App {
             macro_record_pending: false,
             macro_play_pending: false,
             show_authorship: true,
+            zen_mode: false,
             leader_pending: false,
             intent_input: String::new(),
             project_rules: None,

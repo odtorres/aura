@@ -36,7 +36,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     } else {
         0
     };
-    let tab_bar_height: u16 = 1;
+    let zen = app.zen_mode;
+    let tab_bar_height: u16 = if zen { 0 } else { 1 };
+    let status_height: u16 = if zen { 0 } else { 1 };
+    let cmd_height: u16 = if zen { 0 } else { 1 };
+    let terminal_height = if zen { 0 } else { terminal_height };
+    let debug_panel_height = if zen { 0 } else { debug_panel_height };
 
     let chunks = if has_proposal {
         Layout::default()
@@ -47,8 +52,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Constraint::Percentage(50),             // Proposal (diff)
                 Constraint::Length(debug_panel_height), // Debug panel (0 when hidden)
                 Constraint::Length(terminal_height),    // Terminal pane (0 when hidden)
-                Constraint::Length(1),                  // Status bar
-                Constraint::Length(1),                  // Command bar
+                Constraint::Length(status_height),      // Status bar
+                Constraint::Length(cmd_height),         // Command bar
             ])
             .split(area)
     } else {
@@ -60,8 +65,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Constraint::Length(0),                  // No proposal pane
                 Constraint::Length(debug_panel_height), // Debug panel (0 when hidden)
                 Constraint::Length(terminal_height),    // Terminal pane (0 when hidden)
-                Constraint::Length(1),                  // Status bar
-                Constraint::Length(1),                  // Command bar
+                Constraint::Length(status_height),      // Status bar
+                Constraint::Length(cmd_height),         // Command bar
             ])
             .split(area)
     };
@@ -5984,8 +5989,8 @@ fn draw_editor_pane(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Minimap + scrollbar column.
-    let show_minimap = app.config.editor.show_minimap;
+    // Minimap + scrollbar column (hidden in zen mode).
+    let show_minimap = app.config.editor.show_minimap && !app.zen_mode;
     let minimap_width: u16 = 12; // narrow code overview
     let (content_area, minimap_area) = if show_minimap && inner.width > minimap_width + 20 {
         let hsplit = Layout::default()
