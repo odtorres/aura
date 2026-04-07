@@ -129,6 +129,54 @@ impl SettingsModal {
                         .collect(),
                 },
             },
+            SettingEntry {
+                label: "AI Provider".to_string(),
+                key: "ai.provider".to_string(),
+                value: SettingValue::Select {
+                    current: config.ai.provider.clone(),
+                    options: vec![
+                        "anthropic".to_string(),
+                        "openai".to_string(),
+                        "ollama".to_string(),
+                    ],
+                },
+            },
+            SettingEntry {
+                label: "AI Model".to_string(),
+                key: "ai.model".to_string(),
+                value: SettingValue::Select {
+                    current: config.ai.model.clone(),
+                    options: {
+                        let provider = aura_ai::ProviderType::from_str(&config.ai.provider)
+                            .unwrap_or(aura_ai::ProviderType::Anthropic);
+                        provider
+                            .common_models()
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect()
+                    },
+                },
+            },
+            SettingEntry {
+                label: "Commit Model".to_string(),
+                key: "ai.commit_model".to_string(),
+                value: SettingValue::Select {
+                    current: if config.ai.commit_model.is_empty() {
+                        "(default)".to_string()
+                    } else {
+                        config.ai.commit_model.clone()
+                    },
+                    options: {
+                        let mut opts = vec!["(default)".to_string()];
+                        for p in aura_ai::PROVIDERS {
+                            for m in p.common_models() {
+                                opts.push(m.to_string());
+                            }
+                        }
+                        opts
+                    },
+                },
+            },
         ];
         self.selected = 0;
         self.visible = true;
@@ -220,6 +268,19 @@ impl SettingsModal {
                 }
                 ("theme", SettingValue::Select { current, .. }) => {
                     config.theme = current.clone();
+                }
+                ("ai.provider", SettingValue::Select { current, .. }) => {
+                    config.ai.provider = current.clone();
+                }
+                ("ai.model", SettingValue::Select { current, .. }) => {
+                    config.ai.model = current.clone();
+                }
+                ("ai.commit_model", SettingValue::Select { current, .. }) => {
+                    config.ai.commit_model = if current == "(default)" {
+                        String::new()
+                    } else {
+                        current.clone()
+                    };
                 }
                 _ => {}
             }

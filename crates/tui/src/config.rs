@@ -235,6 +235,9 @@ impl Default for EditorConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AiSettings {
+    /// AI provider: "anthropic", "openai", or "ollama".
+    #[serde(default = "default_provider")]
+    pub provider: String,
     /// Default AI model (used for chat and general requests).
     pub model: String,
     /// Maximum tokens for AI responses.
@@ -262,6 +265,32 @@ pub struct AiSettings {
     /// Model for conversation summarization/compaction.
     #[serde(default)]
     pub summarize_model: String,
+
+    // --- Provider-specific configuration ---
+    /// OpenAI API key (or set `OPENAI_API_KEY` env var).
+    #[serde(default)]
+    pub openai_api_key: String,
+    /// OpenAI base URL (for compatible APIs like Azure, Together, Groq).
+    #[serde(default = "default_openai_base_url")]
+    pub openai_base_url: String,
+    /// Ollama server host URL.
+    #[serde(default = "default_ollama_host")]
+    pub ollama_host: String,
+}
+
+/// Default provider name.
+fn default_provider() -> String {
+    "anthropic".to_string()
+}
+
+/// Default OpenAI base URL.
+fn default_openai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+/// Default Ollama host.
+fn default_ollama_host() -> String {
+    "http://localhost:11434".to_string()
 }
 
 impl AiSettings {
@@ -286,6 +315,7 @@ impl AiSettings {
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
+            provider: default_provider(),
             model: "claude-sonnet-4-20250514".to_string(),
             max_tokens: 4096,
             aggressiveness: "moderate".to_string(),
@@ -296,6 +326,9 @@ impl Default for AiSettings {
             agent_model: String::new(),
             chat_model: String::new(),
             summarize_model: String::new(),
+            openai_api_key: String::new(),
+            openai_base_url: default_openai_base_url(),
+            ollama_host: default_ollama_host(),
         }
     }
 }
