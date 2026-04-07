@@ -1202,8 +1202,11 @@ impl App {
         // Load project rules from .aura/rules.md or .aura/rules/*.md.
         app.load_project_rules();
 
-        // Discover and load Lua plugins from ~/.aura/plugins/.
+        // Discover and load Lua and WASM plugins from ~/.aura/plugins/.
         for plugin in crate::plugin::discover_lua_plugins() {
+            app.plugin_manager.register(plugin);
+        }
+        for plugin in crate::plugin::discover_wasm_plugins() {
             app.plugin_manager.register(plugin);
         }
         let plugin_count = app.plugin_manager.plugin_names().len();

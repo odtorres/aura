@@ -285,6 +285,143 @@ pub fn discover_lua_plugins() -> Vec<Box<dyn Plugin>> {
     plugins
 }
 
+/// A WASM plugin that runs as an external WASI process.
+///
+/// Communication is via stdin/stdout JSON messages. The WASM runtime
+/// (`wasmtime` or `wasmer`) must be installed on the system.
+pub struct WasmPlugin {
+    /// Plugin name extracted from filename.
+    plugin_name: String,
+    /// Path to the `.wasm` file.
+    wasm_path: std::path::PathBuf,
+}
+
+impl WasmPlugin {
+    /// Create a new WASM plugin from a `.wasm` file path.
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        // Verify the file exists and has WASM magic bytes.
+        let bytes = std::fs::read(path)?;
+        if bytes.len() < 4 || &bytes[..4] != b"\0asm" {
+            anyhow::bail!("Not a valid WASM file: {}", path.display());
+        }
+        Ok(Self {
+            plugin_name: name,
+            wasm_path: path.to_path_buf(),
+        })
+    }
+
+    /// Run the WASM plugin with a JSON command and return the JSON response.
+    fn run_command(&self, command: &str) -> Option<String> {
+        // Try wasmtime first, then wasmer.
+        let runtimes = ["wasmtime", "wasmer"];
+        for runtime in &runtimes {
+            if let Ok(output) = std::process::Command::new(runtime)
+                .arg("run")
+                .arg(&self.wasm_path)
+                .arg("--")
+                .arg(command)
+                .output()
+            {
+                if output.status.success() {
+                    return String::from_utf8(output.stdout).ok();
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Plugin for WasmPlugin {
+    fn name(&self) -> &str {
+        &self.plugin_name
+    }
+
+    fn on_load(&mut self) -> anyhow::Result<()> {
+        // Verify a WASI runtime is available.
+        let has_runtime = std::process::Command::new("wasmtime")
+            .arg("--version")
+            .output()
+            .is_ok()
+            || std::process::Command::new("wasmer")
+                .arg("--version")
+                .output()
+                .is_ok();
+        if !has_runtime {
+            anyhow::bail!("No WASI runtime found (install wasmtime or wasmer)");
+        }
+        Ok(())
+    }
+
+    fn on_key(&mut self, mode: &str, key: &str) -> Option<PluginAction> {
+        let cmd = format!("{{\"event\":\"key\",\"mode\":\"{mode}\",\"key\":\"{key}\"}}");
+        let response = self.run_command(&cmd)?;
+        let trimmed = response.trim();
+        if trimmed.starts_with("cmd:") {
+            Some(PluginAction::RunCommand(trimmed[4..].to_string()))
+        } else if trimmed.starts_with("insert:") {
+            Some(PluginAction::InsertText(trimmed[7..].to_string()))
+        } else if trimmed.starts_with("status:") {
+            Some(PluginAction::SetStatus(trimmed[7..].to_string()))
+        } else {
+            None
+        }
+    }
+
+    fn on_save(&mut self, path: &str) -> anyhow::Result<()> {
+        let cmd = format!("{{\"event\":\"save\",\"path\":\"{path}\"}}");
+        self.run_command(&cmd);
+        Ok(())
+    }
+
+    fn on_intent(&mut self, intent: &str) -> Option<String> {
+        let cmd = format!("{{\"event\":\"intent\",\"text\":\"{intent}\"}}");
+        self.run_command(&cmd)
+    }
+}
+
+/// Discover and load all `.wasm` plugins from `~/.aura/plugins/`.
+pub fn discover_wasm_plugins() -> Vec<Box<dyn Plugin>> {
+    let mut plugins: Vec<Box<dyn Plugin>> = Vec::new();
+
+    let plugins_dir = dirs_path_home().map(|h| h.join(".aura").join("plugins"));
+
+    let dir = match plugins_dir {
+        Some(d) if d.is_dir() => d,
+        _ => return plugins,
+    };
+
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return plugins,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("wasm") {
+            match WasmPlugin::from_file(&path) {
+                Ok(plugin) => {
+                    tracing::info!(
+                        "Discovered WASM plugin: {} ({})",
+                        plugin.plugin_name,
+                        path.display()
+                    );
+                    plugins.push(Box::new(plugin));
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load WASM plugin {}: {e}", path.display());
+                }
+            }
+        }
+    }
+
+    plugins
+}
+
 /// Get the user's home directory.
 fn dirs_path_home() -> Option<std::path::PathBuf> {
     std::env::var("HOME").ok().map(std::path::PathBuf::from)
