@@ -158,6 +158,7 @@ aura-editor/
     │       ├── undo_tree.rs           # Visual undo history modal with time-travel
     │       ├── ai_visor.rs            # Claude Code config browser (.claude/ folder viewer)
     │       ├── project_search.rs     # Project-wide search/replace panel
+    │       ├── markdown_preview.rs    # Markdown live preview renderer
     │       ├── marketplace.rs        # Plugin marketplace (registry, install, uninstall)
     │       ├── rebase_modal.rs      # Interactive rebase UI (visual git rebase -i)
     │       ├── remote.rs            # SSH remote file editing (ssh read/write/ls)

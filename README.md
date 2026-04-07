@@ -498,6 +498,12 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Light theme readability** — completely reworked light theme with GitHub-inspired colors; dark readable syntax highlighting on white background
 - File tree sidebar now uses theme-aware colors instead of hardcoded cyan/white
 
+### New in v0.5.0
+- **Zen mode** — `:zen` hides all chrome (tab bar, status bar, terminal, sidebars, minimap) for distraction-free editing
+- **Breadcrumbs** — scope path (file > class > function) shown above the editor, updates on cursor movement
+- **Sticky scroll** — enclosing scope headers pinned at viewport top when scrolled past (up to 3 levels)
+- **Markdown live preview** — `:preview` splits the editor with rendered markdown (headers, code blocks, lists, tables, inline formatting)
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
