@@ -437,6 +437,8 @@ pub struct App {
     pub show_authorship: bool,
     /// Whether zen mode is active (hide all chrome for distraction-free editing).
     pub zen_mode: bool,
+    /// Breadcrumbs: scope path at the current cursor position.
+    pub breadcrumbs: Vec<String>,
     /// Leader key pending (Space was pressed, waiting for next key).
     pub leader_pending: bool,
     /// Pending operator waiting for a motion (operator-pending mode).
@@ -1017,6 +1019,7 @@ impl App {
             macro_play_pending: false,
             show_authorship: true,
             zen_mode: false,
+            breadcrumbs: Vec::new(),
             leader_pending: false,
             intent_input: String::new(),
             project_rules: None,
@@ -1340,6 +1343,7 @@ impl App {
                     });
             }
             self.update_matching_bracket();
+            self.update_breadcrumbs();
             terminal.draw(|frame| crate::render::draw(frame, self))?;
 
             // Set blinking bar cursor when chat input is focused, block otherwise.
@@ -4285,6 +4289,45 @@ impl App {
             };
             tab.cursor.col = tab.cursor.col.min(max_col);
         }
+    }
+
+    /// Update the matching bracket position for the character under the cursor.
+    /// Update the breadcrumb path from the current cursor position.
+    ///
+    /// Uses the tab's foldable ranges (from tree-sitter) to find all
+    /// scopes that contain the cursor line, building a path from
+    /// outermost to innermost.
+    pub fn update_breadcrumbs(&mut self) {
+        let cursor_row = self.tab().cursor.row;
+        let tab = self.tab();
+
+        // Collect all foldable ranges that contain the cursor.
+        let mut enclosing: Vec<(usize, usize, String)> = tab
+            .foldable_ranges
+            .iter()
+            .filter_map(|(&start, &end)| {
+                if cursor_row >= start && cursor_row <= end {
+                    tab.buffer
+                        .line_text(start)
+                        .map(|text| (start, end, text.trim().to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by start line (outermost first), then by end line descending (narrower = inner).
+        enclosing.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+
+        // Truncate labels for readability.
+        self.breadcrumbs = enclosing
+            .into_iter()
+            .map(|(_, _, label)| {
+                let label: String = label.chars().take(60).collect();
+                // Remove trailing '{' or ':' for cleaner display.
+                label.trim_end_matches('{').trim_end().to_string()
+            })
+            .collect();
     }
 
     /// Update the matching bracket position for the character under the cursor.

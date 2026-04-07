@@ -6002,6 +6002,31 @@ fn draw_editor_pane(
         (inner, None)
     };
 
+    // Breadcrumbs bar (1 row above editor content, hidden in zen mode).
+    let content_area =
+        if !app.zen_mode && is_focused && !app.breadcrumbs.is_empty() && content_area.height > 3 {
+            // Render breadcrumbs at the top of content_area.
+            let bc_text = app.breadcrumbs.join(" > ");
+            let bc_display: String = bc_text.chars().take(content_area.width as usize).collect();
+            frame.render_widget(
+                Paragraph::new(bc_display).style(
+                    Style::default()
+                        .fg(app.theme.gutter_fg)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+                Rect::new(content_area.x, content_area.y, content_area.width, 1),
+            );
+            // Shrink content area by 1 row.
+            Rect::new(
+                content_area.x,
+                content_area.y + 1,
+                content_area.width,
+                content_area.height - 1,
+            )
+        } else {
+            content_area
+        };
+
     // Scroll the focused pane's tab to keep cursor visible.
     if is_focused {
         let gutter_w = 6u16;
