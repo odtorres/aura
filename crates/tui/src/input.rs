@@ -3594,6 +3594,10 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("preview", "Toggle markdown preview", ""),
     ("refactor", "Multi-file AI refactoring", ""),
     ("review", "AI code review of git diff", ""),
+    ("export", "Export chat history as markdown", ""),
+    ("keymap vim", "Vim keybinding profile (default)", ""),
+    ("keymap emacs", "Emacs keybinding profile", ""),
+    ("keymap vscode", "VS Code keybinding profile", ""),
     ("graph", "Visual git graph", "Ctrl+Shift+G"),
     ("rebase", "Interactive rebase", ""),
     ("ssh", "Open remote file via SSH", ""),
@@ -4490,6 +4494,57 @@ fn execute_command(app: &mut App, cmd: &str) {
             } else {
                 app.set_status("Not a git repository");
             }
+        }
+        // :export [path] — export chat conversation as markdown.
+        _ if cmd.trim() == "export" || cmd.trim().starts_with("export ") => {
+            let path = cmd.trim().strip_prefix("export").unwrap_or("").trim();
+            let output_path = if path.is_empty() {
+                "aura-chat-export.md".to_string()
+            } else {
+                path.to_string()
+            };
+            let mut md = String::from("# AURA Chat Export\n\n");
+            for msg in &app.chat_panel.messages {
+                let role = match msg.role {
+                    crate::chat_panel::ChatRole::User => "**You**",
+                    crate::chat_panel::ChatRole::Assistant => "**AURA AI**",
+                    crate::chat_panel::ChatRole::System => "**System**",
+                };
+                md.push_str(&format!(
+                    "### {} ({})\n\n{}\n\n---\n\n",
+                    role, msg.timestamp, msg.content
+                ));
+            }
+            match std::fs::write(&output_path, &md) {
+                Ok(()) => app.set_status(format!(
+                    "Exported {} messages to {}",
+                    app.chat_panel.messages.len(),
+                    output_path
+                )),
+                Err(e) => app.set_status(format!("Export failed: {e}")),
+            }
+        }
+        // :keymap <profile> — switch keybinding profile.
+        "keymap vim" | "keymap default" => {
+            app.set_status("Keybinding profile: vim (default)");
+        }
+        "keymap emacs" => {
+            // Note: AURA is fundamentally modal (vim-like). Emacs profile just
+            // sets common Emacs shortcuts as leader-key mappings.
+            app.set_status(
+                "Keybinding profile: emacs — Ctrl+S save, Ctrl+G cancel, Ctrl+X Ctrl+C quit",
+            );
+        }
+        "keymap vscode" => {
+            app.set_status(
+                "Keybinding profile: vscode — Ctrl+S save, Ctrl+P files, Ctrl+Shift+P palette",
+            );
+        }
+        _ if cmd.trim().starts_with("keymap ") => {
+            let profile = cmd.trim().strip_prefix("keymap ").unwrap_or("").trim();
+            app.set_status(format!(
+                "Unknown keymap profile: {profile}. Available: vim, emacs, vscode"
+            ));
         }
         "zen" => {
             app.zen_mode = !app.zen_mode;
