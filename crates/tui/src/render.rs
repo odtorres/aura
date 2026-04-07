@@ -6027,6 +6027,64 @@ fn draw_editor_pane(
             content_area
         };
 
+    // Sticky scroll: pin enclosing scope headers at the top of the viewport.
+    let content_area = if !app.zen_mode && is_focused && content_area.height > 5 {
+        let scroll_row = app.tabs.tabs()[tab_idx].scroll_row;
+        let tab = &app.tabs.tabs()[tab_idx];
+
+        // Find scopes whose start line is above the viewport but end is below.
+        let mut sticky_lines: Vec<(usize, String)> = tab
+            .foldable_ranges
+            .iter()
+            .filter_map(|(&start, &end)| {
+                if start < scroll_row && end >= scroll_row {
+                    tab.buffer.line_text(start).map(|text| {
+                        let label = text.trim().to_string();
+                        let label: String =
+                            label.chars().take(content_area.width as usize).collect();
+                        (start, label)
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by start line so outermost is first; keep only last 3.
+        sticky_lines.sort_by_key(|(line, _)| *line);
+        let sticky_count = sticky_lines
+            .len()
+            .min(3)
+            .min(content_area.height as usize / 4);
+        let sticky_lines = &sticky_lines[sticky_lines.len().saturating_sub(sticky_count)..];
+
+        if !sticky_lines.is_empty() {
+            let sticky_bg = Style::default()
+                .fg(app.theme.keyword)
+                .bg(app.theme.status_bg)
+                .add_modifier(Modifier::DIM);
+            for (i, (_, label)) in sticky_lines.iter().enumerate() {
+                let y = content_area.y + i as u16;
+                frame.render_widget(
+                    Paragraph::new(format!(" {}", label)).style(sticky_bg),
+                    Rect::new(content_area.x, y, content_area.width, 1),
+                );
+            }
+            // Shrink content area.
+            let n = sticky_lines.len() as u16;
+            Rect::new(
+                content_area.x,
+                content_area.y + n,
+                content_area.width,
+                content_area.height.saturating_sub(n),
+            )
+        } else {
+            content_area
+        }
+    } else {
+        content_area
+    };
+
     // Scroll the focused pane's tab to keep cursor visible.
     if is_focused {
         let gutter_w = 6u16;
