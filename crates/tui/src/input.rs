@@ -3592,6 +3592,8 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("branches", "Open branch picker", "Ctrl+B"),
     ("zen", "Toggle zen mode", ""),
     ("preview", "Toggle markdown preview", ""),
+    ("refactor", "Multi-file AI refactoring", ""),
+    ("review", "AI code review of git diff", ""),
     ("graph", "Visual git graph", "Ctrl+Shift+G"),
     ("rebase", "Interactive rebase", ""),
     ("ssh", "Open remote file via SSH", ""),
@@ -4447,6 +4449,46 @@ fn execute_command(app: &mut App, cmd: &str) {
                 app.set_status("Markdown preview on");
             } else {
                 app.set_status("Markdown preview off");
+            }
+        }
+        // :refactor <instruction> — multi-file AI refactoring via chat.
+        _ if cmd.trim().starts_with("refactor ") => {
+            let instruction = cmd.trim().strip_prefix("refactor ").unwrap_or("").trim();
+            if instruction.is_empty() {
+                app.set_status("Usage: :refactor <instruction>");
+            } else {
+                // Send the refactoring instruction to the chat panel as an agent task.
+                let prompt = format!(
+                    "Refactor the codebase: {}. Show me the changes as a diff for each file affected.",
+                    instruction
+                );
+                app.chat_panel.visible = true;
+                app.chat_panel_focused = true;
+                app.chat_panel.input = prompt;
+                app.send_chat_message();
+                app.set_status(format!("Refactoring: {}", instruction));
+            }
+        }
+        // :review — AI code review of the current git diff.
+        "review" => {
+            if let Some(repo) = &app.git_repo {
+                match repo.staged_diff_patch(50_000) {
+                    Ok(diff) if !diff.is_empty() => {
+                        let prompt = format!(
+                            "Review this git diff and provide feedback on code quality, potential bugs, and suggestions:\n\n```diff\n{}\n```",
+                            diff
+                        );
+                        app.chat_panel.visible = true;
+                        app.chat_panel_focused = true;
+                        app.chat_panel.input = prompt;
+                        app.send_chat_message();
+                        app.set_status("AI code review started");
+                    }
+                    Ok(_) => app.set_status("No changes to review"),
+                    Err(e) => app.set_status(format!("Diff failed: {e}")),
+                }
+            } else {
+                app.set_status("Not a git repository");
             }
         }
         "zen" => {
