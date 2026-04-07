@@ -361,14 +361,14 @@ impl Plugin for WasmPlugin {
         let cmd = format!("{{\"event\":\"key\",\"mode\":\"{mode}\",\"key\":\"{key}\"}}");
         let response = self.run_command(&cmd)?;
         let trimmed = response.trim();
-        if trimmed.starts_with("cmd:") {
-            Some(PluginAction::RunCommand(trimmed[4..].to_string()))
-        } else if trimmed.starts_with("insert:") {
-            Some(PluginAction::InsertText(trimmed[7..].to_string()))
-        } else if trimmed.starts_with("status:") {
-            Some(PluginAction::SetStatus(trimmed[7..].to_string()))
+        if let Some(rest) = trimmed.strip_prefix("cmd:") {
+            Some(PluginAction::RunCommand(rest.to_string()))
+        } else if let Some(rest) = trimmed.strip_prefix("insert:") {
+            Some(PluginAction::InsertText(rest.to_string()))
         } else {
-            None
+            trimmed
+                .strip_prefix("status:")
+                .map(|rest| PluginAction::SetStatus(rest.to_string()))
         }
     }
 

@@ -175,3 +175,38 @@ pub fn execute_cell(cell: &CodeCell) -> anyhow::Result<String> {
         Ok(stdout.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_cell_python() {
+        let content = "# some header\n# %%\nx = 1\nprint(x)\n# %%\ny = 2\n";
+        // Cursor on line 2 (x = 1) should find the first cell.
+        let cell = find_cell_at_cursor(content, 2).unwrap();
+        assert_eq!(cell.language, "python");
+        assert!(cell.code.contains("x = 1"));
+        assert_eq!(cell.start_line, 2);
+        assert_eq!(cell.end_line, 4);
+    }
+
+    #[test]
+    fn test_find_cell_fenced() {
+        let content = "Some text\n```python\nprint('hello')\n```\nMore text\n";
+        // Cursor on line 2 (inside the fenced block).
+        let cell = find_cell_at_cursor(content, 2).unwrap();
+        assert_eq!(cell.language, "python");
+        assert!(cell.code.contains("print('hello')"));
+    }
+
+    #[test]
+    fn test_find_all_cells() {
+        let content = "# %% [python]\nx = 1\n# %% [rust]\nlet y = 2;\n# %%\nz = 3\n";
+        let cells = find_all_cells(content);
+        assert_eq!(cells.len(), 3);
+        assert_eq!(cells[0].language, "python");
+        assert_eq!(cells[1].language, "rust");
+        assert_eq!(cells[2].language, "python"); // default
+    }
+}

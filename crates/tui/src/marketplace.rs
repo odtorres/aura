@@ -331,7 +331,10 @@ fn download_file(url: &str, dest: &std::path::Path) -> anyhow::Result<()> {
 }
 
 /// Parse a plugin.toml file for metadata.
-fn parse_plugin_toml(content: &str, default_name: &str) -> (String, String, String, String) {
+pub(crate) fn parse_plugin_toml(
+    content: &str,
+    default_name: &str,
+) -> (String, String, String, String) {
     let mut name = default_name.to_string();
     let mut version = String::new();
     let mut description = String::new();
@@ -359,4 +362,75 @@ fn parse_plugin_toml(content: &str, default_name: &str) -> (String, String, Stri
     }
 
     (name, version, description, author)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_plugin_toml() {
+        let toml_content = r#"
+name = "my-plugin"
+version = "1.2.3"
+description = "A test plugin"
+author = "Test Author"
+"#;
+        let (name, version, description, author) = parse_plugin_toml(toml_content, "fallback");
+        assert_eq!(name, "my-plugin");
+        assert_eq!(version, "1.2.3");
+        assert_eq!(description, "A test plugin");
+        assert_eq!(author, "Test Author");
+    }
+
+    #[test]
+    fn test_marketplace_modal_filter() {
+        let mut modal = MarketplaceModal::new();
+        modal.registry = vec![
+            PluginListing {
+                name: "git-blame".to_string(),
+                version: "0.1.0".to_string(),
+                description: "Show git blame annotations".to_string(),
+                author: "Alice".to_string(),
+                repo: String::new(),
+                download: String::new(),
+                toml: String::new(),
+            },
+            PluginListing {
+                name: "formatter".to_string(),
+                version: "0.2.0".to_string(),
+                description: "Auto-format on save".to_string(),
+                author: "Bob".to_string(),
+                repo: String::new(),
+                download: String::new(),
+                toml: String::new(),
+            },
+            PluginListing {
+                name: "snippets-extra".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Extra code snippets".to_string(),
+                author: "Alice".to_string(),
+                repo: String::new(),
+                download: String::new(),
+                toml: String::new(),
+            },
+        ];
+
+        // No query — all entries match.
+        modal.filter();
+        assert_eq!(modal.filtered.len(), 3);
+
+        // Filter by "git" — only git-blame matches.
+        modal.query = "git".to_string();
+        modal.filter();
+        assert_eq!(modal.filtered.len(), 1);
+        assert_eq!(modal.filtered[0], 0);
+
+        // Filter by author "alice" (case-insensitive).
+        modal.query = "alice".to_string();
+        modal.filter();
+        assert_eq!(modal.filtered.len(), 2);
+        assert_eq!(modal.filtered[0], 0);
+        assert_eq!(modal.filtered[1], 2);
+    }
 }

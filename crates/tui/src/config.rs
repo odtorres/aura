@@ -1393,4 +1393,33 @@ indent_size = 2
         assert_eq!(result.indent_style.as_deref(), Some("tab"));
         assert_eq!(result.insert_final_newline, Some(true));
     }
+
+    #[test]
+    fn test_builtin_themes_count() {
+        assert_eq!(BUILTIN_THEMES.len(), 10);
+    }
+
+    #[test]
+    fn test_resolve_all_themes() {
+        let expected = [
+            ("dark", "dark"),
+            ("light", "light"),
+            ("monokai", "monokai"),
+            ("dracula", "dracula"),
+            ("nord", "nord"),
+            ("one-dark", "one-dark"),
+            ("catppuccin", "catppuccin"),
+            ("gruvbox", "gruvbox"),
+            ("tokyo-night", "tokyo-night"),
+            ("solarized-dark", "solarized-dark"),
+        ];
+        for (input, expected_name) in &expected {
+            let theme = resolve_theme(input, None);
+            assert_eq!(
+                theme.name, *expected_name,
+                "resolve_theme({}) should have name {}",
+                input, expected_name
+            );
+        }
+    }
 }

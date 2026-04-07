@@ -272,3 +272,42 @@ fn render_inline_spans(text: &str) -> Vec<Span<'static>> {
 
     spans
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_header() {
+        let lines = render_markdown("# Title", 80);
+        assert_eq!(lines.len(), 1);
+        // The rendered line should contain the title text.
+        let line_str: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(line_str.contains("Title"));
+    }
+
+    #[test]
+    fn test_render_code_block() {
+        let source = "```rust\nfn main() {}\n```\n";
+        let lines = render_markdown(source, 80);
+        // The code block should produce at least one line for "fn main() {}".
+        assert!(!lines.is_empty());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref().to_string()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(all_text.contains("fn main()"));
+    }
+
+    #[test]
+    fn test_render_list() {
+        let source = "- item1\n- item2\n";
+        let lines = render_markdown(source, 80);
+        assert_eq!(lines.len(), 2);
+        let first: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let second: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(first.contains("item1"));
+        assert!(second.contains("item2"));
+    }
+}

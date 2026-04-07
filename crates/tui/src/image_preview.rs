@@ -188,9 +188,9 @@ fn read_jpeg_dimensions(path: &Path) -> Option<(u32, u32)> {
 }
 
 /// Simple base64 encoder (no external dependency).
-fn base64_encode(data: &[u8]) -> String {
+pub(crate) fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
@@ -211,4 +211,48 @@ fn base64_encode(data: &[u8]) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_is_image_file() {
+        assert!(is_image_file(Path::new("photo.png")));
+        assert!(is_image_file(Path::new("photo.jpg")));
+        assert!(is_image_file(Path::new("photo.JPEG")));
+        assert!(is_image_file(Path::new("icon.gif")));
+        assert!(is_image_file(Path::new("logo.webp")));
+        assert!(!is_image_file(Path::new("main.rs")));
+        assert!(!is_image_file(Path::new("plugin.lua")));
+        assert!(!is_image_file(Path::new("noext")));
+    }
+
+    #[test]
+    fn test_base64_encode() {
+        // "Hello" in base64 is "SGVsbG8="
+        let encoded = base64_encode(b"Hello");
+        assert_eq!(encoded, "SGVsbG8=");
+
+        // Empty input.
+        let empty = base64_encode(b"");
+        assert_eq!(empty, "");
+
+        // Single byte.
+        let one = base64_encode(b"A");
+        assert_eq!(one, "QQ==");
+    }
+
+    #[test]
+    fn test_png_magic_bytes() {
+        // A non-PNG file should return None.
+        // Create a temp file with non-PNG content.
+        let tmp = std::env::temp_dir().join("aura_test_not_a_png.bin");
+        std::fs::write(&tmp, b"This is not a PNG file at all").unwrap();
+        let dims = read_png_dimensions(&tmp);
+        assert!(dims.is_none());
+        let _ = std::fs::remove_file(&tmp);
+    }
 }

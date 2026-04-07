@@ -56,8 +56,8 @@ pub fn parse_request_at_cursor(content: &str, cursor_line: usize) -> Option<Http
     // Find the request line (METHOD URL).
     let methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
     let mut request_line_idx = None;
-    for i in block_start..lines.len() {
-        let trimmed = lines[i].trim();
+    for (i, line) in lines.iter().enumerate().skip(block_start) {
+        let trimmed = line.trim();
         if trimmed == "###" && i > block_start {
             break;
         }
@@ -75,10 +75,9 @@ pub fn parse_request_at_cursor(content: &str, cursor_line: usize) -> Option<Http
 
     // Parse headers (lines after request line until empty line or ###).
     let mut headers = Vec::new();
-    let mut body_lines = Vec::new();
+    let mut body_lines: Vec<&str> = Vec::new();
     let mut in_body = false;
-    for i in (req_idx + 1)..lines.len() {
-        let line = lines[i];
+    for line in lines.iter().skip(req_idx + 1) {
         if line.trim() == "###" {
             break;
         }
@@ -222,4 +221,56 @@ pub fn format_response(resp: &HttpResponse) -> String {
     output.push('\n');
     output.push_str(&resp.body);
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_get_request() {
+        let content = "GET https://api.example.com/users\nAuthorization: Bearer token123\n";
+        let req = parse_request_at_cursor(content, 0).unwrap();
+        assert_eq!(req.method, "GET");
+        assert_eq!(req.url, "https://api.example.com/users");
+        assert_eq!(req.headers.len(), 1);
+        assert_eq!(req.headers[0].0, "Authorization");
+        assert_eq!(req.headers[0].1, "Bearer token123");
+        assert!(req.body.is_empty());
+    }
+
+    #[test]
+    fn test_parse_post_with_body() {
+        let content = "POST https://api.example.com/users\nContent-Type: application/json\n\n{\"name\": \"Alice\"}\n";
+        let req = parse_request_at_cursor(content, 0).unwrap();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.url, "https://api.example.com/users");
+        assert_eq!(req.headers.len(), 1);
+        assert_eq!(req.headers[0].0, "Content-Type");
+        assert!(req.body.contains("\"name\""));
+    }
+
+    #[test]
+    fn test_substitute_variables() {
+        std::env::set_var("AURA_TEST_VAR_XYZ", "hello_world");
+        let result = substitute_variables("prefix-{{AURA_TEST_VAR_XYZ}}-suffix");
+        assert_eq!(result, "prefix-hello_world-suffix");
+        std::env::remove_var("AURA_TEST_VAR_XYZ");
+    }
+
+    #[test]
+    fn test_format_response() {
+        let resp = HttpResponse {
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+            body: "{\"id\": 1}".to_string(),
+            time_ms: 42,
+        };
+        let formatted = format_response(&resp);
+        assert!(formatted.contains("HTTP 200 OK"));
+        assert!(formatted.contains("42 ms"));
+        assert!(formatted.contains("Content-Type: application/json"));
+        assert!(formatted.contains("{\"id\": 1}"));
+    }
 }

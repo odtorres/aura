@@ -189,3 +189,94 @@ impl Default for InteractiveRebaseModal {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_commit(short: &str, summary: &str) -> GraphCommit {
+        GraphCommit {
+            hash: format!("{}abcdef1234567890", short),
+            short: short.to_string(),
+            author: "Test".to_string(),
+            summary: summary.to_string(),
+            parents: Vec::new(),
+            timestamp: 0,
+            refs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_generate_todo() {
+        let mut modal = InteractiveRebaseModal::new();
+        modal.entries = vec![
+            RebaseEntry {
+                commit: make_commit("abc1234", "first commit"),
+                action: RebaseAction::Pick,
+            },
+            RebaseEntry {
+                commit: make_commit("def5678", "second commit"),
+                action: RebaseAction::Squash,
+            },
+            RebaseEntry {
+                commit: make_commit("ghi9012", "third commit"),
+                action: RebaseAction::Drop,
+            },
+        ];
+
+        let todo = modal.generate_todo();
+        let lines: Vec<&str> = todo.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("pick abc1234 first commit"));
+        assert!(lines[1].starts_with("squash def5678 second commit"));
+        assert!(lines[2].starts_with("drop ghi9012 third commit"));
+    }
+
+    #[test]
+    fn test_move_up_down() {
+        let mut modal = InteractiveRebaseModal::new();
+        modal.entries = vec![
+            RebaseEntry {
+                commit: make_commit("aaa", "first"),
+                action: RebaseAction::Pick,
+            },
+            RebaseEntry {
+                commit: make_commit("bbb", "second"),
+                action: RebaseAction::Pick,
+            },
+            RebaseEntry {
+                commit: make_commit("ccc", "third"),
+                action: RebaseAction::Pick,
+            },
+        ];
+        modal.selected = 0;
+
+        // Move first entry down.
+        modal.move_down();
+        assert_eq!(modal.selected, 1);
+        assert_eq!(modal.entries[0].commit.short, "bbb");
+        assert_eq!(modal.entries[1].commit.short, "aaa");
+
+        // Move it back up.
+        modal.move_up();
+        assert_eq!(modal.selected, 0);
+        assert_eq!(modal.entries[0].commit.short, "aaa");
+        assert_eq!(modal.entries[1].commit.short, "bbb");
+    }
+
+    #[test]
+    fn test_set_action() {
+        let mut modal = InteractiveRebaseModal::new();
+        modal.entries = vec![RebaseEntry {
+            commit: make_commit("abc", "a commit"),
+            action: RebaseAction::Pick,
+        }];
+        modal.selected = 0;
+
+        modal.set_action(RebaseAction::Reword);
+        assert_eq!(modal.entries[0].action, RebaseAction::Reword);
+
+        modal.set_action(RebaseAction::Fixup);
+        assert_eq!(modal.entries[0].action, RebaseAction::Fixup);
+    }
+}

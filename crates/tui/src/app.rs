@@ -7085,10 +7085,8 @@ impl App {
             return;
         }
 
-        if self.screen_to_cursor(col, row) {
-            if self.mode != Mode::Visual {
-                self.mode = Mode::Visual;
-            }
+        if self.screen_to_cursor(col, row) && self.mode != Mode::Visual {
+            self.mode = Mode::Visual;
         }
     }
 

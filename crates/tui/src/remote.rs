@@ -170,3 +170,43 @@ pub fn ssh_ls(spec: &RemoteSpec, path: &str) -> anyhow::Result<Vec<String>> {
 pub fn is_remote_path(s: &str) -> bool {
     RemoteSpec::parse(s).is_some()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_remote_spec() {
+        let spec = RemoteSpec::parse("user@host:/path/to/file").unwrap();
+        assert_eq!(spec.user, "user");
+        assert_eq!(spec.host, "host");
+        assert_eq!(spec.path, "/path/to/file");
+    }
+
+    #[test]
+    fn test_parse_no_user() {
+        let spec = RemoteSpec::parse("host:/path/to/file").unwrap();
+        assert_eq!(spec.user, "");
+        assert_eq!(spec.host, "host");
+        assert_eq!(spec.path, "/path/to/file");
+    }
+
+    #[test]
+    fn test_is_not_remote() {
+        // Windows drive letter should not be parsed as remote.
+        assert!(!is_remote_path("C:\\path"));
+        // No colon at all.
+        assert!(!is_remote_path("/local/path"));
+    }
+
+    #[test]
+    fn test_local_cache_path() {
+        let spec = RemoteSpec::parse("deploy@server:/etc/nginx/nginx.conf").unwrap();
+        let cache = spec.local_cache_path();
+        let cache_str = cache.to_string_lossy();
+        // Should contain the host name and a flattened filename.
+        assert!(cache_str.contains("aura-ssh"));
+        assert!(cache_str.contains("server"));
+        assert!(cache_str.contains("etc_nginx_nginx.conf"));
+    }
+}
