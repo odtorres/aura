@@ -16,6 +16,12 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
+    // Fill the entire screen with the theme background color.
+    let bg = app.theme.bg;
+    if bg != Color::Reset {
+        frame.render_widget(Block::default().style(Style::default().bg(bg)), area);
+    }
+
     // Layout: optional tab bar + editor area + optional proposal + optional debug panel + optional terminal + status bar + command bar.
     let has_proposal = app.proposal.is_some() && app.mode == Mode::Review;
     let has_terminal = app.terminal().visible;
@@ -5962,6 +5968,8 @@ fn draw_editor_pane(
     is_focused: bool,
 ) {
     let tab_idx = tab_idx.min(app.tabs.count().saturating_sub(1));
+    let theme_bg = app.theme.bg;
+    let theme_fg = app.theme.fg;
     let border_color = if is_focused {
         Color::Cyan
     } else {
@@ -5971,7 +5979,8 @@ fn draw_editor_pane(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .border_style(Style::default().fg(border_color));
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(theme_bg).fg(theme_fg));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
