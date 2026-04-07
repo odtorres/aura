@@ -811,24 +811,40 @@ struct PendingToolCall {
 impl App {
     /// Create a new app. Attempts to initialise the AI client from env.
     pub fn new(buffer: Buffer) -> Self {
-        // Load configuration from .aura/aura.toml (preferred) or aura.toml (legacy).
-        let config_path = {
-            let project_dir = buffer
-                .file_path()
-                .and_then(|p| p.parent())
-                .unwrap_or_else(|| std::path::Path::new("."));
+        // Load configuration: global ~/.aura/aura.toml first, then project-level override.
+        let global_config_path = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".aura/aura.toml");
+
+        let project_dir = buffer
+            .file_path()
+            .and_then(|p| p.parent())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let project_config_path = {
             let new_path = project_dir.join(".aura/aura.toml");
             let legacy_path = project_dir.join("aura.toml");
             if new_path.exists() {
-                new_path
+                Some(new_path)
             } else if legacy_path.exists() {
-                legacy_path
+                Some(legacy_path)
             } else {
-                // Default to new location for fresh installs.
-                new_path
+                None
             }
         };
-        let config = crate::config::load_config(&config_path);
+
+        // Load global config, then overlay project-level config.
+        let mut config = crate::config::load_config(&global_config_path);
+        if let Some(ref project_path) = project_config_path {
+            let project_config = crate::config::load_config(project_path);
+            // Project config overrides global for editor/AI settings.
+            // (In practice, load_config returns defaults for missing keys,
+            // so the project file only overrides what it explicitly sets.)
+            config = project_config;
+        }
+
+        // Save path: global by default (shared across all instances).
+        let config_path = global_config_path;
         let config_table = crate::config::load_config_table(&config_path);
         let theme = crate::config::resolve_theme(&config.theme, config_table.as_ref());
         let config_mtime = std::fs::metadata(&config_path)

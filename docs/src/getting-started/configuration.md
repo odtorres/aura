@@ -1,13 +1,14 @@
 # Configuration
 
-AURA is configured via `aura.toml`. It searches for configuration in:
+AURA is configured via `aura.toml`. It searches for configuration in this order:
 
-1. `.aura/aura.toml` (project directory — preferred)
-2. `./aura.toml` (project root — legacy, still supported)
+1. `~/.aura/aura.toml` (global — shared across all projects)
+2. `.aura/aura.toml` (project directory — overrides global)
+3. `./aura.toml` (project root — legacy, still supported)
 
-If no config file is found, sensible defaults are used. New settings are saved to `.aura/aura.toml`.
+Settings from the **Settings modal** (`Ctrl+,`) are saved to the **global** config (`~/.aura/aura.toml`) so they apply to all AURA instances. Project-level configs can override specific settings.
 
-You can also change common settings interactively with the **Settings modal** (`Ctrl+,` or `:settings`). Changes apply immediately and are **persisted to `.aura/aura.toml`** automatically, so they survive restarts.
+If no config file is found, sensible defaults are used.
 
 ## Full Example
 
