@@ -491,6 +491,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 ### New in v0.4.23
 - **Theme background fix** — themes now fill the entire screen with their background color; editor pane uses theme fg/bg so light themes actually look light
 
+### New in v0.4.24
+- **File tree `d` key fix** — lowercase `d` now works for delete (was only `D`/Delete)
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
