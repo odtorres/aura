@@ -504,6 +504,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - **Sticky scroll** — enclosing scope headers pinned at viewport top when scrolled past (up to 3 levels)
 - **Markdown live preview** — `:preview` splits the editor with rendered markdown (headers, code blocks, lists, tables, inline formatting)
 
+### New in v0.5.1
+- **Improved minimap** — uses Unicode half-block characters (▀▄█) for 2x vertical density, giving a VS Code-like tiny text appearance
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
