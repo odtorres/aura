@@ -441,6 +441,10 @@ pub struct App {
     pub breadcrumbs: Vec<String>,
     /// Whether markdown preview is active for the current tab.
     pub preview_active: bool,
+    /// Inline AI completion (ghost text after cursor). Shown in Insert mode.
+    pub inline_completion: Option<String>,
+    /// Cursor position when the inline completion was generated.
+    pub inline_completion_pos: Option<(usize, usize)>,
     /// Leader key pending (Space was pressed, waiting for next key).
     pub leader_pending: bool,
     /// Pending operator waiting for a motion (operator-pending mode).
@@ -1023,6 +1027,8 @@ impl App {
             zen_mode: false,
             breadcrumbs: Vec::new(),
             preview_active: false,
+            inline_completion: None,
+            inline_completion_pos: None,
             leader_pending: false,
             intent_input: String::new(),
             project_rules: None,
@@ -1426,6 +1432,18 @@ impl App {
             // Poll speculative engine and trigger analysis if idle.
             self.poll_speculative();
             self.maybe_trigger_analysis();
+
+            // In Insert mode, convert ghost suggestions to inline completions.
+            if self.mode == Mode::Insert && self.inline_completion.is_none() {
+                let cursor_pos = (self.tab().cursor.row, self.tab().cursor.col);
+                if let Some(suggestion) = self.current_ghost_suggestion() {
+                    if suggestion.start_line <= cursor_pos.0 && suggestion.end_line >= cursor_pos.0
+                    {
+                        self.inline_completion = Some(suggestion.text.clone());
+                        self.inline_completion_pos = Some(cursor_pos);
+                    }
+                }
+            }
             self.update_edit_predictions();
 
             // Send debounced didChange and re-index if needed (300ms delay).

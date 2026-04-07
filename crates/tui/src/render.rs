@@ -335,6 +335,37 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_ghost_text(frame, app, editor_inner_for_popups, suggestion);
         }
 
+        // Render inline AI completion (ghost text after cursor).
+        if let Some(ref completion) = app.inline_completion {
+            let cursor_row = app.tab().cursor.row;
+            let cursor_col = app.tab().cursor.col;
+            let scroll_row = app.tab().scroll_row;
+            let scroll_col = app.tab().scroll_col;
+            let gutter_w = 6u16;
+            if cursor_row >= scroll_row {
+                let screen_row = (cursor_row - scroll_row) as u16;
+                let screen_col = (cursor_col.saturating_sub(scroll_col) + gutter_w as usize) as u16;
+                let y = editor_inner_for_popups.y + screen_row;
+                let x = editor_inner_for_popups.x + screen_col;
+                if y < editor_inner_for_popups.y + editor_inner_for_popups.height {
+                    let max_w = (editor_inner_for_popups.x + editor_inner_for_popups.width)
+                        .saturating_sub(x) as usize;
+                    let display: String = completion.chars().take(max_w).collect();
+                    if !display.is_empty() {
+                        frame.render_widget(
+                            Paragraph::new(Span::styled(
+                                display,
+                                Style::default()
+                                    .fg(app.theme.ghost)
+                                    .add_modifier(Modifier::ITALIC),
+                            )),
+                            Rect::new(x, y, max_w as u16, 1),
+                        );
+                    }
+                }
+            }
+        }
+
         // Render next-edit prediction markers.
         if !app.edit_predictions().is_empty() {
             draw_edit_predictions(frame, app, editor_inner_for_popups);

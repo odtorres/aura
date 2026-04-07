@@ -3150,6 +3150,30 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
 /// Handle keys in Insert mode.
 pub fn handle_insert(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // Handle inline AI completion: Tab to accept, any other key dismisses.
+    if app.inline_completion.is_some() {
+        if code == KeyCode::Tab {
+            if let Some(completion) = app.inline_completion.take() {
+                let char_idx = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                app.tab_mut().buffer.insert(
+                    char_idx,
+                    &completion,
+                    aura_core::AuthorId::ai("inline"),
+                );
+                // Move cursor past the inserted text.
+                let new_pos = char_idx + completion.len();
+                let new_cursor = app.tab().buffer.char_idx_to_cursor(new_pos);
+                app.tab_mut().cursor = new_cursor;
+                app.tab_mut().mark_highlights_dirty();
+            }
+            app.inline_completion_pos = None;
+            return;
+        }
+        // Any other key dismisses the completion.
+        app.inline_completion = None;
+        app.inline_completion_pos = None;
+    }
+
     // If a tool call is pending approval, intercept Y/N regardless of mode.
     if app.chat_panel.pending_approval.is_some() {
         match code {
