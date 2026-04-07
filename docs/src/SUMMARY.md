@@ -25,6 +25,11 @@
 - [Claude Code Integration](user-guide/claude-code.md)
 - [AI Visor](user-guide/ai-visor.md)
 - [Debugger (DAP)](user-guide/debugger.md)
+- [Zen Mode & UI](user-guide/zen-mode.md)
+- [Markdown Preview](user-guide/markdown-preview.md)
+- [SSH Remote Editing](user-guide/ssh-remote.md)
+- [HTTP Client](user-guide/http-client.md)
+- [Notebook / REPL](user-guide/notebook.md)
 
 # Architecture
 

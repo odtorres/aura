@@ -114,3 +114,55 @@ Plugins implement the `Plugin` trait (Rust) via a Lua bridge. The bridge:
 - Collects return actions and applies them to the editor
 
 See the [Architecture: TUI](../architecture/tui.md) section for details on the internal trait interface.
+
+## WASM Plugins
+
+AURA also supports WebAssembly plugins. Place `.wasm` files in `~/.aura/plugins/` alongside Lua plugins. WASM plugins communicate via stdin/stdout JSON messages using the system's `wasmtime` or `wasmer` runtime.
+
+Requirements: install `wasmtime` or `wasmer` on your system.
+
+## Plugin Marketplace
+
+Browse, install, and manage plugins from within AURA.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `:plugin search [query]` | Open marketplace modal (browse/install/uninstall) |
+| `:plugin install <name>` | Install a plugin from the registry |
+| `:plugin uninstall <name>` | Remove a plugin |
+| `:plugin update` | Update all plugins to latest versions |
+| `:plugin list` | Show installed plugins in status bar |
+
+### Marketplace Modal
+
+| Key | Action |
+|-----|--------|
+| Type | Filter by name/description/author |
+| `Enter` | Install selected plugin |
+| `d` | Uninstall selected plugin |
+| `r` | Refresh registry from remote |
+| `j` / `k` | Navigate |
+| `Esc` | Close |
+
+Plugins are color-coded: green = installed, yellow = update available, white = new.
+
+### Configuration
+
+```toml
+[plugins]
+registry = "https://raw.githubusercontent.com/odtorres/aura-plugins/main/registry.json"
+auto_update = false
+```
+
+### Plugin Metadata
+
+Each plugin can include a `plugin.toml` alongside its `.lua` or `.wasm` file:
+
+```toml
+name = "my-plugin"
+version = "1.0.0"
+description = "What this plugin does"
+author = "Your Name"
+```

@@ -159,7 +159,11 @@ aura-editor/
     │       ├── ai_visor.rs            # Claude Code config browser (.claude/ folder viewer)
     │       ├── project_search.rs     # Project-wide search/replace panel
     │       ├── markdown_preview.rs    # Markdown live preview renderer
+    │       ├── http_client.rs         # Built-in HTTP/REST client for .http files
+    │       ├── image_preview.rs      # Image preview (Kitty graphics protocol)
+    │       ├── markdown_preview.rs    # Markdown live preview renderer
     │       ├── marketplace.rs        # Plugin marketplace (registry, install, uninstall)
+    │       ├── notebook.rs           # Notebook/REPL mode (code cell execution)
     │       ├── rebase_modal.rs      # Interactive rebase UI (visual git rebase -i)
     │       ├── remote.rs            # SSH remote file editing (ssh read/write/ls)
     │       └── acp_server.rs         # ACP (Agent Client Protocol) server

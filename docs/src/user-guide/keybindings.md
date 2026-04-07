@@ -565,6 +565,83 @@ clipboard_sync = true      # Sync yank to system clipboard
 show_minimap = true        # Show code minimap
 ```
 
+## File Tree Actions (focused)
+
+| Key | Action |
+|-----|--------|
+| `r` | Rename file/directory (inline input) |
+| `d` | Delete file/directory (with `y` confirmation) |
+| `a` | New file in selected directory |
+| `A` | New directory in selected directory |
+| `y` | Copy (yank) file |
+| `x` | Cut file |
+| `p` | Paste copied/cut file |
+| `.` | Reveal in Finder / file manager |
+
+## Interactive Rebase Modal
+
+| Key | Action |
+|-----|--------|
+| `p` | Pick (keep commit as-is) |
+| `r` | Reword (edit message) |
+| `e` | Edit (pause for amending) |
+| `s` | Squash (meld with previous) |
+| `f` | Fixup (meld, discard message) |
+| `d` | Drop (remove commit) |
+| `Alt+j` / `Alt+k` | Reorder commit up/down |
+| `w` / `Enter` | Execute rebase |
+| `q` / `Esc` | Abort |
+
+## Plugin Marketplace Modal
+
+| Key | Action |
+|-----|--------|
+| Type | Filter by name/description/author |
+| `Enter` | Install selected plugin |
+| `d` | Uninstall selected plugin |
+| `r` | Refresh registry from remote |
+| `j` / `k` | Navigate |
+| `Esc` | Close |
+
+## New Commands (v0.5+)
+
+| Command | Description |
+|---------|-------------|
+| `:zen` | Toggle zen mode (hide all chrome) |
+| `:preview` / `:md` | Toggle markdown live preview |
+| `:rebase [N]` | Interactive rebase last N commits (default 10) |
+| `:ssh user@host:/path` | Open remote file via SSH |
+| `:plugin search [query]` | Open plugin marketplace |
+| `:plugin install <name>` | Install a plugin |
+| `:plugin uninstall <name>` | Uninstall a plugin |
+| `:plugin update` | Update all plugins |
+| `:plugin list` | List installed plugins |
+| `:refactor <instruction>` | Multi-file AI refactoring |
+| `:review` | AI code review of staged diff |
+| `:export [path]` | Export chat history as markdown |
+| `:http send` | Execute HTTP request at cursor |
+| `:cell run` | Run code cell at cursor |
+| `:cell run-all` | Run all code cells |
+| `:pair on/off` | Toggle AI pair programming |
+| `:keymap vim/emacs/vscode` | Switch keybinding profile |
+
+## Inline AI Completions (Insert Mode)
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Accept inline completion |
+| Any other key | Dismiss completion |
+
+Ghost text appears after the cursor when the AI has a suggestion. Powered by the speculative engine.
+
+## Mouse Actions
+
+| Action | Description |
+|--------|-------------|
+| Drag tab | Reorder tabs by dragging in the tab bar |
+| Click status bar | Open command palette |
+| Click gutter | Toggle breakpoint |
+
 ## Customization
 
 Keybindings can be customized in `aura.toml`. See [Configuration](../getting-started/configuration.md#keybinding-customization).

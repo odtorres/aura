@@ -21,9 +21,22 @@ The file tree shows the directory structure of the current working directory. Wh
 
 When you press `Enter` on a file, it opens in the editor and focus returns to the buffer. Directories expand/collapse in place.
 
+### File Management
+
+| Key | Action |
+|-----|--------|
+| `r` | Rename — type new name, Enter to confirm, Esc to cancel |
+| `d` | Delete — press `y` to confirm |
+| `a` | New file in selected directory |
+| `A` | New directory in selected directory |
+| `y` | Copy (yank) file |
+| `x` | Cut file |
+| `p` | Paste copied/cut file into selected directory |
+| `.` | Reveal in Finder (macOS) / file manager (Linux) / Explorer (Windows) |
+
 ### Visible Files
 
-The file tree shows all files including dotfiles (`.env`, `.gitignore`, `.eslintrc`, etc.). Only noise directories are hidden: `.git`, `.aura`, `target`, `node_modules`.
+The file tree shows all files including dotfiles (`.env`, `.gitignore`, `.eslintrc`, `.aura`, etc.). Only noise directories are hidden: `.git`, `target`, `node_modules`.
 
 ## Fuzzy File Picker
 

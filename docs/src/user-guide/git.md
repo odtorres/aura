@@ -101,6 +101,25 @@ When committing, AURA attaches conversation summaries as `Aura-Conversation` tra
 
 Branch decorations shown as green badges (e.g., `[HEAD -> main, origin/main]`). Merge commits create branch lines in the graph.
 
+## Interactive Rebase
+
+`:rebase` or `:rebase N` opens a visual interactive rebase modal for the last N commits (default 10).
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate commits |
+| `p` | Pick (keep as-is) |
+| `r` | Reword (edit message) |
+| `e` | Edit (pause for amending) |
+| `s` | Squash (meld with previous) |
+| `f` | Fixup (meld, discard message) |
+| `d` | Drop (remove commit) |
+| `Alt+j` / `Alt+k` | Reorder commit |
+| `w` / `Enter` | Execute rebase |
+| `q` / `Esc` | Abort |
+
+Actions are color-coded: green=pick, cyan=reword, yellow=edit, magenta=squash, blue=fixup, red=drop.
+
 ## Branch Management
 
 ### Branch Picker
