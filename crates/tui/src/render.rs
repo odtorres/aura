@@ -2015,8 +2015,8 @@ fn draw_file_tree(frame: &mut Frame, app: &mut App, area: Rect) {
         .skip(scroll_offset)
         .take(visible_height);
     let selected_style = Style::default().add_modifier(Modifier::REVERSED);
-    let dir_style = Style::default().fg(Color::Cyan);
-    let file_style = Style::default().fg(Color::White);
+    let dir_style = Style::default().fg(app.theme.function);
+    let file_style = Style::default().fg(app.theme.fg);
 
     for (i, entry) in entries.enumerate() {
         let y = tree_inner.y + i as u16;
