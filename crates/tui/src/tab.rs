@@ -467,6 +467,24 @@ impl TabManager {
         self.active = new_idx;
     }
 
+    /// Move a tab from one index to another (for drag-to-reorder).
+    pub fn move_tab_to(&mut self, from: usize, to: usize) {
+        let to = to.min(self.tabs.len().saturating_sub(1));
+        if from == to || from >= self.tabs.len() {
+            return;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        // Update active index to follow the moved tab if it was active.
+        if self.active == from {
+            self.active = to;
+        } else if from < self.active && to >= self.active {
+            self.active = self.active.saturating_sub(1);
+        } else if from > self.active && to <= self.active {
+            self.active = (self.active + 1).min(self.tabs.len().saturating_sub(1));
+        }
+    }
+
     /// Move the active tab one position to the left.
     pub fn move_tab_left(&mut self) {
         if self.active > 0 {

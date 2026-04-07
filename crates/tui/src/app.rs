@@ -441,6 +441,8 @@ pub struct App {
     pub breadcrumbs: Vec<String>,
     /// Whether markdown preview is active for the current tab.
     pub preview_active: bool,
+    /// Tab being dragged (index) for mouse drag-to-reorder.
+    pub tab_drag_source: Option<usize>,
     /// Inline AI completion (ghost text after cursor). Shown in Insert mode.
     pub inline_completion: Option<String>,
     /// Cursor position when the inline completion was generated.
@@ -1027,6 +1029,7 @@ impl App {
             zen_mode: false,
             breadcrumbs: Vec::new(),
             preview_active: false,
+            tab_drag_source: None,
             inline_completion: None,
             inline_completion_pos: None,
             leader_pending: false,
@@ -1525,6 +1528,7 @@ impl App {
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             self.panel_resize_drag = None;
+                            self.tab_drag_source = None;
                             // Clear the drag anchor if no selection was made.
                             if !matches!(
                                 self.mode,
@@ -7030,6 +7034,26 @@ impl App {
 
     /// Handle mouse drag — extend visual selection while dragging.
     fn handle_mouse_drag(&mut self, col: u16, row: u16) {
+        // Tab bar drag-to-reorder: detect drag starting in tab bar.
+        let tb = self.tab_bar_rect;
+        if tb.width > 0 && row == tb.y && col >= tb.x && col < tb.x + tb.width {
+            if self.tab_drag_source.is_none() {
+                // Find which tab the drag started on.
+                if let Some(idx) = self.tab_at_column(col) {
+                    self.tab_drag_source = Some(idx);
+                }
+            } else if let Some(src) = self.tab_drag_source {
+                // Move the tab to the position under the cursor.
+                if let Some(dst) = self.tab_at_column(col) {
+                    if dst != src {
+                        self.tabs.move_tab_to(src, dst);
+                        self.tab_drag_source = Some(dst);
+                    }
+                }
+            }
+            return;
+        }
+
         // Only start/extend selection if the drag is within the editor area.
         let r = self.editor_rect;
         let in_editor = r.width > 0
@@ -7043,11 +7067,26 @@ impl App {
         }
 
         if self.screen_to_cursor(col, row) {
-            // Enter Visual mode on the first drag event if not already there.
             if self.mode != Mode::Visual {
                 self.mode = Mode::Visual;
             }
         }
+    }
+
+    /// Find the tab index at a given screen column in the tab bar.
+    fn tab_at_column(&self, col: u16) -> Option<usize> {
+        let mut x = self.tab_bar_rect.x;
+        for (i, tab) in self.tabs.tabs().iter().enumerate() {
+            let title_len = tab.title().len() as u16 + 4; // " title x "
+            if col >= x && col < x + title_len {
+                return Some(i);
+            }
+            x += title_len;
+            if x > self.tab_bar_rect.x + self.tab_bar_rect.width {
+                break;
+            }
+        }
+        None
     }
 
     /// Translate screen coordinates to a buffer position and move the cursor.
