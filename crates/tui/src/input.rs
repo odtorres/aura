@@ -4420,7 +4420,7 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         // :plugin — marketplace commands.
         _ if cmd.trim() == "plugin" || cmd.trim().starts_with("plugin ") => {
-            let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
             let sub = parts.get(1).copied().unwrap_or("list");
             let arg = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
             match sub {
@@ -4495,10 +4495,11 @@ fn execute_command(app: &mut App, cmd: &str) {
                             for inst in &installed {
                                 if let Some(listing) = registry.iter().find(|r| r.name == inst.name)
                                 {
-                                    if !inst.version.is_empty() && inst.version != listing.version {
-                                        if crate::marketplace::install_plugin(listing).is_ok() {
-                                            updated += 1;
-                                        }
+                                    if !inst.version.is_empty()
+                                        && inst.version != listing.version
+                                        && crate::marketplace::install_plugin(listing).is_ok()
+                                    {
+                                        updated += 1;
                                     }
                                 }
                             }
@@ -4513,7 +4514,7 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         // :rebase N — interactive rebase last N commits (default 10).
         _ if cmd.trim() == "rebase" || cmd.trim().starts_with("rebase ") => {
-            let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
             let count = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
             app.open_interactive_rebase(count);
         }

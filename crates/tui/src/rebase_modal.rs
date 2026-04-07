@@ -110,9 +110,9 @@ impl InteractiveRebaseModal {
             })
             .collect();
         self.selected = 0;
-        self.status = format!(
+        self.status =
             "p:pick r:reword e:edit s:squash f:fixup d:drop | Alt+j/k:reorder | w:execute q:abort"
-        );
+                .to_string();
         self.visible = true;
     }
 

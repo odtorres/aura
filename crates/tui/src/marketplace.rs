@@ -271,7 +271,7 @@ pub fn list_installed() -> Vec<InstalledPlugin> {
     let mut plugins = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.extension().is_some_and(|e| e == "lua") {
+        if path.extension().is_none_or(|e| e != "lua") {
             continue;
         }
 
@@ -314,7 +314,7 @@ fn plugins_dir() -> PathBuf {
 }
 
 /// Download a file from a URL to a local path.
-fn download_file(url: &str, dest: &PathBuf) -> anyhow::Result<()> {
+fn download_file(url: &str, dest: &std::path::Path) -> anyhow::Result<()> {
     let output = std::process::Command::new("curl")
         .args(["-sSfL", "--max-time", "30", "-o"])
         .arg(dest.as_os_str())
