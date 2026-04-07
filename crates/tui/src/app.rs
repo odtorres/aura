@@ -439,6 +439,8 @@ pub struct App {
     pub zen_mode: bool,
     /// Breadcrumbs: scope path at the current cursor position.
     pub breadcrumbs: Vec<String>,
+    /// Whether markdown preview is active for the current tab.
+    pub preview_active: bool,
     /// Leader key pending (Space was pressed, waiting for next key).
     pub leader_pending: bool,
     /// Pending operator waiting for a motion (operator-pending mode).
@@ -1020,6 +1022,7 @@ impl App {
             show_authorship: true,
             zen_mode: false,
             breadcrumbs: Vec::new(),
+            preview_active: false,
             leader_pending: false,
             intent_input: String::new(),
             project_rules: None,

@@ -3567,6 +3567,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("commit", "Generate AI commit message", ""),
     ("branches", "Open branch picker", "Ctrl+B"),
     ("zen", "Toggle zen mode", ""),
+    ("preview", "Toggle markdown preview", ""),
     ("graph", "Visual git graph", "Ctrl+Shift+G"),
     ("rebase", "Interactive rebase", ""),
     ("ssh", "Open remote file via SSH", ""),
@@ -4415,6 +4416,14 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "branches" | "br" => {
             app.open_branch_picker();
+        }
+        "preview" | "md" => {
+            app.preview_active = !app.preview_active;
+            if app.preview_active {
+                app.set_status("Markdown preview on");
+            } else {
+                app.set_status("Markdown preview off");
+            }
         }
         "zen" => {
             app.zen_mode = !app.zen_mode;

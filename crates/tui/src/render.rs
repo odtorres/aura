@@ -269,7 +269,24 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 && !app.file_tree_focused
                 && !app.source_control_focused
                 && !app.conversation_history_focused;
-            draw_editor_pane(frame, app, editor_area, app.tabs.active_index(), is_focused);
+
+            // Markdown preview: split editor area 50/50 with preview on the right.
+            if app.preview_active {
+                let preview_split = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(editor_area);
+                draw_editor_pane(
+                    frame,
+                    app,
+                    preview_split[0],
+                    app.tabs.active_index(),
+                    is_focused,
+                );
+                draw_markdown_preview(frame, app, preview_split[1]);
+            } else {
+                draw_editor_pane(frame, app, editor_area, app.tabs.active_index(), is_focused);
+            }
         }
 
         if has_proposal {
@@ -4691,6 +4708,32 @@ fn draw_git_graph_modal(frame: &mut Frame, modal: &crate::git_graph::GitGraphMod
 }
 
 /// Draw the interactive rebase modal.
+/// Draw the markdown preview pane.
+fn draw_markdown_preview(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Preview ")
+        .border_style(Style::default().fg(Color::Magenta))
+        .style(Style::default().bg(app.theme.bg).fg(app.theme.fg));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let source = app.tab().buffer.rope().to_string();
+    let rendered = crate::markdown_preview::render_markdown(&source, inner.width as usize);
+
+    // Scroll based on editor scroll position.
+    let scroll = app.tab().scroll_row;
+    let visible = inner.height as usize;
+
+    for (i, line) in rendered.iter().skip(scroll).take(visible).enumerate() {
+        let y = inner.y + i as u16;
+        frame.render_widget(
+            Paragraph::new(line.clone()),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+    }
+}
+
 fn draw_rebase_modal(
     frame: &mut Frame,
     modal: &crate::rebase_modal::InteractiveRebaseModal,
