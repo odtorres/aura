@@ -8751,6 +8751,33 @@ impl App {
 
     /// Open a file by path in a new tab, or switch to an existing tab.
     pub fn open_file(&mut self, path: PathBuf) -> Result<(), String> {
+        // If this is an image file, show preview instead of loading as text.
+        if crate::image_preview::is_image_file(&path) {
+            if let Some(info) = crate::image_preview::ImageInfo::from_path(&path) {
+                let dims = info.dimensions_display();
+                let size = info.size_display();
+                self.set_status(format!(
+                    "Image: {} {} — {} — {}",
+                    info.format,
+                    dims,
+                    size,
+                    path.display()
+                ));
+                // Attempt to render via Kitty graphics protocol.
+                if crate::image_preview::supports_kitty_graphics() {
+                    let area = self.editor_rect;
+                    crate::image_preview::render_kitty_image(
+                        &path,
+                        area.width.saturating_sub(2),
+                        area.height.saturating_sub(2),
+                    );
+                }
+            } else {
+                self.set_status(format!("Image: {}", path.display()));
+            }
+            return Ok(());
+        }
+
         let conversation_store = self.conversation_store.as_ref();
         let theme = self.theme.clone();
         let was_new = self.tabs.open_or_switch(&path, || {

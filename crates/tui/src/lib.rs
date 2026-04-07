@@ -27,6 +27,7 @@ pub mod git;
 pub mod git_graph;
 pub mod help;
 pub mod highlight;
+pub mod image_preview;
 pub mod input;
 pub mod lsp;
 pub mod markdown_preview;
