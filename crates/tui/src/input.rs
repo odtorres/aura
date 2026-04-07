@@ -1159,8 +1159,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     app.set_status("Rename: type new name, Enter to confirm, Esc to cancel");
                 }
             }
-            // d / Delete — delete selected file/directory (with y confirmation).
-            KeyCode::Char('D') | KeyCode::Delete => {
+            // d / D / Delete — delete selected file/directory (with y confirmation).
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
                 if let Some((path, is_dir, name)) = selected_entry {
                     let kind = if is_dir { "directory" } else { "file" };
                     app.set_status(format!("Delete {kind} '{name}'? (y to confirm)"));
