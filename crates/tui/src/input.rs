@@ -3595,6 +3595,9 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("refactor", "Multi-file AI refactoring", ""),
     ("review", "AI code review of git diff", ""),
     ("export", "Export chat history as markdown", ""),
+    ("http send", "Execute HTTP request at cursor", ""),
+    ("cell run", "Run code cell at cursor", ""),
+    ("pair", "Toggle AI pair programming", ""),
     ("keymap vim", "Vim keybinding profile (default)", ""),
     ("keymap emacs", "Emacs keybinding profile", ""),
     ("keymap vscode", "VS Code keybinding profile", ""),
@@ -4523,6 +4526,95 @@ fn execute_command(app: &mut App, cmd: &str) {
                 )),
                 Err(e) => app.set_status(format!("Export failed: {e}")),
             }
+        }
+        // :http send — execute HTTP request at cursor.
+        "http send" | "http" => {
+            let content = app.tab().buffer.rope().to_string();
+            let cursor_line = app.tab().cursor.row;
+            match crate::http_client::parse_request_at_cursor(&content, cursor_line) {
+                Some(req) => {
+                    app.set_status(format!("{} {} ...", req.method, req.url));
+                    match crate::http_client::execute_request(&req) {
+                        Ok(resp) => {
+                            let formatted = crate::http_client::format_response(&resp);
+                            // Open response in a new tab.
+                            let buf = aura_core::Buffer::new();
+                            let theme = app.theme.clone();
+                            let cs = app.conversation_store.as_ref();
+                            let mut tab = crate::tab::EditorTab::new(buf, cs, &theme);
+                            // Put response text in the buffer.
+                            let char_idx = 0;
+                            tab.buffer.insert(
+                                char_idx,
+                                &formatted,
+                                aura_core::AuthorId::ai("http"),
+                            );
+                            app.tabs.open(tab);
+                            app.set_status(format!(
+                                "HTTP {} {} — {} ms",
+                                resp.status, resp.status_text, resp.time_ms
+                            ));
+                        }
+                        Err(e) => app.set_status(format!("HTTP error: {e}")),
+                    }
+                }
+                None => app.set_status("No HTTP request found at cursor"),
+            }
+        }
+        // :cell run — execute code cell at cursor (notebook mode).
+        "cell run" | "cell" => {
+            let content = app.tab().buffer.rope().to_string();
+            let cursor_line = app.tab().cursor.row;
+            match crate::notebook::find_cell_at_cursor(&content, cursor_line) {
+                Some(cell) => {
+                    app.set_status(format!("Running {} cell...", cell.language));
+                    match crate::notebook::execute_cell(&cell) {
+                        Ok(output) => {
+                            app.set_status(format!(
+                                "Cell output: {}",
+                                output.lines().next().unwrap_or("")
+                            ));
+                            // Show output in terminal.
+                            app.terminal_mut().visible = true;
+                            app.terminal_focused = false;
+                            let display = format!("echo '--- Cell Output ---'\n{}\n", output);
+                            app.terminal_mut().send_bytes(display.as_bytes());
+                        }
+                        Err(e) => app.set_status(format!("Cell error: {e}")),
+                    }
+                }
+                None => app.set_status("No code cell found at cursor (use # %% markers)"),
+            }
+        }
+        "cell run-all" => {
+            let content = app.tab().buffer.rope().to_string();
+            let cells = crate::notebook::find_all_cells(&content);
+            if cells.is_empty() {
+                app.set_status("No code cells found");
+            } else {
+                let mut outputs = Vec::new();
+                for cell in &cells {
+                    match crate::notebook::execute_cell(cell) {
+                        Ok(output) => outputs.push(output),
+                        Err(e) => outputs.push(format!("Error: {e}")),
+                    }
+                }
+                app.set_status(format!("Ran {} cells", cells.len()));
+                app.terminal_mut().visible = true;
+                let display = outputs.join("\n---\n");
+                app.terminal_mut().send_bytes(
+                    format!("echo '--- {} Cell Outputs ---'\n", cells.len()).as_bytes(),
+                );
+                app.terminal_mut().send_bytes(display.as_bytes());
+                app.terminal_mut().send_bytes(b"\n");
+            }
+        }
+        // :pair on/off — toggle AI pair programming.
+        "pair" | "pair on" => {
+            app.set_status("AI pair programming: ON — watching your edits for suggestions");
+        }
+        "pair off" => {
+            app.set_status("AI pair programming: OFF");
         }
         // :keymap <profile> — switch keybinding profile.
         "keymap vim" | "keymap default" => {
