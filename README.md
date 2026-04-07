@@ -488,6 +488,9 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 - Themes apply live and persist to `aura.toml`
 - Use Left/Right arrows or Enter to cycle through themes
 
+### New in v0.4.23
+- **Theme background fix** — themes now fill the entire screen with their background color; editor pane uses theme fg/bg so light themes actually look light
+
 ## Documentation
 
 - [User Guide & Documentation](https://odtorres.github.io/aura/) — mdBook documentation site
