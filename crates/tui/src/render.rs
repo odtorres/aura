@@ -604,37 +604,55 @@ fn draw_minimap(
             .map(|s| s.as_str())
             .unwrap_or("");
 
-        // Compress the line: skip leading whitespace proportionally, show condensed chars.
+        // Use block elements to represent code density — each column shows
+        // whether that position has a non-space character, giving a "tiny text" look.
         let trimmed = line_text.trim_start();
         let indent = line_text.len().saturating_sub(trimmed.len());
-        let indent_display = (indent / 2).min(content_w); // 2:1 compression for indent
+        let indent_cols = (indent / 4).min(content_w); // 4:1 compression for indent
 
-        // Build the display string: indent spaces + condensed content.
-        let remaining_w = content_w.saturating_sub(indent_display);
-        let condensed: String = trimmed.chars().take(remaining_w).collect();
+        // Also get the next source line for 2-line-per-row half-block rendering.
+        let next_line = source_line + 1;
+        let next_text = buffer_lines
+            .get(next_line)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let next_trimmed = next_text.trim_start();
+        let next_indent = next_text.len().saturating_sub(next_trimmed.len());
+        let next_indent_cols = (next_indent / 4).min(content_w);
 
         // Dim the text for minimap appearance.
         let text_fg = if in_viewport {
-            Color::Rgb(120, 120, 130)
+            Color::Rgb(140, 140, 155)
         } else {
-            Color::Rgb(80, 80, 85)
+            Color::Rgb(90, 90, 100)
+        };
+        let dim_fg = if in_viewport {
+            Color::Rgb(100, 100, 110)
+        } else {
+            Color::Rgb(60, 60, 65)
         };
 
-        let indent_str: String = " ".repeat(indent_display);
-        let pad_len = content_w
-            .saturating_sub(indent_display)
-            .saturating_sub(condensed.len());
-        let pad: String = " ".repeat(pad_len);
+        // Build the minimap row using half-block characters.
+        let mut spans: Vec<Span> = Vec::new();
+        for col in 0..content_w {
+            let top_has_char = col >= indent_cols
+                && col < indent_cols + trimmed.len() / 2 + 1
+                && !trimmed.is_empty();
+            let bot_has_char = col >= next_indent_cols
+                && col < next_indent_cols + next_trimmed.len() / 2 + 1
+                && !next_trimmed.is_empty();
+
+            let (ch, fg) = match (top_has_char, bot_has_char) {
+                (true, true) => ("█", text_fg),
+                (true, false) => ("▀", text_fg),
+                (false, true) => ("▄", dim_fg),
+                (false, false) => (" ", dim_fg),
+            };
+            spans.push(Span::styled(ch, Style::default().fg(fg).bg(bg)));
+        }
 
         let cell_area = Rect::new(area.x, area.y + r as u16, content_w as u16, 1);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(indent_str, Style::default().bg(bg)),
-                Span::styled(condensed, Style::default().fg(text_fg).bg(bg)),
-                Span::styled(pad, Style::default().bg(bg)),
-            ])),
-            cell_area,
-        );
+        frame.render_widget(Paragraph::new(Line::from(spans)), cell_area);
 
         // Scrollbar column: filled block for viewport, thin for rest.
         let has_marker = marker_map.get(&source_line);
