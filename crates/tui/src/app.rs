@@ -7272,13 +7272,9 @@ impl App {
         } else if self.chat_panel.visible && point_in(self.chat_panel_rect) {
             // Scroll the chat panel.
             if up {
-                for _ in 0..scroll_lines {
-                    self.chat_panel.scroll_up();
-                }
+                self.chat_panel.page_up(scroll_lines);
             } else {
-                for _ in 0..scroll_lines {
-                    self.chat_panel.scroll_down();
-                }
+                self.chat_panel.page_down(scroll_lines);
             }
         } else if self.conversation_history.visible && point_in(self.conv_history_rect) {
             // Scroll the conversation history panel.

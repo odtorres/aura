@@ -1622,10 +1622,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.chat_panel.input_end();
             }
             KeyCode::Up if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.chat_panel.scroll_up();
+                app.chat_panel.page_up(3);
             }
             KeyCode::Down if modifiers.contains(KeyModifiers::CONTROL) => {
-                app.chat_panel.scroll_down();
+                app.chat_panel.page_down(3);
             }
             KeyCode::Up => {
                 let wrap_w = app.chat_panel_rect.width.saturating_sub(4) as usize;
