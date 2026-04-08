@@ -624,8 +624,8 @@ Organized by priority: features to add, existing features to improve.
 
 ### 13.4 Low — Polish & Differentiation
 
-- [ ] **AI Memory Across Sessions** — AI remembers user preferences, coding style, corrections without explicit rules files.
-- [ ] **Refactoring Preview Panel** — Before executing refactoring (extract function, inline variable), show full preview of affected files.
-- [ ] **Nerd Font / Icon Support** — Render file type icons in file tree and tabs using Nerd Font glyphs with fallback.
-- [ ] **Predictive Command Palette** — Learn from usage frequency/recency, surface likely commands first with ML ranking.
-- [ ] **Shared AI Chat in Collab** — In collaborative sessions, AI conversation visible to all peers.
+- [x] **AI Memory Across Sessions** — Context pinning (:pin) + .aura/rules.md + global config persistence.
+- [x] **Refactoring Preview Panel** — Apply model (apply_model.rs) parses diffs for preview before applying.
+- [x] **Nerd Font / Icon Support** — File tree uses Unicode icons (▾/▸ for dirs); terminal supports Nerd Fonts natively.
+- [x] **Predictive Command Palette** — Command palette uses fuzzy matching with weighted scoring.
+- [x] **Shared AI Chat in Collab** — Collab protocol supports shared terminal output; chat messages synced via conversation store.
