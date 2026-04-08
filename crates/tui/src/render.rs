@@ -1714,7 +1714,69 @@ fn draw_debug_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw the embedded PTY terminal pane.
+/// Draw a single terminal pane (used in split mode).
+fn draw_single_terminal(frame: &mut Frame, app: &App, area: Rect, idx: usize, is_active: bool) {
+    if idx >= app.terminals.len() {
+        return;
+    }
+    let term = &app.terminals[idx];
+    let label = if term.label.is_empty() {
+        format!("Terminal {}", idx + 1)
+    } else {
+        term.label.clone()
+    };
+    let border_color = if is_active && app.terminal_focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", label))
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let (snapshot, cursor_row, cursor_col) = term.snapshot();
+    let h = inner.height as usize;
+    let w = inner.width as usize;
+
+    for (row_idx, row) in snapshot.iter().take(h).enumerate() {
+        let y = inner.y + row_idx as u16;
+        let line_text: String = row.iter().map(|cell| cell.ch).take(w).collect();
+        frame.render_widget(
+            Paragraph::new(line_text).style(Style::default().fg(Color::White)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+    }
+
+    // Draw cursor if this is the active pane.
+    if is_active && app.terminal_focused && cursor_row < h && cursor_col < w {
+        let cursor_y = inner.y + cursor_row as u16;
+        let cursor_x = inner.x + cursor_col as u16;
+        frame.render_widget(
+            Paragraph::new(" ").style(Style::default().bg(Color::White).fg(Color::Black)),
+            Rect::new(cursor_x, cursor_y, 1, 1),
+        );
+    }
+}
+
 fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
+    // If split mode, draw two terminals side by side.
+    if app.terminal_split && app.terminals.len() >= 2 {
+        let hsplit = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        draw_single_terminal(frame, app, hsplit[0], app.active_terminal, true);
+        draw_single_terminal(frame, app, hsplit[1], app.terminal_split_idx, false);
+        return;
+    }
+
     let focused = app.terminal_focused;
     let multi_tab = app.terminals.len() > 1;
 

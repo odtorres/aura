@@ -560,6 +560,10 @@ pub struct App {
     pub terminals: Vec<EmbeddedTerminal>,
     /// Index of the active terminal tab.
     pub active_terminal: usize,
+    /// Whether the terminal area is split (show 2 terminals side-by-side).
+    pub terminal_split: bool,
+    /// Index of the secondary terminal in split mode.
+    pub terminal_split_idx: usize,
     /// When `true`, keystrokes are routed to the terminal input instead of the
     /// editor.
     pub terminal_focused: bool,
@@ -1102,6 +1106,8 @@ impl App {
                 vec![t]
             },
             active_terminal: 0,
+            terminal_split: false,
+            terminal_split_idx: 0,
             terminal_focused: false,
             file_tree_focused: false,
             file_tree_input: None,

@@ -5069,6 +5069,24 @@ fn execute_command(app: &mut App, cmd: &str) {
         "term prev" => {
             app.prev_terminal_tab();
         }
+        // :term split — split terminal pane (show 2 terminals side by side).
+        "term split" | "term vsplit" => {
+            if app.terminals.len() < 2 {
+                // Create a second terminal if only one exists.
+                app.new_terminal_tab();
+            }
+            app.terminal_split = true;
+            // Show the first two terminals side by side.
+            app.active_terminal = 0;
+            app.terminal_split_idx = 1.min(app.terminals.len().saturating_sub(1));
+            app.terminal_mut().visible = true;
+            app.terminal_focused = true;
+            app.set_status("Terminal split — Ctrl+Shift+Arrow to switch panes");
+        }
+        "term unsplit" => {
+            app.terminal_split = false;
+            app.set_status("Terminal split off");
+        }
         // :tree — toggle the file tree sidebar.
         "tree" => {
             app.file_tree.toggle();
