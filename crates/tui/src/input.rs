@@ -3599,6 +3599,12 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("cell run", "Run code cell at cursor", ""),
     ("pair", "Toggle AI pair programming", ""),
     ("pr-review", "AI review a GitHub pull request", ""),
+    ("checkpoint list", "List AI checkpoints", ""),
+    ("checkpoint rollback", "Rollback to AI checkpoint", ""),
+    ("pin", "Pin current file as AI context", ""),
+    ("pin note", "Pin a note as AI context", ""),
+    ("unpin", "Remove a pinned context item", ""),
+    ("pins", "List pinned context items", ""),
     ("bookmark add", "Add bookmark at cursor", ""),
     ("bookmark list", "List all bookmarks", ""),
     ("bookmark jump", "Jump to bookmark", ""),
@@ -4682,6 +4688,107 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.set_status("AI pair programming: OFF");
         }
         // :bookmark — named bookmark system.
+        // :checkpoint — AI checkpoint management.
+        "checkpoint list" | "checkpoints" => {
+            let cps = app.checkpoints.list();
+            if cps.is_empty() {
+                app.set_status("No AI checkpoints yet");
+            } else {
+                let items: Vec<String> = cps
+                    .iter()
+                    .take(5)
+                    .map(|c| {
+                        format!(
+                            "#{} {} ({})",
+                            c.id,
+                            c.description,
+                            crate::checkpoints::CheckpointManager::age_display(c)
+                        )
+                    })
+                    .collect();
+                app.set_status(format!("Checkpoints: {}", items.join(" | ")));
+            }
+        }
+        _ if cmd.trim().starts_with("checkpoint rollback ") => {
+            let id_str = cmd
+                .trim()
+                .strip_prefix("checkpoint rollback ")
+                .unwrap_or("")
+                .trim();
+            if let Ok(id) = id_str.parse::<usize>() {
+                if let Some(cp) = app.checkpoints.get(id).cloned() {
+                    // Restore the file content.
+                    if let Err(e) = app.open_file(cp.file.clone()) {
+                        app.set_status(format!("Cannot open file: {e}"));
+                    } else {
+                        let char_count = app.tab().buffer.rope().len_chars();
+                        if char_count > 0 {
+                            app.tab_mut().buffer.delete(
+                                0,
+                                char_count,
+                                aura_core::AuthorId::human(),
+                            );
+                        }
+                        app.tab_mut()
+                            .buffer
+                            .insert(0, &cp.content, aura_core::AuthorId::human());
+                        app.tab_mut().cursor.row = cp.cursor.0;
+                        app.tab_mut().cursor.col = cp.cursor.1;
+                        app.clamp_cursor();
+                        app.set_status(format!(
+                            "Rolled back to checkpoint #{}: {}",
+                            id, cp.description
+                        ));
+                    }
+                } else {
+                    app.set_status(format!("Checkpoint #{} not found", id));
+                }
+            } else {
+                app.set_status("Usage: :checkpoint rollback <id>");
+            }
+        }
+        // :pin — context pinning for AI.
+        "pin" => {
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                app.context_pins.pin_file(path.clone());
+                app.set_status(format!("Pinned: {}", path.display()));
+            } else {
+                app.set_status("No file to pin");
+            }
+        }
+        _ if cmd.trim().starts_with("pin note ") => {
+            let note = cmd.trim().strip_prefix("pin note ").unwrap_or("").trim();
+            if note.is_empty() {
+                app.set_status("Usage: :pin note <text>");
+            } else {
+                app.context_pins.pin_note(note.to_string());
+                app.set_status(format!("Pinned note: {}", note));
+            }
+        }
+        "pins" | "pin list" => {
+            let labels = app.context_pins.list_labels();
+            if labels.is_empty() {
+                app.set_status("No pinned context");
+            } else {
+                app.set_status(format!("Pins: {}", labels.join(", ")));
+            }
+        }
+        _ if cmd.trim().starts_with("unpin ") => {
+            let idx_str = cmd.trim().strip_prefix("unpin ").unwrap_or("").trim();
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                if app.context_pins.unpin(idx) {
+                    app.set_status(format!("Unpinned item {}", idx));
+                } else {
+                    app.set_status(format!("Invalid pin index: {}", idx));
+                }
+            } else {
+                app.set_status("Usage: :unpin <index>");
+            }
+        }
+        "unpin all" => {
+            app.context_pins.clear();
+            app.set_status("All pins cleared");
+        }
         _ if cmd.trim().starts_with("bookmark ") || cmd.trim() == "bookmark" => {
             let parts: Vec<&str> = cmd.split_whitespace().collect();
             let sub = parts.get(1).copied().unwrap_or("list");

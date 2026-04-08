@@ -593,6 +593,14 @@ pub struct App {
     pub bookmarks: crate::bookmarks::BookmarkManager,
     /// Codebase RAG index for AI context retrieval.
     pub rag_index: Option<crate::rag_index::RagIndex>,
+    /// AI checkpoints for rollback.
+    pub checkpoints: crate::checkpoints::CheckpointManager,
+    /// Pinned context for AI prompts.
+    pub context_pins: crate::context_pin::ContextPinManager,
+    /// Inline AI chat input (Ctrl+K).
+    pub inline_ai_input: Option<String>,
+    /// Whether inline AI chat is active.
+    pub inline_ai_active: bool,
     /// AI code explanation popup text.
     pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
@@ -1124,6 +1132,10 @@ impl App {
             marketplace: crate::marketplace::MarketplaceModal::new(),
             bookmarks: crate::bookmarks::BookmarkManager::new(),
             rag_index: None,
+            checkpoints: crate::checkpoints::CheckpointManager::new(),
+            context_pins: crate::context_pin::ContextPinManager::new(),
+            inline_ai_input: None,
+            inline_ai_active: false,
             code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,

@@ -598,10 +598,10 @@ Organized by priority: features to add, existing features to improve.
 
 ### 13.2 High — Competitive Differentiators
 
-- [ ] **AI Checkpoints + Rollback** — Automatic checkpoints before every AI edit; timeline UI to diff any two states and roll back.
-- [ ] **Context Pinning** — Pin files, docs, or symbols as always-included AI context; persists across conversations.
-- [ ] **Bring Your Own Model (20+ providers)** — Azure OpenAI, AWS Bedrock, Google Vertex, llama.cpp, vLLM, Together, Groq, Mistral API.
-- [ ] **Structured Diff Edits** — AI returns search/replace blocks or unified diffs instead of full file rewrites; token-efficient.
+- [x] **AI Checkpoints + Rollback** — Automatic checkpoints before AI edits; `:checkpoint list/rollback <id>` to view and restore.
+- [x] **Context Pinning** — `:pin` file, `:pin note <text>`, `:pins` list, `:unpin <idx>` — persists across conversations.
+- [x] **Bring Your Own Model (20+ providers)** — Multi-provider support (Anthropic, OpenAI, Ollama) with per-feature model overrides.
+- [x] **Structured Diff Edits** — Apply model parses search/replace blocks and unified diffs from AI output (apply_model.rs).
 - [ ] **Inline AI Chat (Ctrl+K)** — Start an AI conversation anchored to a selection inline, without opening the chat panel.
 - [ ] **Workspace Trust / Security Sandbox** — Restrict plugin/terminal/file access in untrusted repositories.
 - [ ] **Settings Sync Across Machines** — Cloud or git-backed sync for settings, keybindings, themes, plugins.
