@@ -1038,6 +1038,40 @@ pub fn save_config(path: &Path, config: &AuraConfig) {
         );
     }
 
+    // [ai]
+    {
+        let ai = ensure_table(&mut table, "ai");
+        ai.insert(
+            "provider".into(),
+            toml::Value::String(config.ai.provider.clone()),
+        );
+        ai.insert("model".into(), toml::Value::String(config.ai.model.clone()));
+        if !config.ai.commit_model.is_empty() {
+            ai.insert(
+                "commit_model".into(),
+                toml::Value::String(config.ai.commit_model.clone()),
+            );
+        }
+        if !config.ai.speculative_model.is_empty() {
+            ai.insert(
+                "speculative_model".into(),
+                toml::Value::String(config.ai.speculative_model.clone()),
+            );
+        }
+        if !config.ai.agent_model.is_empty() {
+            ai.insert(
+                "agent_model".into(),
+                toml::Value::String(config.ai.agent_model.clone()),
+            );
+        }
+        if !config.ai.chat_model.is_empty() {
+            ai.insert(
+                "chat_model".into(),
+                toml::Value::String(config.ai.chat_model.clone()),
+            );
+        }
+    }
+
     // theme (top-level key)
     table.insert("theme".into(), toml::Value::String(config.theme.clone()));
 
