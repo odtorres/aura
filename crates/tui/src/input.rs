@@ -3598,6 +3598,7 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("http send", "Execute HTTP request at cursor", ""),
     ("cell run", "Run code cell at cursor", ""),
     ("pair", "Toggle AI pair programming", ""),
+    ("pr-review", "AI review a GitHub pull request", ""),
     ("bookmark add", "Add bookmark at cursor", ""),
     ("bookmark list", "List all bookmarks", ""),
     ("bookmark jump", "Jump to bookmark", ""),
@@ -4522,6 +4523,44 @@ fn execute_command(app: &mut App, cmd: &str) {
                 }
             } else {
                 app.set_status("Not a git repository");
+            }
+        }
+        // :pr-review <number> — AI review a GitHub pull request.
+        _ if cmd.trim().starts_with("pr-review ") => {
+            let pr_num = cmd.trim().strip_prefix("pr-review ").unwrap_or("").trim();
+            if pr_num.is_empty() {
+                app.set_status("Usage: :pr-review <PR number>");
+            } else {
+                app.set_status(format!("Fetching PR #{} diff...", pr_num));
+                // Use gh CLI to get PR diff.
+                let output = std::process::Command::new("gh")
+                    .args(["pr", "diff", pr_num, "--patch"])
+                    .output();
+                match output {
+                    Ok(out) if out.status.success() => {
+                        let diff = String::from_utf8_lossy(&out.stdout);
+                        if diff.len() > 100_000 {
+                            app.set_status("PR diff too large (>100KB). Try a smaller PR.");
+                        } else {
+                            let prompt = format!(
+                                "Review this pull request diff. Provide:\n1. Summary of changes\n2. Potential bugs or issues\n3. Code quality suggestions\n4. Security concerns\n\n```diff\n{}\n```",
+                                diff
+                            );
+                            app.chat_panel.visible = true;
+                            app.chat_panel_focused = true;
+                            app.chat_panel.input = prompt;
+                            app.send_chat_message();
+                            app.set_status(format!("AI reviewing PR #{}...", pr_num));
+                        }
+                    }
+                    Ok(out) => {
+                        let err = String::from_utf8_lossy(&out.stderr);
+                        app.set_status(format!("gh pr diff failed: {}", err.trim()));
+                    }
+                    Err(e) => {
+                        app.set_status(format!("gh not found: {e}. Install GitHub CLI."));
+                    }
+                }
             }
         }
         // :export [path] — export chat conversation as markdown.

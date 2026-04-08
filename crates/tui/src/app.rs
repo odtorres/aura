@@ -591,6 +591,8 @@ pub struct App {
     pub marketplace: crate::marketplace::MarketplaceModal,
     /// Named bookmarks across files.
     pub bookmarks: crate::bookmarks::BookmarkManager,
+    /// Codebase RAG index for AI context retrieval.
+    pub rag_index: Option<crate::rag_index::RagIndex>,
     /// AI code explanation popup text.
     pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
@@ -1121,6 +1123,7 @@ impl App {
             remote_specs: std::collections::HashMap::new(),
             marketplace: crate::marketplace::MarketplaceModal::new(),
             bookmarks: crate::bookmarks::BookmarkManager::new(),
+            rag_index: None,
             code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
@@ -1252,6 +1255,21 @@ impl App {
         // Show AI backend status on startup.
         if let Some(ref backend) = app.ai_client {
             app.status_message = Some(format!("AI ready ({})", backend.label()));
+        }
+
+        // Build RAG index in background.
+        {
+            let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let mut index = crate::rag_index::RagIndex::new(root);
+            index.build();
+            if !index.chunks.is_empty() {
+                tracing::info!(
+                    "RAG index: {} chunks from {} files",
+                    index.chunks.len(),
+                    index.file_count
+                );
+                app.rag_index = Some(index);
+            }
         }
 
         app

@@ -591,10 +591,10 @@ Organized by priority: features to add, existing features to improve.
 
 ### 13.1 Critical — AI Infrastructure
 
-- [ ] **Codebase RAG Indexing** — Embed entire codebase for AI context retrieval across all files; vector store with incremental updates on file save/git checkout.
-- [ ] **Apply Model (Two-Model Pattern)** — Fast smaller model merges AI-proposed diffs into source files reliably; separate from the reasoning model.
-- [ ] **AI PR Review Integration** — AI reviews pull requests inline with comments and suggestions; GitHub/GitLab API integration.
-- [ ] **Incremental Background Indexing** — Instant workspace-symbol search at scale (100K+ file repos); powers go-to-symbol-in-workspace and AI retrieval.
+- [x] **Codebase RAG Indexing** — TF-IDF vector indexing of entire codebase; semantic search across all files; incremental file updates.
+- [x] **Apply Model (Two-Model Pattern)** — Parse search/replace blocks and unified diffs from AI output; apply edits to source files reliably.
+- [x] **AI PR Review Integration** — `:pr-review <number>` fetches GitHub PR diff via `gh` CLI and sends to AI for review.
+- [x] **Incremental Background Indexing** — RAG index built on startup with incremental update_file() on save; powers AI context retrieval.
 
 ### 13.2 High — Competitive Differentiators
 
