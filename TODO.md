@@ -582,3 +582,50 @@ Organized by priority: features to add, existing features to improve.
 - [x] **Cross-file rename** — Use LSP workspace edit for rename refactoring across multiple files.
 - [x] **Auto conversation compaction** — Automatically compact long AI conversations using summarization.
 - [x] **Split pane sync** — Full scroll position synchronization between split panes in follow mode.
+---
+
+## Phase 13: Next-Gen AI & Editor Features (v0.9 → v1.0)
+
+> Research-driven roadmap based on 2025-2026 editor landscape gap analysis.
+> Benchmarked against: Cursor, Windsurf, Zed, VS Code, JetBrains, Continue.dev, Aider.
+
+### 13.1 Critical — AI Infrastructure
+
+- [ ] **Codebase RAG Indexing** — Embed entire codebase for AI context retrieval across all files; vector store with incremental updates on file save/git checkout.
+- [ ] **Apply Model (Two-Model Pattern)** — Fast smaller model merges AI-proposed diffs into source files reliably; separate from the reasoning model.
+- [ ] **AI PR Review Integration** — AI reviews pull requests inline with comments and suggestions; GitHub/GitLab API integration.
+- [ ] **Incremental Background Indexing** — Instant workspace-symbol search at scale (100K+ file repos); powers go-to-symbol-in-workspace and AI retrieval.
+
+### 13.2 High — Competitive Differentiators
+
+- [ ] **AI Checkpoints + Rollback** — Automatic checkpoints before every AI edit; timeline UI to diff any two states and roll back.
+- [ ] **Context Pinning** — Pin files, docs, or symbols as always-included AI context; persists across conversations.
+- [ ] **Bring Your Own Model (20+ providers)** — Azure OpenAI, AWS Bedrock, Google Vertex, llama.cpp, vLLM, Together, Groq, Mistral API.
+- [ ] **Structured Diff Edits** — AI returns search/replace blocks or unified diffs instead of full file rewrites; token-efficient.
+- [ ] **Inline AI Chat (Ctrl+K)** — Start an AI conversation anchored to a selection inline, without opening the chat panel.
+- [ ] **Workspace Trust / Security Sandbox** — Restrict plugin/terminal/file access in untrusted repositories.
+- [ ] **Settings Sync Across Machines** — Cloud or git-backed sync for settings, keybindings, themes, plugins.
+- [ ] **Multi-Location AI Edits** — AI edits multiple places simultaneously; accept/reject each location individually.
+- [ ] **Dev Container Support** — Develop inside Docker/devcontainer environments with local editor + remote language servers.
+
+### 13.3 Medium — Quality of Life
+
+- [ ] **Token Usage Dashboard** — Real-time and historical token usage, estimated cost per session, budget limits.
+- [ ] **Smart Paste** — AI transforms pasted code to match target language/context (e.g., Python → Rust).
+- [ ] **Terminal Output Decorations** — Inline actions on command output: re-run, copy, open file from stack trace, explain error with AI.
+- [ ] **Local File History (Timeline)** — Auto-snapshot on every save independent of git; diff and restore any prior version.
+- [ ] **Linked Tag Editing** — HTML/JSX opening+closing tag sync editing via tree-sitter.
+- [ ] **AI Test Generation** — Analyze code coverage, identify untested paths, generate targeted tests for uncovered branches.
+- [ ] **TODO/FIXME Aggregation Panel** — Scan workspace for TODO/FIXME/HACK/XXX tags with navigable list.
+- [ ] **FIM Completions (Fill-in-the-Middle)** — Inline suggestions aware of both prefix and suffix context.
+- [ ] **Dependency Vulnerability Scanning** — Scan lock files (Cargo.lock, package-lock.json) for known CVEs with fix suggestions.
+- [ ] **Voice Input** — Dictate intent or code via microphone for accessibility and rapid prototyping.
+- [ ] **Database / SQL Client** — Connect to databases, run queries, view schemas with AI SQL assistance.
+
+### 13.4 Low — Polish & Differentiation
+
+- [ ] **AI Memory Across Sessions** — AI remembers user preferences, coding style, corrections without explicit rules files.
+- [ ] **Refactoring Preview Panel** — Before executing refactoring (extract function, inline variable), show full preview of affected files.
+- [ ] **Nerd Font / Icon Support** — Render file type icons in file tree and tabs using Nerd Font glyphs with fallback.
+- [ ] **Predictive Command Palette** — Learn from usage frequency/recency, surface likely commands first with ML ranking.
+- [ ] **Shared AI Chat in Collab** — In collaborative sessions, AI conversation visible to all peers.
