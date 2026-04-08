@@ -3598,6 +3598,10 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("http send", "Execute HTTP request at cursor", ""),
     ("cell run", "Run code cell at cursor", ""),
     ("pair", "Toggle AI pair programming", ""),
+    ("bookmark add", "Add bookmark at cursor", ""),
+    ("bookmark list", "List all bookmarks", ""),
+    ("bookmark jump", "Jump to bookmark", ""),
+    ("new", "Create project from template", ""),
     ("keymap vim", "Vim keybinding profile (default)", ""),
     ("keymap emacs", "Emacs keybinding profile", ""),
     ("keymap vscode", "VS Code keybinding profile", ""),
@@ -4063,12 +4067,34 @@ fn handle_leader(app: &mut App, code: KeyCode) {
                 app.set_status("No API key. Set ANTHROPIC_API_KEY");
             }
         }
-        // <leader>e — explain selected code
+        // <leader>e — explain code via chat panel
         KeyCode::Char('e') => {
             if app.has_ai() {
-                app.send_intent(
-                    "Explain this code concisely. Output only the explanation as a comment block.",
-                );
+                // Get visual selection range or current line.
+                let tab = app.tab();
+                let text = if let Some(anchor) = tab.visual_anchor {
+                    let cursor = tab.cursor;
+                    let (start, end) = if (anchor.row, anchor.col) <= (cursor.row, cursor.col) {
+                        (anchor, cursor)
+                    } else {
+                        (cursor, anchor)
+                    };
+                    let start_idx = tab.buffer.cursor_to_char_idx(&start);
+                    let end_idx = tab.buffer.cursor_to_char_idx(&end) + 1;
+                    let end_idx = end_idx.min(tab.buffer.rope().len_chars());
+                    tab.buffer.rope().slice(start_idx..end_idx).to_string()
+                } else {
+                    tab.buffer
+                        .line_text(tab.cursor.row)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                let prompt = format!("Explain this code concisely:\n\n```\n{}\n```", text);
+                app.chat_panel.visible = true;
+                app.chat_panel_focused = true;
+                app.chat_panel.input = prompt;
+                app.send_chat_message();
+                app.set_status("AI explaining code...");
             } else {
                 app.set_status("No API key. Set ANTHROPIC_API_KEY");
             }
@@ -4615,6 +4641,129 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         "pair off" => {
             app.set_status("AI pair programming: OFF");
+        }
+        // :bookmark — named bookmark system.
+        _ if cmd.trim().starts_with("bookmark ") || cmd.trim() == "bookmark" => {
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            let sub = parts.get(1).copied().unwrap_or("list");
+            let arg = parts.get(2..).map(|s| s.join(" ")).unwrap_or_default();
+            match sub {
+                "add" | "a" => {
+                    if arg.is_empty() {
+                        app.set_status("Usage: :bookmark add <name>");
+                    } else {
+                        let file = app
+                            .tab()
+                            .buffer
+                            .file_path()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_default();
+                        let line = app.tab().cursor.row;
+                        let col = app.tab().cursor.col;
+                        app.bookmarks.add(arg.clone(), file, line, col);
+                        app.set_status(format!("Bookmark added: {}", arg));
+                    }
+                }
+                "list" | "ls" => {
+                    let bms = app.bookmarks.list();
+                    if bms.is_empty() {
+                        app.set_status("No bookmarks set");
+                    } else {
+                        let names: Vec<String> = bms
+                            .iter()
+                            .map(|b| {
+                                format!(
+                                    "{}({}:{})",
+                                    b.name,
+                                    b.file.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
+                                    b.line + 1
+                                )
+                            })
+                            .collect();
+                        app.set_status(format!("Bookmarks: {}", names.join(", ")));
+                    }
+                }
+                "jump" | "j" | "go" => {
+                    if arg.is_empty() {
+                        app.set_status("Usage: :bookmark jump <name>");
+                    } else if let Some(bm) = app.bookmarks.get(&arg).cloned() {
+                        if let Err(e) = app.open_file(bm.file) {
+                            app.set_status(e);
+                        } else {
+                            app.tab_mut().cursor.row = bm.line;
+                            app.tab_mut().cursor.col = bm.col;
+                            app.clamp_cursor();
+                            app.set_status(format!("Jumped to bookmark: {}", arg));
+                        }
+                    } else {
+                        app.set_status(format!("Bookmark not found: {}", arg));
+                    }
+                }
+                "delete" | "del" | "rm" => {
+                    if arg.is_empty() {
+                        app.set_status("Usage: :bookmark delete <name>");
+                    } else if app.bookmarks.remove(&arg) {
+                        app.set_status(format!("Bookmark deleted: {}", arg));
+                    } else {
+                        app.set_status(format!("Bookmark not found: {}", arg));
+                    }
+                }
+                _ => app.set_status(format!(
+                    "Unknown bookmark command: {sub}. Use add/list/jump/delete"
+                )),
+            }
+        }
+        // :new <template> — create project from template.
+        _ if cmd.trim() == "new" || cmd.trim().starts_with("new ") => {
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            let template = parts.get(1).copied().unwrap_or("list");
+            let name = parts.get(2).copied().unwrap_or("my-project");
+            match template {
+                "list" => {
+                    app.set_status("Templates: rust, react, python, node, go");
+                }
+                "rust" => {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    app.terminal_mut()
+                        .send_bytes(format!("cargo init {} && cd {}\n", name, name).as_bytes());
+                    app.set_status(format!("Creating Rust project: {}", name));
+                }
+                "react" | "next" => {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    app.terminal_mut()
+                        .send_bytes(format!("npx create-next-app@latest {}\n", name).as_bytes());
+                    app.set_status(format!("Creating React/Next.js project: {}", name));
+                }
+                "python" | "py" => {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    let cmd = format!("mkdir -p {} && cd {} && python3 -m venv venv && echo '# {}' > README.md && echo '*.pyc\nvenv/\n__pycache__/' > .gitignore && git init\n", name, name, name);
+                    app.terminal_mut().send_bytes(cmd.as_bytes());
+                    app.set_status(format!("Creating Python project: {}", name));
+                }
+                "node" | "npm" => {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    let cmd = format!("mkdir -p {} && cd {} && npm init -y\n", name, name);
+                    app.terminal_mut().send_bytes(cmd.as_bytes());
+                    app.set_status(format!("Creating Node.js project: {}", name));
+                }
+                "go" | "golang" => {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    let cmd = format!("mkdir -p {} && cd {} && go mod init {}\n", name, name, name);
+                    app.terminal_mut().send_bytes(cmd.as_bytes());
+                    app.set_status(format!("Creating Go project: {}", name));
+                }
+                other => {
+                    app.set_status(format!(
+                        "Unknown template: {}. Available: rust, react, python, node, go",
+                        other
+                    ));
+                }
+            }
         }
         // :keymap <profile> — switch keybinding profile.
         "keymap vim" | "keymap default" => {

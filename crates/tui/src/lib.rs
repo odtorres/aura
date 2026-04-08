@@ -9,6 +9,7 @@ pub mod agent_plan;
 pub mod agent_timeline;
 pub mod ai_visor;
 pub mod app;
+pub mod bookmarks;
 pub mod branch_picker;
 pub mod chat_panel;
 pub mod chat_tools;

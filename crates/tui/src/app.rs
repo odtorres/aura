@@ -585,6 +585,10 @@ pub struct App {
     pub remote_specs: std::collections::HashMap<PathBuf, crate::remote::RemoteSpec>,
     /// Plugin marketplace modal.
     pub marketplace: crate::marketplace::MarketplaceModal,
+    /// Named bookmarks across files.
+    pub bookmarks: crate::bookmarks::BookmarkManager,
+    /// AI code explanation popup text.
+    pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
     pub claude_watcher: Option<crate::claude_watcher::ClaudeWatcher>,
 
@@ -1110,6 +1114,8 @@ impl App {
             rebase_modal: crate::rebase_modal::InteractiveRebaseModal::new(),
             remote_specs: std::collections::HashMap::new(),
             marketplace: crate::marketplace::MarketplaceModal::new(),
+            bookmarks: crate::bookmarks::BookmarkManager::new(),
+            code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
             split_direction: SplitDirection::Vertical,
