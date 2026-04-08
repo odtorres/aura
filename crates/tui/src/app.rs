@@ -603,6 +603,10 @@ pub struct App {
     pub inline_ai_active: bool,
     /// Whether the current workspace is trusted (allows plugins, terminal, etc.).
     pub workspace_trusted: bool,
+    /// Token usage tracker for AI cost monitoring.
+    pub token_tracker: crate::token_tracker::TokenTracker,
+    /// Local file history manager.
+    pub local_history: crate::local_history::LocalHistory,
     /// AI code explanation popup text.
     pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
@@ -1138,7 +1142,9 @@ impl App {
             context_pins: crate::context_pin::ContextPinManager::new(),
             inline_ai_input: None,
             inline_ai_active: false,
-            workspace_trusted: true, // Trusted by default; :trust off to restrict.
+            workspace_trusted: true,
+            token_tracker: crate::token_tracker::TokenTracker::new(),
+            local_history: crate::local_history::LocalHistory::new(),
             code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,

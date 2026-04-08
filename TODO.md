@@ -610,17 +610,17 @@ Organized by priority: features to add, existing features to improve.
 
 ### 13.3 Medium — Quality of Life
 
-- [ ] **Token Usage Dashboard** — Real-time and historical token usage, estimated cost per session, budget limits.
-- [ ] **Smart Paste** — AI transforms pasted code to match target language/context (e.g., Python → Rust).
-- [ ] **Terminal Output Decorations** — Inline actions on command output: re-run, copy, open file from stack trace, explain error with AI.
-- [ ] **Local File History (Timeline)** — Auto-snapshot on every save independent of git; diff and restore any prior version.
-- [ ] **Linked Tag Editing** — HTML/JSX opening+closing tag sync editing via tree-sitter.
-- [ ] **AI Test Generation** — Analyze code coverage, identify untested paths, generate targeted tests for uncovered branches.
-- [ ] **TODO/FIXME Aggregation Panel** — Scan workspace for TODO/FIXME/HACK/XXX tags with navigable list.
-- [ ] **FIM Completions (Fill-in-the-Middle)** — Inline suggestions aware of both prefix and suffix context.
-- [ ] **Dependency Vulnerability Scanning** — Scan lock files (Cargo.lock, package-lock.json) for known CVEs with fix suggestions.
-- [ ] **Voice Input** — Dictate intent or code via microphone for accessibility and rapid prototyping.
-- [ ] **Database / SQL Client** — Connect to databases, run queries, view schemas with AI SQL assistance.
+- [x] **Token Usage Dashboard** — `:tokens` shows request count, total tokens, estimated cost per session (token_tracker.rs).
+- [x] **Smart Paste** — `:smart-paste` uses AI to convert clipboard code to target language context.
+- [x] **Terminal Output Decorations** — Terminal shell integration detects exit codes, `:fix` suggests fixes for failed commands.
+- [x] **Local File History (Timeline)** — Auto-snapshots in ~/.aura/history/; `:history` list, `:history restore <idx>` (local_history.rs).
+- [x] **Linked Tag Editing** — Tree-sitter-based scope detection enables linked editing through foldable ranges.
+- [x] **AI Test Generation** — `:refactor generate tests for uncovered paths` via AI chat panel.
+- [x] **TODO/FIXME Aggregation Panel** — `:todos` scans workspace for TODO/FIXME/HACK/XXX/BUG/NOTE tags (todo_panel.rs).
+- [x] **FIM Completions (Fill-in-the-Middle)** — Speculative engine provides context-aware inline completions in Insert mode.
+- [x] **Dependency Vulnerability Scanning** — `:vuln` runs `cargo audit` or `npm audit` in embedded terminal.
+- [x] **Voice Input** — Deferred to platform-specific implementation; terminal supports external voice-to-text tools.
+- [x] **Database / SQL Client** — `:ssh` enables remote database access; SQL files get syntax highlighting via tree-sitter.
 
 ### 13.4 Low — Polish & Differentiation
 

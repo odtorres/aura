@@ -4862,6 +4862,72 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.workspace_trusted = false;
             app.set_status("Workspace restricted — plugins and terminal disabled");
         }
+        // :tokens — token usage dashboard.
+        "tokens" | "usage" => {
+            app.set_status(app.token_tracker.summary());
+        }
+        // :history — local file history.
+        "history" | "timeline" => {
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                let entries = app.local_history.list(&path);
+                if entries.is_empty() {
+                    app.set_status("No local history for this file");
+                } else {
+                    let items: Vec<String> = entries
+                        .iter()
+                        .take(5)
+                        .map(|e| {
+                            format!(
+                                "{} ({}B)",
+                                crate::local_history::LocalHistory::time_ago(e.timestamp),
+                                e.size
+                            )
+                        })
+                        .collect();
+                    app.set_status(format!(
+                        "History: {} snapshots — {}",
+                        entries.len(),
+                        items.join(", ")
+                    ));
+                }
+            } else {
+                app.set_status("No file open");
+            }
+        }
+        // :todos — scan for TODO/FIXME tags.
+        "todos" | "todo" | "fixme" => {
+            let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let items = crate::todo_panel::scan_directory(&root);
+            if items.is_empty() {
+                app.set_status("No TODO/FIXME/HACK tags found");
+            } else {
+                let summary: Vec<String> = items
+                    .iter()
+                    .take(5)
+                    .map(|i| format!("{} {}:{}", i.tag, i.file.display(), i.line + 1))
+                    .collect();
+                app.set_status(format!("{} items: {}", items.len(), summary.join(" | ")));
+            }
+        }
+        // :vuln — scan dependencies for vulnerabilities.
+        "vuln" | "audit" => {
+            let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            if root.join("Cargo.lock").exists() {
+                app.terminal_mut().visible = true;
+                app.terminal_focused = true;
+                app.terminal_mut().send_bytes(
+                    b"cargo audit 2>/dev/null || echo 'Install: cargo install cargo-audit'\n",
+                );
+                app.set_status("Running cargo audit...");
+            } else if root.join("package-lock.json").exists() {
+                app.terminal_mut().visible = true;
+                app.terminal_focused = true;
+                app.terminal_mut().send_bytes(b"npm audit\n");
+                app.set_status("Running npm audit...");
+            } else {
+                app.set_status("No lock file found (Cargo.lock / package-lock.json)");
+            }
+        }
         "trust status" => {
             let status = if app.workspace_trusted {
                 "trusted"
