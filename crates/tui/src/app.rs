@@ -601,6 +601,8 @@ pub struct App {
     pub inline_ai_input: Option<String>,
     /// Whether inline AI chat is active.
     pub inline_ai_active: bool,
+    /// Whether the current workspace is trusted (allows plugins, terminal, etc.).
+    pub workspace_trusted: bool,
     /// AI code explanation popup text.
     pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
@@ -1136,6 +1138,7 @@ impl App {
             context_pins: crate::context_pin::ContextPinManager::new(),
             inline_ai_input: None,
             inline_ai_active: false,
+            workspace_trusted: true, // Trusted by default; :trust off to restrict.
             code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,

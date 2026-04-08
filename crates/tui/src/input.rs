@@ -182,6 +182,63 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
 
+    // Inline AI chat input (Ctrl+K).
+    if app.inline_ai_active {
+        match code {
+            KeyCode::Esc => {
+                app.inline_ai_active = false;
+                app.inline_ai_input = None;
+                app.set_status("Inline AI cancelled");
+            }
+            KeyCode::Enter => {
+                if let Some(instruction) = app.inline_ai_input.take() {
+                    app.inline_ai_active = false;
+                    if !instruction.is_empty() {
+                        // Get selected text or current line.
+                        let tab = app.tab();
+                        let code_text = if let Some(anchor) = tab.visual_anchor {
+                            let cursor = tab.cursor;
+                            let (start, end) =
+                                if (anchor.row, anchor.col) <= (cursor.row, cursor.col) {
+                                    (anchor, cursor)
+                                } else {
+                                    (cursor, anchor)
+                                };
+                            let s = tab.buffer.cursor_to_char_idx(&start);
+                            let e = (tab.buffer.cursor_to_char_idx(&end) + 1)
+                                .min(tab.buffer.rope().len_chars());
+                            tab.buffer.rope().slice(s..e).to_string()
+                        } else {
+                            tab.buffer
+                                .line_text(tab.cursor.row)
+                                .unwrap_or_default()
+                                .to_string()
+                        };
+
+                        let prompt = format!("{}\n\nCode:\n```\n{}\n```", instruction, code_text);
+                        app.chat_panel.visible = true;
+                        app.chat_panel_focused = true;
+                        app.chat_panel.input = prompt;
+                        app.send_chat_message();
+                        app.set_status(format!("Inline AI: {}", instruction));
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(ref mut input) = app.inline_ai_input {
+                    input.pop();
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(ref mut input) = app.inline_ai_input {
+                    input.push(c);
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // When the close-tab confirmation modal is visible, intercept S/D/Esc.
     if app.tab_close_confirm.is_some() {
         match code {
@@ -411,6 +468,13 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             KeyCode::Char('i') => {
                 unfocus_all_panels(app);
                 app.toggle_ai_visor();
+                true
+            }
+            // Ctrl+K — inline AI chat (anchored to selection).
+            KeyCode::Char('k') => {
+                app.inline_ai_active = true;
+                app.inline_ai_input = Some(String::new());
+                app.set_status("Inline AI: type instruction, Enter to send, Esc to cancel");
                 true
             }
             // Ctrl+, — open settings.
@@ -4788,6 +4852,42 @@ fn execute_command(app: &mut App, cmd: &str) {
         "unpin all" => {
             app.context_pins.clear();
             app.set_status("All pins cleared");
+        }
+        // :trust — workspace trust management.
+        "trust" | "trust on" => {
+            app.workspace_trusted = true;
+            app.set_status("Workspace trusted — full access enabled");
+        }
+        "trust off" | "untrust" => {
+            app.workspace_trusted = false;
+            app.set_status("Workspace restricted — plugins and terminal disabled");
+        }
+        "trust status" => {
+            let status = if app.workspace_trusted {
+                "trusted"
+            } else {
+                "restricted"
+            };
+            app.set_status(format!("Workspace: {status}"));
+        }
+        // :sync — settings sync.
+        "sync export" => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let src = format!("{}/.aura/aura.toml", home);
+            let dst = format!("{}/.aura/settings-export.toml", home);
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => app.set_status(format!("Settings exported to {}", dst)),
+                Err(e) => app.set_status(format!("Export failed: {e}")),
+            }
+        }
+        "sync import" => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let src = format!("{}/.aura/settings-export.toml", home);
+            let dst = format!("{}/.aura/aura.toml", home);
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => app.set_status("Settings imported — restart to apply"),
+                Err(e) => app.set_status(format!("Import failed: {e}")),
+            }
         }
         _ if cmd.trim().starts_with("bookmark ") || cmd.trim() == "bookmark" => {
             let parts: Vec<&str> = cmd.split_whitespace().collect();

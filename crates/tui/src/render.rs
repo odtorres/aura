@@ -403,6 +403,31 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_references_panel(frame, app, area);
         }
 
+        // Render inline AI input bar (Ctrl+K).
+        if app.inline_ai_active {
+            let input_text = app.inline_ai_input.as_deref().unwrap_or("");
+            let display = format!(" AI> {} ", input_text);
+            let w = editor_inner_for_popups.width.min(60);
+            let x =
+                editor_inner_for_popups.x + (editor_inner_for_popups.width.saturating_sub(w)) / 2;
+            let cursor_row = app.tab().cursor.row;
+            let scroll_row = app.tab().scroll_row;
+            let screen_row = cursor_row.saturating_sub(scroll_row) as u16 + 1;
+            let y = (editor_inner_for_popups.y + screen_row)
+                .min(editor_inner_for_popups.y + editor_inner_for_popups.height - 1);
+            let bar = Rect::new(x, y, w, 1);
+            frame.render_widget(Clear, bar);
+            frame.render_widget(
+                Paragraph::new(display).style(
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Rgb(60, 60, 120))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                bar,
+            );
+        }
+
         // Render rename input if active.
         if app.rename_active {
             draw_rename_input(frame, app, command_area);

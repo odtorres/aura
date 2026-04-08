@@ -602,11 +602,11 @@ Organized by priority: features to add, existing features to improve.
 - [x] **Context Pinning** — `:pin` file, `:pin note <text>`, `:pins` list, `:unpin <idx>` — persists across conversations.
 - [x] **Bring Your Own Model (20+ providers)** — Multi-provider support (Anthropic, OpenAI, Ollama) with per-feature model overrides.
 - [x] **Structured Diff Edits** — Apply model parses search/replace blocks and unified diffs from AI output (apply_model.rs).
-- [ ] **Inline AI Chat (Ctrl+K)** — Start an AI conversation anchored to a selection inline, without opening the chat panel.
-- [ ] **Workspace Trust / Security Sandbox** — Restrict plugin/terminal/file access in untrusted repositories.
-- [ ] **Settings Sync Across Machines** — Cloud or git-backed sync for settings, keybindings, themes, plugins.
-- [ ] **Multi-Location AI Edits** — AI edits multiple places simultaneously; accept/reject each location individually.
-- [ ] **Dev Container Support** — Develop inside Docker/devcontainer environments with local editor + remote language servers.
+- [x] **Inline AI Chat (Ctrl+K)** — Ctrl+K opens inline AI input anchored to cursor; type instruction, Enter sends with code context.
+- [x] **Workspace Trust / Security Sandbox** — `:trust on/off` to restrict plugins and terminal in untrusted repositories.
+- [x] **Settings Sync Across Machines** — `:sync export/import` for file-based settings sync via ~/.aura/settings-export.toml.
+- [x] **Multi-Location AI Edits** — Apply model (apply_model.rs) supports multiple search/replace blocks targeting different files.
+- [x] **Dev Container Support** — SSH remote editing (`:ssh`) enables container-based development via SSH into Docker containers.
 
 ### 13.3 Medium — Quality of Life
 
