@@ -7689,6 +7689,9 @@ impl App {
             self.pending_tool_calls = needs_approval;
             // Auto-focus the chat panel so the user can press Y/N.
             self.chat_panel_focused = true;
+            self.chat_panel.visible = true;
+            self.chat_panel.scroll_to_bottom();
+            self.set_status("Tool approval needed — press Y to allow, N to deny");
         } else {
             // All tools were auto-approved — continue the loop.
             self.continue_tool_loop();

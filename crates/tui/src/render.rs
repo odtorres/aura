@@ -2867,8 +2867,21 @@ fn draw_chat_panel(frame: &mut Frame, app: &App, area: Rect) {
 
                 // Show approval prompt if pending.
                 if *status == ToolCallStatus::PendingApproval {
-                    let prompt = "   Allow? [Y]es / [N]o".to_string();
-                    wrapped_lines.push((ChatRole::System, prompt, Some(Color::Yellow)));
+                    wrapped_lines.push((
+                        ChatRole::System,
+                        "   ┌─────────────────────────────┐".to_string(),
+                        Some(Color::Yellow),
+                    ));
+                    wrapped_lines.push((
+                        ChatRole::System,
+                        "   │  Allow? [Y]es / [N]o / Esc  │".to_string(),
+                        Some(Color::Yellow),
+                    ));
+                    wrapped_lines.push((
+                        ChatRole::System,
+                        "   └─────────────────────────────┘".to_string(),
+                        Some(Color::Yellow),
+                    ));
                 }
 
                 // Show result summary if available.
