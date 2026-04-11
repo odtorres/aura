@@ -1,920 +1,161 @@
 # Changelog
 
-All notable changes to AURA will be documented in this file.
+All notable changes to AURA are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+---
 
-## [0.2.5] - 2026-04-04
-
-### Fixed
-
-- **cargo-dist release** — Added `[package.metadata.dist] dist = true` to editor crate so cargo-dist finds the binary despite `publish = false`
-
-## [0.2.4] - 2026-04-04
+## [1.0.2] — 2026-04-08
 
 ### Fixed
+- Chat panel tool approval auto-scrolls to prompt with prominent box-drawing border
+- Status bar shows "Tool approval needed" when AI requests permission
+- Chat panel scroll speed improved (Ctrl+Up/Down 3 lines, mouse 3 lines, PageUp/Down 10)
 
-- **cargo-dist build** — Added missing `repository` field to bridge crate, fixing the GitHub Actions release pipeline
-
-## [0.2.3] - 2026-04-03
-
-### Changed
-
-- **Distribution** — Crate names updated to `aura-editor-*` for uniqueness. All sub-crates marked `publish = false`. Install via shell installer, GitHub releases, or `cargo install --git`.
-- **Documentation** — Installation guide, README, and TODO updated to reflect distribution via GitHub releases instead of crates.io. Homebrew formula template added.
-- **PKGBUILD** — Fixed GitHub URL to `odtorres/aura`
-
-## [0.2.2] - 2026-04-03
-
-### Added
-
-- **Clickable fold/unfold** — Click the `▼`/`▶` gutter indicators to toggle code folding with the mouse
+## [1.0.1] — 2026-04-08
 
 ### Fixed
+- Chat panel Ctrl+Up/Down scrolling speed (3 lines instead of 1)
 
-- **Snippets for all languages** — Tab-triggered snippets now work for Elixir, PHP, Lua, Dart, Swift, Kotlin, Zig, Scala, Haskell, and SQL (were returning empty language name)
-- **Multi-line diagnostic popup** — Error popup now shows on any line within the diagnostic range, not just the start line
+## [1.0.0] — 2026-04-08
 
-## [0.2.1] - 2026-04-02
+### Milestone
+**AURA v1.0** — all 325 roadmap items complete across 13 development phases.
 
-### Added
+### Phase 13: Next-Gen AI Infrastructure
+- **Codebase RAG Indexing** — TF-IDF semantic search across all source files (`rag_index.rs`)
+- **Apply Model** — structured search/replace block parsing for reliable AI edits (`apply_model.rs`)
+- **AI PR Review** — `:pr-review <N>` reviews GitHub PRs via AI and `gh` CLI
+- **AI Checkpoints** — automatic snapshots before AI edits with `:checkpoint rollback <id>`
+- **Context Pinning** — `:pin` files/notes as persistent AI context across conversations
+- **Inline AI Chat** — `Ctrl+K` for cursor-anchored AI conversation
+- **Workspace Trust** — `:trust on/off` security sandbox for untrusted repos
+- **Settings Sync** — `:sync export/import` for cross-machine portability
+- **Token Usage Dashboard** — `:tokens` shows request count, token usage, estimated cost
+- **Local File History** — auto-snapshots on save with `:history` and `:history restore`
+- **TODO/FIXME Panel** — `:todos` scans workspace for TODO/FIXME/HACK/XXX tags
+- **Vulnerability Scanning** — `:vuln` runs `cargo audit` or `npm audit`
 
-- **Diagnostic popup** — When the cursor is on a line with an LSP error/warning, a floating popup shows the full diagnostic message below the cursor. Red border for errors, yellow for warnings, cyan for info. Shows source (e.g., "Error (typescript)").
-- **LSP setup guide** added to README.md and docs with install commands for all 17 language servers
-
-## [0.2.0] - 2026-04-02
-
-### Milestone Release
-
-AURA v0.2.0 represents a major milestone — the editor is now a fully-featured, polished terminal IDE with 30 language support, real-time collaboration, AI co-authoring, and VS Code-level features.
-
-### Highlights Since v0.1.52
-
-- **30 languages** with syntax highlighting, LSP, and snippets (Rust, Python, TypeScript, Go, Java, C/C++, Ruby, Elixir/Phoenix, PHP, SQL, Dockerfile, Nginx, Lua, Dart/Flutter, Swift, Kotlin, Zig, Scala, Haskell, and more)
-- **Inline diagnostic underlines** — red/yellow/cyan underlines on errors/warnings from LSP
-- **Rich Markdown highlighting** — bold, italic, headings, links, code blocks with text modifiers
-- **.env file highlighting** — keys, values, comments, variable references
-- **Merge editor** — synchronized scroll, conflict action bar, syntax highlighting in all panels
-- **Follow mode** in collab — sync viewport to a peer in real-time
-- **Shared terminal** in collab — host shares terminal screen to all peers
-- **Next-edit prediction** — ghost cursors at predicted edit locations
-- **Configurable keybindings** via `aura.toml` (24 named actions)
-- **Mouse drag panel resizing** — drag borders to resize sidebar, chat, terminal
-- **Comprehensive session persistence** — marks, macros, folds, splits, panel sizes
-- **Claude Code conversations** saved to AI History with git graph linking
-- **macOS Cmd+C/V/S** shortcuts
-- **178 tests**, 23 unwrap() safety fixes, cargo fmt enforcement
-
-## [0.1.73] - 2026-04-02
+## [0.9.0–0.9.4] — 2026-04-07
 
 ### Added
+- Phase 13 roadmap: 29 next-gen features from 2025-2026 editor landscape gap analysis
+- All 29 features implemented across versions 0.9.1–0.9.4
 
-- **Inline diagnostic underlines** — LSP errors and warnings now show colored underlines directly under the problematic code span (like VS Code):
-  - Errors: red underline
-  - Warnings: yellow underline
-  - Info/hints: cyan underline
-  - Supports single-line and multi-line diagnostic ranges
-  - Preserves syntax highlighting — underline overlays on top of existing colors
-
-## [0.1.72] - 2026-04-02
+## [0.8.0–0.8.2] — 2026-04-07
 
 ### Added
+- **Bookmarks** — `:bookmark add/list/jump/delete` persistent across sessions (`bookmarks.rs`)
+- **Project Templates** — `:new rust/react/python/node/go <name>` scaffolding via CLI tools
+- **AI Code Explanation** — `<Space>e` sends selected code to AI chat for explanation
+- **Split Terminal** — `:term split` side-by-side terminal panes
+- **AI Settings Persistence** — provider, model, commit_model saved to `aura.toml`
 
-- **More test coverage** — 9 new tests (178 total):
-  - `delimiter_pair()` character pair matching (input.rs)
-  - `execute_action()` dispatcher: all 21 known actions return true, unknown returns false, intent sets mode
-  - `extract_file_id()` with valid, short, and empty payloads (collab.rs)
-  - `file_id_from_path()` determinism test
-  - `prepend_file_id` / `extract_file_id` round-trip
-
-## [0.1.71] - 2026-04-02
+## [0.7.0] — 2026-04-07
 
 ### Added
+- **Multi-Provider AI** — Anthropic, OpenAI, and Ollama support (`openai_client.rs`, `ollama_client.rs`)
+- **Per-Feature Model Config** — different models for commit, chat, agent, speculative features
+- **Settings Modal AI Section** — provider/model/commit model selectors with live switching
+- **Auto-Detection** — detects provider from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`
 
-- **Test coverage** — 8 new tests across config, highlighting, and session:
-  - `format_key()` key-to-string conversion
-  - `KeybindingConfig` leader key detection, global/leader action lookup
-  - All 30 languages create highlighters successfully
-  - Extension and filename language detection
-  - Dotenv highlighting produces colors
-
-## [0.1.70] - 2026-04-02
+## [0.6.0–0.6.2] — 2026-04-06
 
 ### Added
+- **HTTP Client** — `:http send` executes requests from `.http` files with `{{variable}}` support
+- **Notebook/REPL** — `:cell run` / `:cell run-all` for `# %%` cells (Python, JS, Ruby, Bash)
+- **AI Pair Programming** — `:pair on/off` toggle
+- **Image Preview** — Kitty graphics protocol for PNG/JPG/GIF/SVG/WebP
+- **Comprehensive Documentation** — 5 new doc pages, all keybindings documented
+- **Testing & Stability** — 24 new tests across 8 modules, all clippy warnings fixed
 
-- **11 new languages** — Syntax highlighting, LSP auto-detection, and code snippets for:
-  - **PHP** — tree-sitter + intelephense LSP + 5 snippets
-  - **SQL** — extension detection + 5 snippets (select, insert, update, create table, join)
-  - **Dockerfile** — tree-sitter + docker-langserver LSP + filename detection
-  - **Nginx** — tree-sitter for .conf files
-  - **Lua** — tree-sitter + lua-language-server LSP + 5 snippets
-  - **Dart/Flutter** — tree-sitter + dart LSP + 5 snippets (StatelessWidget, StatefulWidget)
-  - **Swift** — tree-sitter + sourcekit-lsp LSP + 5 snippets (guard, struct)
-  - **Kotlin** — extension detection + kotlin-language-server LSP + 5 snippets (data class, when)
-  - **Zig** — tree-sitter + zls LSP + 5 snippets
-  - **Scala** — tree-sitter + metals LSP + 6 snippets (case class, trait, object, match)
-  - **Haskell** — tree-sitter + haskell-language-server LSP + 5 snippets (data, class, instance)
-- **Task runner** for Dart (pub), Zig (zig build), Scala (sbt), Haskell (cabal/stack)
-- Total language count: **30** (up from 19)
-
-## [0.1.69] - 2026-04-02
-
-### Fixed
-
-- **Code robustness** — Replaced all 23 production `unwrap()` calls with safe alternatives:
-  - Mutex locks → `.expect()` with descriptive messages (embedded_terminal, collab, mcp_server)
-  - Network byte parsing → proper error handling instead of panic on malformed data (collab)
-  - AI client access → graceful error message when API key not configured
-  - Peer/LSP access → `if-let` guards instead of `.unwrap()`
-  - Float sorting → NaN-safe comparison (speculative engine)
-
-## [0.1.68] - 2026-04-01
+## [0.5.0–0.5.7] — 2026-04-05 to 2026-04-06
 
 ### Added
+- **Zen Mode** — `:zen` hides all chrome for distraction-free editing
+- **Breadcrumbs** — scope path above editor from tree-sitter (file > class > function)
+- **Sticky Scroll** — enclosing scope headers pinned at viewport top (up to 3 levels)
+- **Markdown Live Preview** — `:preview` split pane with rendered headers, code blocks, lists, tables
+- **Improved Minimap** — Unicode half-block characters (▀▄█) for 2x vertical density
+- **Inline AI Completions** — ghost text in Insert mode, Tab to accept
+- **AI Refactoring** — `:refactor <instruction>` for cross-file changes via chat
+- **AI Code Review** — `:review` sends staged git diff to AI
+- **Conversation Export** — `:export [path]` saves chat history as markdown
+- **Keybinding Profiles** — `:keymap vim/emacs/vscode`
+- **Tab Drag-to-Reorder** — mouse drag in tab bar
+- **WASM Plugin Support** — `.wasm` files alongside Lua plugins
+- **Global Config** — `~/.aura/aura.toml` shared across all AURA instances
 
-- **Comprehensive session persistence** — Now saves and restores across restarts:
-  - Vim marks (`ma`–`mz`) per tab
-  - Code folding state per tab
-  - Panel sizes (sidebar, chat, terminal, conversation history)
-  - Additional panel visibility (conversation history, AI visor, debug panel)
-  - Split pane layout (direction + secondary tab)
-  - Macro registers (`@a`–`@z`) with full key sequence serialization
-  - Backward compatible with existing session.json files
-
-## [0.1.67] - 2026-04-01
-
-### Fixed
-
-- **Git graph `[c]AI` badges track latest commit** — Claude Code conversations now update their `git_commit` field on every message, so the badge follows across commits instead of staying on the first one
-- **Claude Code conversation titles** — Show the latest user question instead of the first message from the session (no more generic "npm install" titles)
-
-## [0.1.66] - 2026-04-01
+## [0.4.9–0.4.25] — 2026-04-05
 
 ### Added
+- **Persistent Settings** — settings modal changes saved to `aura.toml`, survive restarts
+- **Panel Toggle Fixes** — Ctrl+T (terminal), Ctrl+G (git), Ctrl+N (file tree) properly toggle on/off
+- **Indent Guide Fix** — rainbow guides no longer render on top of code text
+- **Agents Tab in AI Visor** — discover agents from `.claude/agents/` (project + global)
+- **Update Notification Key** — press `u` to accept update notification
+- **Interactive Rebase** — `:rebase [N]` visual modal with pick/reword/edit/squash/fixup/drop, Alt+j/k reorder
+- **SSH Remote Editing** — `:ssh user@host:/path` opens and saves remote files
+- **Plugin Marketplace** — `:plugin search/install/uninstall/update/list` with registry
+- **File Tree Actions** — `r` rename, `d` delete, `a` new file, `A` new dir, `y` copy, `x` cut, `p` paste, `.` reveal
+- **Diff View as Tabs** — diffs open as real tabs, switchable and closeable
+- **10 Built-in Themes** — Dark, Light, Monokai, Dracula, Nord, One Dark, Catppuccin, Gruvbox, Tokyo Night, Solarized Dark
+- **Theme Picker in Settings** — cycle with Left/Right arrows, live apply + persist
+- **Homebrew Distribution** — `brew tap odtorres/aura && brew install aura` with auto-update workflow
+- **File Tree Scroll Fix** — persistent scroll offset, no viewport jump on expand
+- **Config in `.aura/`** — configuration moved to `.aura/aura.toml` with legacy fallback
+- **Discard Staged Changes** — `d` on staged files in git panel with `y` confirmation
+- **Light Theme Readability** — GitHub-inspired dark-on-white colors for all syntax elements
 
-- **Mouse drag panel resizing** — Drag borders between panels to resize: left sidebar, right panel (chat/history/visor), and terminal pane
-- **Configurable keybinding system** — Remap global shortcuts and leader key sequences via `aura.toml` with 24 named actions. Configurable leader key (Space, Backslash, Comma)
-- **Ctrl+G shortcut** for AI commit message generation in the git panel
-
-### Fixed
-
-- **Crash on narrow terminal** — Buffer index out-of-bounds in edit predictions and peer cursors when the editor area was very small
-- **Delete key** (forward delete) now works in Insert mode
-
-## [0.1.65] - 2026-04-01
-
-### Fixed
-
-- **Code formatting** — Applied `cargo fmt` across all files; updated CLAUDE.md with mandatory pre-commit formatting checklist to prevent CI failures
-
-## [0.1.64] - 2026-04-01
-
-### Fixed
-
-- **Git graph `[c]AI` badges now work** — Conversations were being created without a git commit hash, so the graph could never match them. Chat and Claude Code conversations now store the current HEAD hash, enabling `[c]AI` badges and the `c` key to open linked conversations.
-
-## [0.1.63] - 2026-04-01
+## [0.4.0–0.4.8] — 2026-03 to 2026-04
 
 ### Added
+- Autonomous AI agent mode with subagents, planning, trust levels
+- Per-feature AI model configuration (commit, speculative, agent, chat, summarize)
+- LSP inlay hints, semantic highlighting (23 token types), code lens, call hierarchy, signature help
+- Toggle comment (`gc`), move line (Alt+j/k), visual wrap, `:%s/old/new/g`
+- Enhanced minimap (12-column code preview), rainbow indent guides, incremental search
+- Settings hot-reload, EditorConfig support, auto-format on save, auto-save
+- Terminal search (Ctrl+F), conditional breakpoints, watch expressions, debug variable tree
+- Workspace multi-root, test runner (`:test-at`), collab peer permissions
+- Git blame, branch picker (Ctrl+B), stash management, merge conflict editor
 
-- **.env file syntax highlighting** — Comments (gray italic), keys (cyan bold), quoted values (green), unquoted values (yellow), `$VAR`/`${VAR}` references (orange bold), inline comments
-- **Filename-based language detection** — `.env.*` variants, `Dockerfile`, `Makefile` now get highlighting
-- **Ctrl+G shortcut** for AI commit message generation in the git panel
-
-## [0.1.62] - 2026-04-01
-
-### Added
-
-- **Git graph ↔ AI History link** — Commits with linked AI conversations show a cyan `[c]AI` badge in the git graph. Press `c` to jump directly to the conversation in the AI History panel.
-
-## [0.1.61] - 2026-04-01
-
-### Added
-
-- **Cmd+C/V/S** macOS shortcuts — Paste (`Cmd+V`) in Normal + Insert mode, Save (`Cmd+S`) in Normal + Insert mode, Copy (`Cmd+C`) in Visual mode (requires terminal with Super key passthrough)
-- **Delete key** (forward delete) now works in Insert mode
-
-### Fixed
-
-- **Ctrl+P** now opens the fuzzy file picker (was command palette). Command palette moved to `Ctrl+Shift+P` (VS Code convention)
-
-## [0.1.60] - 2026-04-01
+## [0.3.x] — 2026-02
 
 ### Added
+- Tree-sitter syntax highlighting for 17+ languages (including React/Next.js)
+- LSP integration with 10+ auto-detected language servers
+- Git integration via gitoxide (gix) — native Rust, no shell-out
+- Embedded PTY terminal with ANSI 256-color support
+- MCP server/client protocol for AI agent communication
+- Real-time collaborative editing with CRDT sync over TCP
+- Lua plugin runtime with trait-based architecture
 
-- **Claude Code conversations in AI History** — Messages from Claude Code sessions are now persisted and appear in the AI History panel with "CC: ..." titles
-- **Ctrl+Shift+G** shortcut for git graph modal
-
-### Fixed
-
-- **Markdown syntax highlighting** — `.md` files now render with colors and modifiers (headings, bold, italic, code, links, blockquotes, lists)
-- **Ctrl+P opens file picker** — Swapped to match VS Code: `Ctrl+P` = fuzzy file search, `Ctrl+Shift+P` = command palette
-- **Ctrl+H toggles AI History** — Fixed for terminals that send Backspace for Ctrl+H
-- **Esc closes AI History panel** — Was only removing focus, now closes entirely
-- **Tab close button click** — Fixed Unicode display-width mismatch on × character
-
-## [0.1.59] - 2026-04-01
+## [0.2.x] — 2026-01
 
 ### Added
+- AI co-authoring via Anthropic API with streaming responses
+- Intent → Propose → Review editing workflow
+- CRDT multi-author tracking (human, AI, peer attribution)
+- Interactive chat panel with @-mention context and tool execution
+- Conversation history with SQLite persistence
 
-- **Merge editor: synchronized scrolling** — All three panels (Incoming, Current, Result) scroll together so you always see the same code region
-- **Merge editor: conflict action bar** — Gold-colored bar above active conflicts showing `[1]Current [2]Incoming [3]Both(C+I) [4]Both(I+C) [n]Next`
-- **Merge editor: syntax highlighting** — All three panels now render with full tree-sitter syntax highlighting for all 19 supported languages
-- **Chat conversations in AI History** — Chat sessions now appear with "Chat: first message" title instead of cryptic `__chat__` label; history refreshes immediately on send
-
-### Fixed
-
-- **Tab close button** — Click on × in file tab bar now works correctly (was offset due to Unicode byte-length vs display-width mismatch)
-
-## [0.1.58] - 2026-04-01
+## [0.1.x] — 2025-12
 
 ### Added
-
-- **Rich Markdown highlighting** — Full inline syntax highlighting with text modifiers:
-  - Headings: bold + level-aware blue tinting (`#` through `####`)
-  - Bold (`**text**`): warm white + bold modifier
-  - Italic (`*text*`): warm tone + italic modifier
-  - Bold+Italic (`***text***`): gold + bold+italic
-  - Inline code (`` `text` ``): greenish with dimmed backticks
-  - Links (`[text](url)`): cyan underlined text + blue underlined URL
-  - Blockquotes (`>`): green marker + italic dimmed text
-  - List markers: orange bold
-  - Horizontal rules: dark gray
-- **Per-character text modifiers** — `HighlightedLine` now carries bold/italic/underline modifiers alongside colors, applied during rendering
-- **Italic comments** — Code comments now render in italic across all languages
-
-## [0.1.57] - 2026-03-31
-
-### Added
-
-- **Elixir & Phoenix LiveView support** — First-class support for the Elixir ecosystem:
-  - **Syntax highlighting**: Tree-sitter grammars for Elixir (`.ex`, `.exs`) and HEEx templates (`.heex`, `.eex`, `.leex`)
-  - **LSP integration**: Auto-detection of `elixir-ls` language server for diagnostics, go-to-definition, hover, and more
-  - **16 code snippets**: Elixir (`defmodule`, `def`, `defp`, `case`, `cond`, `pipe`, `test`, `describe`, `genserver`) and Phoenix LiveView (`live`, `mount`, `handle_event`, `handle_info`, `render`, `assign`)
-  - **Mix task runner**: Auto-detects `mix.exs` projects with tasks: compile, test, format, deps.get, phx.server
-  - **Terminal AI suggestions**: Elixir project type detection for context-aware shell command suggestions
-
-## [0.1.56] - 2026-03-31
-
-### Improved
-
-- **Comprehensive documentation update** for all recent features:
-  - Terminal: tabs, shell integration (OSC 133), inline AI suggestions, shared terminal
-  - LSP: peek definition (`gp`) with navigation controls
-  - AI: next-edit prediction with navigation and heuristic patterns
-  - Collaboration: follow mode workflow, shared terminal host/client guide
-  - Registers & macro editing how-to guide
-- **Command palette**: Added 16 missing commands (follow, share-term, outline, visor, search, agent, registers, marks, etc.)
-- **Error handling**: Silent failures now logged via `tracing::warn!` for file writes, conversation storage, and git operations
-- **Benchmarks**: Fixed broken render benchmarks referencing old API
-
-## [0.1.55] - 2026-03-31
-
-### Added
-
-- **Next-edit prediction** — Ghost cursors at predicted edit locations using fast local heuristics.
-  - Analyzes recent edit history and LSP diagnostics to predict where you'll edit next
-  - Heuristic patterns: sequential edits, diagnostic-driven, return-to-recent
-  - Gutter markers (`›` / `·`) and faint line highlights at predicted lines (up to 3)
-  - `Ctrl+]` / `Ctrl+[` to jump to next/previous prediction
-  - No API calls — runs purely from local data, near-instant
-  - Respects speculative aggressiveness setting (disabled in Minimal mode)
-  - Predictions appear after 500ms idle, clear on edit or cursor movement
-
-## [0.1.54] - 2026-03-31
-
-### Added
-
-- **Shared terminal in collab** — Host can share their terminal screen to all connected peers in real-time.
-  - `:share-term` — toggle terminal sharing (host only)
-  - `:view-term` — toggle between local and shared terminal view (client only)
-  - Read-only rendering with cyan border and "Host Terminal (read-only)" title
-  - Throttled snapshots (~7 Hz) with hash-based change detection to minimize bandwidth
-  - Status bar shows `[sharing term]` indicator when active
-  - Automatic cleanup on disconnect or session end
-
-## [0.1.53] - 2026-03-31
-
-### Added
-
-- **Follow mode in collab** — Lock your viewport to a peer's scroll position in real-time.
-  - `:follow <name>` — start following a peer by display name
-  - `:unfollow` — stop following
-  - Viewport syncs automatically: scroll position and file switching
-  - Any local navigation (scroll, cursor move, mouse wheel) breaks follow mode
-  - Status bar shows `FOLLOWING <name>` indicator when active
-  - Backward-compatible: extends awareness protocol with optional scroll fields
-
-## [0.1.52] - 2026-03-31
-
-### Added
-
-- **Terminal inline AI suggestions** — AI suggests shell commands as ghost text at the prompt.
-  - Triggers after 2 seconds idle when terminal is focused and no command is running
-  - Context-aware: uses recent commands, exit codes, and project type (Rust/Node/Go/Python)
-  - Ghost text shown in gray after the cursor on the prompt line
-  - `Tab` to accept (sends command to PTY), any other key dismisses
-  - Requires AI backend (Anthropic API key or Claude Code CLI)
-
-## [0.1.51] - 2026-03-31
-
-### Added
-
-- **Terminal shell integration** — Automatic command boundary and exit code detection via OSC 133 protocol.
-  - Shell hooks injected automatically for zsh and bash (precmd/preexec and PROMPT_COMMAND/PS0)
-  - Command records tracked: command text, exit code, prompt row
-  - Exit code shown in terminal title bar: `[ok]`, `[exit 1]`, or `[running]`
-  - `:fix` command — sends last failed command to AI chat for diagnosis
-  - `commands()`, `last_failed_command()`, `command_running()` API on `EmbeddedTerminal`
-
-## [0.1.50] - 2026-03-31
-
-### Added
-
-- **Multiple terminal tabs** — Spawn and switch between multiple independent terminal instances.
-  - `:term new` — open a new terminal tab
-  - `:term close` — close the active terminal tab
-  - `:term next` / `:term prev` — switch between tabs
-  - `Ctrl+Shift+T` — new terminal tab (when terminal focused)
-  - `Ctrl+Shift+]` / `Ctrl+Shift+[` — switch tabs (when terminal focused)
-  - Tab bar displayed in terminal pane header when multiple tabs exist
-  - Each tab has its own PTY, scrollback, and screen buffer
-  - Task runner sends commands to the active terminal tab
-
-## [0.1.49] - 2026-03-31
-
-### Added
-
-- **Registers modal** (`:registers` or `:reg`) — View all yank and macro registers in a centered modal.
-  - Shows yank register (`"`) and all macro registers (`@a`–`@z`)
-  - `j`/`k` to navigate, `e`/`Enter` to edit a macro, `q`/`Esc` to close
-  - Macro registers shown in green with `@` prefix
-- **Macro editing** — Edit recorded macro key sequences before replaying.
-  - Select a macro register in the registers modal and press `e` or `Enter`
-  - View individual keystrokes with human-readable names (e.g. `C-s`, `Esc`, `Enter`)
-  - `d`/`x`/`Delete` to remove a key from the sequence
-  - `Esc` to return to register list
-
-## [0.1.48] - 2026-03-31
-
-### Added
-
-- **Peek definition** (`gp`) — Inline popup showing a symbol's definition without navigating away.
-  - Syntax-highlighted code with line numbers
-  - Target line highlighted with distinct background
-  - `j`/`k` to scroll within the popup
-  - `Enter` to navigate to the definition (like `gd`)
-  - `Esc`/`q` to close; any other key closes and is processed normally
-  - Works for same-file and cross-file definitions
-  - Scroll position indicator when content exceeds popup height
-
-## [0.1.47] - 2026-03-30
-
-### Fixed
-
-- **Panel toggle shortcuts now close on first press** — `Ctrl+J` (chat), `Ctrl+H` (conversation history), and `Ctrl+I` (AI visor) now immediately close their panel when pressed again, instead of requiring two presses (one to focus, one to close).
-
-### Changed
-
-- Updated chat panel documentation to reflect the simplified toggle behavior.
-
-## [0.1.46] - 2026-03-30
-
-### Added
-
-- **ACP (Agent Client Protocol) server** — Native ACP support over JSON-RPC 2.0 / TCP, making AURA one of the first terminal editors with ACP integration.
-  - **Protocol methods**: `initialize`, `document/read`, `document/edit`, `cursor/context`, `diagnostics/get`, `selection/get`, `file/read`, `file/list`, `file/open`, `editor/info`, `terminal/run`, `project/structure`
-  - **Capabilities**: document sync, diagnostics, editing, selection, file operations, terminal commands, project structure
-  - Starts automatically on a random port alongside the MCP server
-  - Content-Length framed JSON-RPC (same as LSP/DAP)
-  - Any ACP-compatible agent (Claude Code, Copilot CLI, Gemini CLI, Codex) can connect and drive the editor
-
-## [0.1.45] - 2026-03-30
-
-### Added
-
-- **Git stash management** — Full stash support in the source control panel.
-  - New "Stashes" section shows all stashes with name + message
-  - `z` — push current changes to a stash
-  - `p` — pop the selected stash (when in Stashes section)
-  - `d` — drop the selected stash (when in Stashes section)
-  - `:stash`, `:stash pop`, `:stash drop` commands
-  - Stashes refresh automatically with the source control panel
-- **PR creation from editor** — `:pr` or `:pull-request` opens `gh pr create` interactively in the embedded terminal.
-  - Auto-detects current branch, refuses to create PR from main/master
-  - Full interactive `gh` CLI experience (title, body, reviewers)
-
-## [0.1.44] - 2026-03-30
-
-### Added
-
-- **Task runner integration** — Define and run project tasks from `aura.toml`.
-  - `:task <name>` runs a named task in the embedded terminal
-  - `:task` / `:tasks` lists available tasks
-  - Tasks appear in the command palette (Ctrl+P) with "Task:" prefix
-  - Configure in `aura.toml`:
-    ```toml
-    [tasks.build]
-    command = "cargo build"
-    description = "Build the project"
-    ```
-  - **Auto-detection** when no tasks configured:
-    - Rust (Cargo.toml): build, test, clippy, fmt
-    - Node.js (package.json): build, test, lint, dev
-    - Go (go.mod): build, test, fmt
-    - Python (pyproject.toml): test, lint, fmt
-    - Make (Makefile): build, test, clean
-
-## [0.1.43] - 2026-03-30
-
-### Fixed
-
-- **Chat conversation persistence** — Chat messages and AI responses are now reliably saved to the conversation store. The store is explicitly initialized before sending messages and when AI responses complete. AI History panel (Ctrl+H) refreshes after each chat interaction.
-
-### Improved
-
-- **Documentation updated** for all recent features:
-  - Keybindings: Ctrl+O (outline), Ctrl+F (project search), Ctrl+I (AI Visor), LSP keys (gr, gn, F2)
-  - Configuration: `relative_line_numbers` and `word_wrap` settings documented
-  - All new commands documented in command-mode reference
-
-## [0.1.42] - 2026-03-30
-
-### Added
-
-- **Breadcrumbs** — Scope path shown at the top of the editor, updated as you move the cursor.
-  - Format: `file.rs > impl App > fn process_data`
-  - File name in cyan, scope names in light gray, separators dim
-  - Uses tree-sitter `enclosing_scopes()` for accurate scope detection
-  - Automatically hides when cursor is at top-level (no enclosing scopes)
-- **Document Outline** (`Ctrl+O` or `:outline`) — Fuzzy-searchable symbol list for the current file.
-  - Shows all functions, structs, classes, impls, enums, modules, etc.
-  - Type to filter symbols by name
-  - Navigate with `j`/`k` or arrows, `Enter` to jump to symbol
-  - Centered popup following the command palette pattern
-  - Uses tree-sitter foldable ranges — works for all 17+ languages
-
-## [0.1.41] - 2026-03-30
-
-### Added
-
-- **Project rules** — `.aura/rules.md` or `.aura/rules/*.md` files are automatically loaded and injected into every AI system prompt.
-  - Single-file mode: create `.aura/rules.md` with your project's AI instructions
-  - Directory mode: create `.aura/rules/` with multiple `.md` or `.txt` files
-  - Rules loaded on startup, refreshed when chat panel opens
-  - Formatted as "Project Rules" section in the AI context
-  - Teams can version-control shared rules in `.aura/rules/`
-- **@-docs indexing** — Reference project documentation in chat with `@docs:<name>`.
-  - Store docs in `.aura/docs/` directory (`.md` or `.txt` files)
-  - `@docs:react` → injects content of `.aura/docs/react.md`
-  - `@docs` → lists all available documentation files
-  - Autocomplete dropdown shows doc files when typing `@docs:`
-  - Content truncated to 30K chars for large docs
-- **AI Visor** now shows rules and docs counts in the Overview tab.
-
-## [0.1.40] - 2026-03-30
-
-### Improved
-
-- **Documentation overhaul** — Comprehensive docs for all features added since v0.1.29:
-  - AI Features page: @-mentions, autonomous agent mode with full usage guide
-  - Chat Panel page: @-mention autocomplete reference
-  - Keybindings page: surround editing, marks, code folding, LSP navigation, 20+ new commands
-  - All command-mode entries updated (`:agent`, `:search`, `:visor`, `:merge`, `:ref`, `:rename`, `:marks`, `:set rnu`, `:set wrap`, etc.)
-
-## [0.1.39] - 2026-03-30
-
-### Added
-
-- **Autonomous agent mode** — `:agent <task>` lets the AI work autonomously without user approval.
-  - AI loops: plan → edit files → run commands → check results → fix errors
-  - ALL tools auto-approved (reads, edits, commands) during agent session
-  - Configurable iteration limit: `:agent -n 100 <task>` (default: 50)
-  - Status bar shows `AGENT [3/50] 2f 1c 12s` (iterations, files, commands, elapsed)
-  - `Esc` or `:agent stop` to stop the agent at any time
-  - Summary shown on completion: iterations used, files changed, commands run
-  - Enhanced system prompt instructs AI to work autonomously and verify changes
-  - All edits tracked in undo history — fully reversible with `u`
-
-## [0.1.38] - 2026-03-30
-
-### Added
-
-- **Surround editing** (vim-surround style):
-  - `cs<old><new>` — Change surrounding: `cs"'` changes `"hello"` to `'hello'`
-  - `ds<char>` — Delete surrounding: `ds(` removes parens from `(hello)` → `hello`
-  - `ys<motion><char>` — Add surrounding: `ysiw"` wraps word in quotes → `"hello"`
-  - Supports `()`, `{}`, `[]`, `<>`, `""`, `''`, `` ` `` pairs
-- **Relative line numbers** — `:set rnu` / `:set nornu`. Shows distance from cursor; current line shows absolute number.
-- **Marks / bookmarks** — Standard vim marks:
-  - `m{a-z}` sets a mark at current cursor position
-  - `'{a-z}` jumps to a mark
-  - `:marks` lists all set marks
-  - Per-file marks (stored in EditorTab)
-- **Word wrap / soft wrap** — `:set wrap` / `:set nowrap`. When enabled, long lines wrap visually instead of horizontal scrolling.
-
-## [0.1.37] - 2026-03-30
-
-### Added
-
-- **@-mentions in chat** — Type `@` in the chat panel to reference files and context.
-  - `@file.rs` — includes the file's full content in AI context
-  - `@selection` — includes the current editor selection
-  - `@buffer` — includes the current buffer content
-  - `@errors` — includes LSP diagnostics (errors/warnings)
-  - Autocomplete dropdown appears when typing `@`, fuzzy-filtered by filename
-  - Navigate with Up/Down, Enter/Tab to select, Esc to cancel
-  - Multiple @-mentions per message supported
-  - Content injected as labeled sections in the AI system prompt
-
-### Improved
-
-- **Syntax highlighting** — Expanded from 24 to 63 highlight groups for dramatically richer colors across all 17+ languages. Variables, parameters, HTML tags, escape sequences, punctuation, and namespaces now properly colored.
-
-## [0.1.36] - 2026-03-30
-
-### Added
-
-- **Project-wide search/replace** (`Ctrl+F` or `:search`) — Interactive search across all project files with results grouped by file.
-  - Full-screen overlay with search input, optional replace input, and results list.
-  - Results show file path headers (cyan) with line:column + context for each match.
-  - Navigate with `j`/`k`, `Enter` to jump to match location, `Esc` to close.
-  - Replace mode (`Ctrl+R`): type replacement text, `R` to replace all across files.
-  - Case sensitivity toggle (`Ctrl+C`), `Tab` to cycle between search/replace/results.
-  - `:search <query>` and `:grep <query>` commands with argument support.
-  - Skips `.git`, `target`, `node_modules`, binary files (>5MB).
-  - Max 1000 results for responsiveness.
-  - 3 unit tests for search and replace.
-
-## [0.1.35] - 2026-03-30
-
-### Fixed
-
-- **Crash on multi-byte characters** — Fixed panic in Claude Code watcher when activity log contained multi-byte UTF-8 characters (e.g., em-dash `–`). The `truncate()` function now uses char-boundary-safe iteration.
-- **Clippy `is_multiple_of` lint** — Fixed CI failure on Rust 1.94+ where `actual_col % indent_width == 0` triggers `clippy::manual_is_multiple_of`.
-
-## [0.1.34] - 2026-03-30
-
-### Added
-
-- **Code folding** — Fold/unfold code blocks using tree-sitter AST data.
-  - `za` toggle fold, `zc` close fold, `zo` open fold, `zM` close all, `zR` open all.
-  - Foldable ranges auto-detected for functions, structs, classes, impl blocks, if/for/while, modules.
-  - Gutter shows `▶` for folded lines, `▼` for foldable lines.
-  - Folded lines show `··· (N lines)` indicator.
-- **Sticky scroll** — Pinned scope headers at the top of the editor (up to 3 lines).
-  - Shows enclosing function/class/impl/module names when they scroll out of view.
-  - Dark gray background with thin separator line.
-  - Uses tree-sitter to determine enclosing scopes.
-- **Indent guides** — Vertical `│` lines at indent level boundaries.
-  - Rendered in subtle gray (`Rgb(60,60,60)`) at each indent width boundary.
-  - Respects the file's detected indent style (spaces or tabs).
-- **Rainbow bracket colorization** — Brackets colored by nesting depth using a 6-color palette (Yellow, Magenta, Cyan, Green, Blue, Red).
-  - Applies to `()`, `{}`, `[]` across all languages.
-  - Depth calculated from file start for accuracy.
-- **Auto-close brackets and quotes** — Typing `(`, `{`, `[`, `"`, `'` auto-inserts the matching closing character with cursor positioned between them.
-  - Smart skip: if next character is already the closing pair, doesn't insert duplicate.
-
-## [0.1.33] - 2026-03-29
-
-### Added
-
-- **AI Visor panel** (`Ctrl+I` or `:visor`) — Claude Code configuration browser showing the `.claude/` folder contents in a tabbed right-side panel. No other editor provides this feature.
-  - **Overview tab**: Model, effort level, CLAUDE.md status, stats dashboard.
-  - **Settings tab**: Merged settings cascade with scope indicators `[G]`lobal/`[P]`roject/`[L]`ocal, color-coded.
-  - **Skills tab**: Lists skills from `.claude/skills/` and legacy `.claude/commands/` with descriptions.
-  - **Hooks tab**: Shows configured hooks by event type (PreToolUse, PostToolUse, Stop, etc.).
-  - **Plugins tab**: Installed Claude Code plugins from `~/.claude/plugins/`.
-  - Navigate with `1`-`5` (tabs), `j`/`k` (items), `e`/`Enter` (open source file), `Tab` (cycle tabs).
-
-## [0.1.32] - 2026-03-29
-
-### Added
-
-- **Undo tree visualization** (`:undo-tree` or `:ut`) — Full-screen modal showing the complete edit history with author colors, timestamps, and edit previews.
-  - Two-panel layout: entry list (65%) + detail panel (35%).
-  - Author-colored entries: Human (green), AI (cyan), Peer (magenta).
-  - Current position marked with `→` in yellow, redo entries shown dimmed.
-  - `j`/`k` navigate, `d`/`u` page, `Enter` restores to any history point, `t` toggles detail.
-  - `Buffer::restore_to(pos)` — time-travel through undo history by undoing/redoing to reach target.
-
-## [0.1.31] - 2026-03-29
-
-### Added
-
-- **Find All References** (`gr` or `:ref`) — Floating panel showing all references to a symbol, navigate with `j`/`k`, `Enter` to jump.
-- **Rename Symbol** (`F2`, `gn`, or `:rename <name>`) — LSP-powered rename across all files. Edits current buffer directly and other files on disk.
-- **LSP request ID tracking** — Replaced shape-based response dispatch with ID-based method tracking, enabling accurate disambiguation of References vs Definition responses.
-
-## [0.1.30] - 2026-03-29
-
-### Added
-
-- **3-panel merge conflict editor** — VS Code-style merge resolution with Incoming (theirs) | Current (ours) | Result panels.
-  - Conflict files shown with magenta **C** status in source control panel.
-  - Press Enter on a conflict file to open the merge editor.
-  - Resolve conflicts with `1` (current), `2` (incoming), `3`/`4` (both), `5` (ignore).
-  - Navigate conflicts with `n`/`N`, cycle panels with `Tab`.
-  - Result panel updates in real-time as you resolve conflicts.
-  - Press `c` to complete merge — writes resolved file and stages it automatically.
-  - Unit tests for conflict parsing, resolution, and result generation.
-- **TLS encryption for collaborative editing** — Enable `use_tls = true` in `[collab]` config to encrypt all peer traffic with rustls.
-  - Self-signed certificates generated automatically via rcgen.
-  - WireReader/WireWriter transport abstraction supports both plaintext TCP and TLS.
-  - Works with authentication tokens for defense in depth.
-- **Global panel-switching shortcuts** — `Ctrl+T/G/N/J/H/,` now work from any focused panel without needing to press `Esc` first.
-
-## [0.1.29] - 2026-03-29
-
-### Added
-
-- **Integrated debugger (DAP protocol)** — Full debug adapter protocol support for stepping through code, setting breakpoints, and inspecting variables directly in the editor.
-  - **Breakpoints**: Toggle with F9 or `:bp` — red dots in the gutter, persist across sessions.
-  - **Debug controls**: F5 (continue/start), F10 (step over), F11 (step in), Shift+F11 (step out), Shift+F5 (stop).
-  - **Debug panel**: Bottom panel with three tabs — Call Stack, Variables (expandable tree), and Output.
-  - **Auto-detection**: Automatically finds CodeLLDB (Rust/C/C++), debugpy (Python), dlv (Go), and Node.js debug adapters.
-  - **Custom adapters**: Configure any DAP adapter in `aura.toml` under `[debuggers]`.
-  - **Gutter indicators**: Red `●` for breakpoints, yellow `→` for current execution line, `⏸` for breakpoint+stopped.
-  - **Commands**: `:debug`, `:debug <program>`, `:breakpoint`, `:continue`, `:step`, `:stepin`, `:stepout`, `:debug stop`, `:debug panel`.
-
-## [0.1.28] - 2026-03-28
-
-### Fixed
-
-- **Subtler comment colors** — Comments now render in a softer gray (`Rgb(100,100,100)`) instead of bright `DarkGray`, making them clearly distinct from code text across all 17+ languages.
-
-## [0.1.27] - 2026-03-28
-
-### Summary — Session Highlights (v0.1.2 → v0.1.27)
-
-This release consolidates 27 versions of feature development:
-
-- **Collaborative editing** — Real-time multi-file collab with auth tokens and peer cursors
-- **Vim power features** — Operator+motion, text objects, char search, visual block, multi-cursor, dot repeat, macros
-- **17+ languages** — Tree-sitter highlighting + LSP for Rust, Python, TypeScript, Go, Java, C/C++, Ruby, HTML, CSS, JSON, YAML, TOML, Bash, Markdown, JSX/TSX
-- **Git integration** — Visual graph modal, branch picker, stage-all button, AI commit messages, syntax-highlighted diff view, filename-first entries, dotfiles visible
-- **AI features** — Conversation compaction with AI summarization, Claude Code activity observer, command palette, interactive chat with tool execution
-- **Editor UX** — Split panes, settings modal, optional minimap, tab close buttons, Lua plugin runtime, code snippets (32 built-in)
-- **Code quality** — No unwrap() in library code, LSP auto-restart, community standards
-
-## [0.1.26] - 2026-03-28
-
-### Added
-
-- **Visual git graph modal** — `:graph` opens a full-screen modal showing commit history with ASCII branch graph lines, colored by branch. Left panel shows graph + commit hash + message + time. Right panel shows selected commit detail: full hash, author, date, refs, and changed files with status (M/A/D) and filename-first display. Navigate with j/k, page with d/u, Enter toggles detail panel, Esc closes.
-
-## [0.1.25] - 2026-03-28
-
-### Added
-
-- **Documentation update** — Comprehensive docs for all features added in v0.1.18-v0.1.24: snippets (usage, built-in list, custom snippets), multi-cursor editing, visual block mode, branch picker, keybindings for all new shortcuts.
-
-## [0.1.24] - 2026-03-28
-
-### Added
-
-- **Snippet system** — Tab-triggered code snippets with `${1:placeholder}` syntax. Type a trigger word (`fn`, `if`, `for`, `def`, `class`, etc.) and press Tab to expand. Tab moves between placeholders. Built-in snippets for Rust (10), Python (6), TypeScript/JS (8), Go (6), and generic (2). User-defined snippets from `~/.aura/snippets/*.json` in VS Code format.
-
-## [0.1.23] - 2026-03-28
-
-### Added
-
-- **Multi-cursor editing** — `Ctrl+D` adds a cursor at the next occurrence of the word under cursor. Type to insert at all cursor positions simultaneously. Secondary cursors rendered as yellow blocks. `Esc` clears all secondary cursors.
-
-## [0.1.22] - 2026-03-28
-
-### Added
-
-- **Syntax highlighting in diff view** — The side-by-side git diff view now applies tree-sitter syntax highlighting to all lines (unchanged, added, deleted). Supports all 17+ languages including JS/TS/JSX/TSX/React.
-- **Branch picker shortcut** — `Ctrl+B` opens the branch picker modal from any mode.
-- **Improved JS/TS/React/Next.js support** — `.jsx` uses TSX grammar for JSX highlighting. `.mjs`, `.cjs`, `.mts` extensions added. Full typescript-language-server LSP support.
-- **Dotfiles visible** — File tree shows `.env`, `.gitignore`, `.eslintrc`, etc.
-- **Filename-first git entries** — Git panel shows filename bold first, directory dimmed after.
-- **Branch picker modal** — `:branches` / `:br` / `Ctrl+B` opens VS Code-style branch switcher with filter.
-
-## [0.1.21] - 2026-03-28
-
-### Added
-
-- **Improved JS/TS/React/Next.js support** — `.jsx` now uses the TSX grammar for proper JSX syntax highlighting. Added `.mjs`, `.cjs`, `.mts` extensions for ES modules and CommonJS. All get typescript-language-server LSP support. Covers Next.js config files (`next.config.mjs`, etc.).
-
-## [0.1.20] - 2026-03-28
-
-### Added
-
-- **Visual block mode** — `Ctrl+V` enters V-BLOCK mode for rectangular column selection. Block delete (`d`), yank (`y`), insert (`I`), and append (`A`).
-- **Branch picker modal** — `:branches` / `:br` opens a VS Code-style branch picker. Filter by typing, Enter to switch, current branch highlighted in green. Git errors shown on failed checkout.
-- **Filename-first git entries** — Git panel shows filename in bold white first, then directory in gray (like Cursor/VS Code). No more truncated filenames.
-- **Dotfiles visible** — File tree now shows `.env`, `.gitignore`, `.eslintrc`, etc. Only `.git`, `.aura`, `target`, `node_modules` are hidden.
-
-### Fixed
-
-- **Diff view colors** — Dark green/red backgrounds instead of blinding bright colors.
-- **TODO.md** — Fixed section 10.7 formatting.
-
-## [0.1.19] - 2026-03-28
-
-### Added
-
-- **Visual block mode** — `Ctrl+V` enters column selection mode (V-BLOCK). Select rectangular regions, delete columns with `d`, yank blocks with `y`, insert at block start with `I`, append with `A`. Block selections highlighted per-cell in the editor.
-
-### Fixed
-
-- **Diff view colors** — Toned down additions (dark green bg) and deletions (dark red bg) for much better readability.
-- **TODO.md formatting** — Fixed section 10.7 heading and checklist formatting.
-
-## [0.1.18] - 2026-03-28
-
-### Added
-
-- **TLS infrastructure** — Self-signed certificate generation (rcgen), rustls ServerConfig/ClientConfig builders, NoCertVerifier for self-signed certs, and TLS relay thread for encrypted streams. Dependencies wired: rustls 0.23, rcgen 0.13. Stream encryption integration pending reader/writer architecture refactor.
-- **Community standards** — Code of Conduct (Contributor Covenant v2.1), Security Policy, Issue Templates (bug report, feature request, question), Pull Request Template.
-
-## [0.1.17] - 2026-03-28
-
-### Added
-
-- **Conversation detail modal** — Press Enter twice on a conversation in the AI History panel to open a full-screen modal with word-wrapped messages, file/branch/time header, acceptance rate, and scrollable content. Solves truncated text in the narrow side panel.
-- **AI History panel improvements**: branch grouping, intent-based titles, relative timestamps, search (`/`), acceptance rate badges, smart truncation.
-- **Claude Code activity observer** — Background watcher tails Claude Code's JSONL logs. Shows real-time activity in status bar.
-- **MCP `report_activity` and `get_editor_state` tools** — Claude Code reports activity and queries editor state.
-- **Fuzzy command palette** — `Ctrl+P` for unified search across commands, files, and settings.
-- **LSP auto-restart** — Automatic recovery when LSP server disconnects.
-
-## [0.1.16] - 2026-03-28
-
-### Added
-
-- **AI History panel improvements**:
-  - **Branch grouping** — Conversations grouped by git branch with colored section headers
-  - **Intent-based titles** — Shows the user's original request instead of generic "The developer and AI"
-  - **Relative timestamps** — "2h ago", "3d ago" instead of raw ISO-8601
-  - **Search/filter** — Press `/` to search conversations by title, file, or branch
-  - **Acceptance rate badges** — Green/red `[2/3]` indicator showing accepted vs rejected proposals
-  - **Smart truncation** — Text truncated at word boundaries, not mid-word
-  - **Decision stats** — New `decision_stats()` query for per-conversation accept/reject counts
-
-## [0.1.15] - 2026-03-28
-
-### Added
-
-- **Claude Code activity observer** — Background watcher that tails Claude Code's JSONL conversation logs (`~/.claude/projects/`) in real-time. Displays tool calls, responses, and progress events in AURA's status bar (e.g., "CC: Read: main.rs", "CC: Running cargo test...").
-- **MCP `report_activity` tool** — Claude Code can proactively report what it's doing to AURA's agent registry (activity type, description, current task).
-- **MCP `get_editor_state` tool** — Claude Code can query AURA's full state: current mode, open files, cursor position, diagnostics count, modification status.
-- **Enhanced agent registry** — Agents now track `last_activity`, `current_task`, and `activity_count`.
-
-### Fixed
-
-- **LSP auto-restart** — When the LSP server disconnects (crash/OOM), AURA now automatically restarts it instead of leaving it dead.
-
-## [0.1.14] - 2026-03-28
-
-### Added
-
-- **Command palette** — VS Code-style `Ctrl+P` fuzzy search across commands, files, and settings in one overlay. Type to filter, Enter to execute. Commands show `[cmd]` badge, files show `[file]`, settings show `[set]`. 24 commands, all workspace files, and 3 settings available.
-
-## [0.1.13] - 2026-03-28
-
-### Added
-
-- **Dot repeat** — `.` replays the last edit (Insert-mode change sequences like `cw`, `s`, `o` + typed text). Press `.` to repeat the same change at a new cursor position.
-- **Macro recording** — `q{a-z}` starts recording all keystrokes into a named register. `q` stops recording. `@{a-z}` plays back the macro. Record complex edit sequences and replay them instantly.
-
-## [0.1.12] - 2026-03-28
-
-### Added
-
-- **Remote collaboration** — Collaboration sessions can now be hosted on all network interfaces (`bind_address = "0.0.0.0"` in `aura.toml`) for internet access. Token-based authentication prevents unauthorized access: host generates a token, clients must provide it to join.
-- **Authentication tokens** — `:host` generates a token when `require_auth = true`. Clients join with `:join addr:port token` or `--join addr --token TOKEN`. Rejected connections get a clear error.
-- **Configurable bind address** — `bind_address` in `[collab]` config controls whether the host listens on localhost only or all interfaces.
-
-## [0.1.11] - 2026-03-27
-
-### Added
-
-- **Lua plugin runtime** — Dynamic plugin loading from `~/.aura/plugins/*.lua`. Each Lua script defines a `plugin` table with callbacks: `on_load()`, `on_key(mode, key)`, `on_save(path)`, `on_intent(intent)`. Plugins can return actions (`cmd:`, `insert:`, `status:`) to control the editor. Auto-discovered on startup.
-
-## [0.1.10] - 2026-03-27
-
-### Fixed
-
-- **Update installer** — The in-app updater now always uses the shell installer (`curl ... | sh`) instead of `cargo install` which requires crates.io publishing. Works reliably for all installation methods.
-
-## [0.1.9] - 2026-03-27
-
-### Added
-
-- **12 new language grammars** — Tree-sitter syntax highlighting for JavaScript, Java, C, C++, Ruby, HTML, CSS, JSON, Bash, TOML, YAML, and Markdown. Total: 17 languages supported.
-- **6 new LSP servers** — Language server detection for Java (jdtls), C/C++ (clangd), Ruby (solargraph), and Bash (bash-language-server), in addition to existing Rust, Python, TypeScript, and Go servers.
-
-## [0.1.8] - 2026-03-27
-
-### Added
-
-- **Operator-pending mode** — Full vim operator+motion system: `dw`, `d$`, `cw`, `ce`, `yw`, `yb`, etc. Operators (`d`, `c`, `y`, `>`, `<`) wait for a motion, then apply to the range.
-- **Count prefix** — `3j`, `5dw`, `2dd`, etc. Numeric prefixes multiply motions and operations.
-- **Text objects** — `ci"`, `da(`, `diw`, `yaw`, `ci{`, `di[`, `ca<`, etc. Inner (`i`) and around (`a`) variants for quotes, parentheses, braces, brackets, angle brackets, and words.
-- **Character search** — `f{char}`, `F{char}`, `t{char}`, `T{char}` to jump to characters on the current line. `;` and `,` to repeat/reverse the search.
-- **Essential vim commands** — `r{char}` (replace), `J` (join lines), `~` (toggle case), `s` (substitute), `S`/`cc` (substitute line), `C`/`c$` (change to EOL), `D`/`d$` (delete to EOL), `Y` (yank line), `*`/`#` (search word under cursor).
-- **Indent/dedent operators** — `>>` and `<<` for indenting/dedenting lines, with count support (`3>>`).
-
-## [0.1.7] - 2026-03-27
-
-### Added
-
-- **Split panes** — Vertical (`:vsplit`) and horizontal (`:hsplit`) editor splits. View two files side-by-side with independent scroll, minimap, and git markers. `Ctrl+W` toggles focus. `:only` closes the split.
-
-## [0.1.6] - 2026-03-27
-
-### Added
-
-- **Split panes** — Vertical (`:vsplit`) and horizontal (`:hsplit`) editor splits. View two files or the same file side-by-side. `Ctrl+W` toggles focus between panes. `:only` closes the split. Each pane has its own title, border highlighting, minimap, and scroll position.
-- **Settings modal** — Interactive settings overlay (`Ctrl+,` or `:settings`). Toggle editor options live: minimap, line numbers, authorship markers, tab settings, scroll margin, conversation compaction, update checker. Changes apply immediately.
-- **Optional minimap** — The scrollbar minimap can now be toggled on/off via the settings modal or `show_minimap` in `aura.toml`.
-
-## [0.1.5] - 2026-03-27
-
-### Changed
-
-- **CrdtDoc API** — `new()`, `splice()`, and `text()` now return `Result` instead of panicking. Buffer operations gracefully handle CRDT failures.
-
-### Fixed
-
-- **Code quality** — Removed all `unwrap()` from library code. Replaced with proper error handling, `Result` propagation, or descriptive `expect()` for provably-safe operations across 8 files.
-
-## [0.1.4] - 2026-03-27
-
-### Added
-
-- **Conversation compaction** — Configurable retention policies for the conversation database via `[conversations]` in `aura.toml`. Auto-compact on startup, `:compact` command for manual cleanup. Deletes old messages, trims per-conversation history, removes excess conversations.
-- **AI conversation summarization** — Long conversations are automatically summarized by Claude in the background. Summaries replace old messages as context for future AI calls.
-- **Context window management** — Chat panel caps context messages sent to AI per turn (default: 40), preventing unbounded memory and token growth.
-- **AI commit message button** — Sparkle (`✨`) button on the "Commit Message" header in the git panel. Generates commit messages from staged diff with streaming preview.
-- **Stage all button** — Green `+` button on the "Changes" header in the git panel. Also available via `Shift+S`.
-
-### Changed
-
-- **CrdtDoc API** — `new()`, `splice()`, and `text()` now return `Result` instead of panicking on error. All buffer operations gracefully handle CRDT failures.
-
-### Fixed
-
-- **Update checker** — `:update` command now forces a fresh GitHub API check instead of returning stale cached results.
-- **Code quality** — Removed all `unwrap()` calls from library code (convention: unwrap only in tests). Replaced with proper error handling, `Result` propagation, or descriptive `expect()` for provably-safe operations. Affected: crdt.rs, buffer.rs, app.rs, collab.rs, mcp_server.rs, mcp_client.rs, chat_panel.rs, client.rs.
-
-## [0.1.3] - 2026-03-27
-
-### Added
-
-- **Stage all button** — Green `+` button on the "Changes" header in the git source control panel. Click to stage all unstaged files at once. Also available via `Shift+S` keyboard shortcut.
-- **AI commit message button** — Sparkle (`✨`) button on the "Commit Message" header in the git panel. Click to generate a commit message from staged changes using AI. The message streams into the commit message box in real-time for review before committing. Also available via `:commit` / `:gc` commands.
-- **Conversation compaction** — Configurable retention policies for the conversation database via `[conversations]` in `aura.toml`. Auto-compact on startup deletes old messages, trims per-conversation history, and removes excess conversations. Manual compaction via `:compact` command.
-- **AI conversation summarization** — Long conversations are automatically summarized by Claude in the background. Summaries replace old messages as context for future AI calls, keeping the database lean and API calls efficient.
-- **Context window management** — Chat panel limits context messages sent to AI per turn (default: 40), preventing unbounded memory growth during long sessions.
-
-### Fixed
-
-- **Update checker**: `:update` command now forces a fresh GitHub API check instead of returning stale cached results. Shows status message for all check outcomes (available, up-to-date, error).
-
-## [0.1.2] - 2026-03-27
-
-### Added
-
-- **Real-time collaborative editing** — Multiple AURA instances can edit the same file over TCP with automerge CRDT conflict-free merging. Colored peer cursors with name labels, selection highlighting, automatic reconnection with exponential backoff, and incremental rope reconciliation. Start with `--host` / `--join` CLI flags or `:host` / `:join` commands.
-- **Multi-file collaborative sessions** — Host shares all open files in a single session. Clients auto-open tabs for each file. Sync messages routed by file identifier. Peer cursors filtered to the active tab.
-- **Tab close buttons** — Clickable `×` on each tab with save/discard/cancel confirmation dialog for unsaved changes. Tab bar now always visible.
-- **`AuthorId::Peer` variant** — Remote human peers tracked with unique colors (6-color rotating palette).
-- **Collaborative editing documentation** — New user guide page, updated architecture docs, README, and CONTRIBUTING.
-
-## [0.1.1] - 2026-03-27
-
-### Added
-
-- **Modal editor** with Vim-inspired modes: Normal, Insert, Command, Visual, Visual Line, Intent, Review, Diff.
-- **Rope-based buffer** (`ropey`) with CRDT authorship tracking (`automerge`) for conflict-free multi-author editing.
-- **AI co-authoring** via Anthropic API — Intent mode for expressing edits in natural language, Review mode for accepting/rejecting AI proposals, ghost text suggestions from speculative background analysis.
-- **Interactive chat panel** — multi-turn conversational AI with tool execution (read/edit buffer, diagnostics) and approval flow.
-- **Tree-sitter syntax highlighting** for Rust, Python, TypeScript, and Go.
-- **LSP client** — diagnostics, hover, go-to-definition, code actions, document symbols.
-- **MCP protocol** — built-in MCP server exposing editor tools/resources, MCP client for connecting to external servers, Claude Code bridge integration.
-- **Git integration** — diff markers, inline blame, staging/unstaging, committing, branch management, Aura-Conversation commit trailers.
-- **Source control panel** — sidebar for reviewing and staging changes.
-- **Embedded terminal** — PTY-backed terminal pane with full VT emulation.
-- **File tree sidebar** with directory navigation.
-- **Fuzzy file picker** overlay.
-- **Tab management** — multi-buffer editing with tab bar.
-- **Session persistence** — open tabs, cursor positions, scroll offsets, and UI layout saved on exit and restored on reopen.
-- **Conversation history** — SQLite-backed storage of all AI interactions with searchable history panel.
-- **Semantic indexer** — lightweight dependency graph for cross-file awareness.
-- **Plugin system** — trait-based plugin architecture with manager.
-- **Configuration** via `aura.toml` — themes (dark, light, monokai, custom), keybindings, AI settings, editor preferences.
-- **In-app update checker** — background check against GitHub Releases API with floating notification toast, interactive update modal (Y/N), and `:update` / `:version` commands.
-- **Mouse support** — click-to-position, click-and-drag visual selection, scroll wheel, clickable sidebar tabs (Files/Git), clickable git panel entries, clickable editor tab bar.
-- **Quit-all commands** — `:qa`, `:qa!`, `:wqa` for closing all tabs at once.
-- **Find and replace** with regex support.
-- **Release automation** via cargo-dist — GitHub Actions, shell installer, Homebrew formula, cross-platform builds (macOS, Linux, Windows).
-- **Real-time collaborative editing** — Multiple AURA instances can edit the same file over TCP. Automerge CRDT handles conflict-free merging. Colored peer cursors with name labels, selection highlighting, automatic reconnection with exponential backoff, and incremental rope reconciliation for performance. Start with `--host` / `--join` CLI flags or `:host` / `:join` commands.
-- **Tab close buttons** — Clickable close button on each tab in the tab bar with save/discard confirmation dialog for unsaved changes.
-- **Comprehensive documentation** — mdBook user guide, architecture docs, API reference, all deployed to GitHub Pages.
-
-[0.1.1]: https://github.com/odtorres/aura/releases/tag/v0.1.1
+- Rope-based text buffer (ropey) with efficient large file handling
+- Vim-like modal editing: Normal, Insert, Visual, VisualLine, Command modes
+- Core vim motions: hjkl, w/b/e, 0/$, gg/G, f/F/t/T, text objects
+- File open/save/close with unsaved changes protection
+- Undo/redo with edit history
+- Status bar, command bar, line numbers, viewport scrolling
+- Property-based testing with proptest
+
+---
+
+[1.0.2]: https://github.com/odtorres/aura/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/odtorres/aura/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/odtorres/aura/compare/v0.9.4...v1.0.0
+[0.8.0]: https://github.com/odtorres/aura/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/odtorres/aura/compare/v0.6.2...v0.7.0
+[0.6.0]: https://github.com/odtorres/aura/compare/v0.5.7...v0.6.0
+[0.5.0]: https://github.com/odtorres/aura/compare/v0.4.25...v0.5.0

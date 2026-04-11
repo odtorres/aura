@@ -21,11 +21,25 @@ Current editors treat AI as a plugin — a guest in a house built for a single h
 
 <!-- ANCHOR: overview-end -->
 
-## Status
+## Status — v1.0 Released
 
-**All development phases complete.** AURA is a fully-featured AI-native editor with CRDT-based multi-author editing, Anthropic AI integration, Tree-sitter syntax highlighting, LSP support, MCP protocol, speculative execution, git integration, an embedded PTY terminal, real-time collaborative editing, and a plugin system.
+**AURA v1.0 is here.** 325 roadmap items complete across 13 development phases. 88 commits, 65+ modules, 281 tests, 10 themes, 3 AI providers.
 
-See [TODO.md](TODO.md) for the full roadmap and phase history.
+### Highlights
+
+| Category | Features |
+|----------|----------|
+| **AI** | Multi-provider (Claude, GPT, Ollama), inline completions, agent mode, RAG indexing, context pinning, checkpoints, PR review |
+| **Editing** | Vim modal editing, multi-cursor, macros, text objects, surround, code folding, breadcrumbs, sticky scroll |
+| **Intelligence** | Tree-sitter (17+ languages), LSP (10+ servers), semantic highlighting, inlay hints, code lens |
+| **Git** | Source control panel, interactive rebase, diff view, graph, branches, stash, blame, AI commit messages |
+| **Collaboration** | Real-time CRDT editing, peer cursors, follow mode, shared terminal |
+| **Terminal** | Embedded PTY, tabs, split panes, shell integration, AI command suggestions |
+| **Plugins** | Lua + WASM plugins, marketplace, plugin.toml metadata |
+| **UI** | 10 themes, zen mode, markdown preview, minimap, command palette, settings modal |
+| **Remote** | SSH editing, HTTP client, notebook/REPL, image preview |
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 <!-- ANCHOR: quickstart-start -->
 
@@ -337,175 +351,10 @@ AURA uses vim-inspired modal editing with additional modes for AI interaction:
 
 <!-- ANCHOR: techstack-end -->
 
-## New in v0.4 (Phase 12)
 
-### AI & Agent System
-- **Autonomous agent mode** with subagents, planning phases, trust levels (`:agent <task>`)
-- **Per-feature AI model config** — use haiku for commits, sonnet for chat (`commit_model`, `agent_model`, etc.)
-- **Agent diff review** — review all changes after agent completes (`:agent diff`)
-- **Chat context sliding window** with automatic summarization
+## Release History
 
-### LSP Intelligence
-- **Inlay hints** — inline type annotations and parameter names
-- **Semantic highlighting** — 23 token type colors from LSP semantic tokens
-- **Code lens** — reference counts at end of function lines
-- **Call hierarchy** — show incoming callers (`:calls`)
-- **Signature help** — active parameter highlighting on `(` and `,`
-- **Cross-file rename** — updates all open tab buffers
-
-### Editing Features
-- **Toggle comment** — `gc` or `:comment` (language-aware: `//` `#` `--` etc.)
-- **Move line** — `Alt+j`/`Alt+k` moves current line
-- **Visual wrap** — select text, type `(` `"` `[` to wrap in brackets/quotes
-- **`:%s/old/new/g`** — vim-style search and replace
-- **`:sort` / `:sort!`** — sort lines alphabetically or reverse
-- **`:upper` / `:lower`** — convert selection case
-- **`:duplicate`** — duplicate current line
-- **`:trim`** — trim trailing whitespace
-- **`:encoding lf/crlf`** — convert line endings
-- **Block visual I/A** — insert/append text to all selected lines
-- **`ge` / `gE`** — backward word/WORD end motions
-- **`J` with count** — `3J` joins 3 lines
-- **`:N`** — jump to line N
-
-### UI & Navigation
-- **Enhanced minimap** — 12-column code preview with scrollbar
-- **Rainbow indent guides** — colored by nesting depth
-- **Incremental search** — live match highlighting as you type
-- **Search history** — Up/Down arrows, persisted across sessions
-- **Command palette shortcuts** — keyboard shortcuts shown beside commands
-- **File size + line count** in status bar
-- **Selection word count** — `3L 12W 87C` in visual mode
-- **Pinned tabs** — `:pin` / `:unpin`, protected from close
-- **Tab reordering** — `:tabmove left/right`
-- **Status bar click** — opens command palette
-- **Diagnostic hints** — shows `<leader>f to fix` in popup
-
-### Configuration & Workflow
-- **Settings hot-reload** — `aura.toml` changes apply without restart
-- **EditorConfig** — `.editorconfig` support for indent, line endings
-- **Auto-format on save** — `format_on_save = true` (rustfmt, prettier, etc.)
-- **Auto-save** — `auto_save_seconds = 30`
-- **Auto clipboard sync** — yank copies to system clipboard
-- **Named sessions** — `:session save/load/list/delete`
-- **`:cd` / `:pwd`** — change working directory
-- **Snippet variables** — `$TM_FILENAME`, `$CURRENT_DATE`, etc.
-
-### Terminal & Debug
-- **Terminal search** — `Ctrl+F` searches scrollback
-- **Conditional breakpoints** — `:breakpoint if <condition>`
-- **Watch expressions** — `:watch <expr>` / `:unwatch`
-- **Debug variable expansion** — Enter to expand/collapse variable tree
-- **Split scroll sync** — `:scrollsync`
-
-### New in v0.4.4
-- **`:run`** — run current file (cargo run, python, node, go, etc.)
-- **`:test`** — run tests (cargo test, pytest, npm test, etc.)
-- **Gutter click breakpoint** — click line number to toggle breakpoint
-- **Word highlight** — all occurrences of word under cursor highlighted automatically
-- **`:upper` / `:lower`** — convert selection case
-- **`:trim`** — trim trailing whitespace
-- **`:encoding lf/crlf`** — convert line endings
-- **`:cd` / `:pwd`** — change working directory
-- **`:run`** — smart run current file by language
-- **`:test`** — smart test by language
-- **`:recent`** — show recently opened files
-- **`:set number/nonumber`** — toggle line numbers
-- **`:set minimap/nominimap`** — toggle minimap
-- **Ctrl+Z** — undo in any mode
-- **Gutter click** — toggle breakpoint on line number
-- **Word highlight** — auto-highlight all occurrences of word under cursor
-- **`:count` / `:wc`** — document stats (lines, words, chars, size)
-- **`:diff`** — diff unsaved changes vs file on disk
-- **Ctrl+A** — select all (visual line mode)
-- **`:open <folder>`** — open folder in file tree sidebar
-- **Test runner** — auto-discover tests (Rust, Python, JS, Go), green ▶ gutter markers, `:test-at` runs test at cursor
-- **`:collab-readonly <peer>`** — toggle read-only mode for collaboration peers
-- **Workspace / multi-root** — `:workspace add/remove/list` for multi-folder projects, persisted in session
-- **`:count` / `:wc`** — document statistics
-- **`:diff`** — diff unsaved changes vs file on disk
-- **Ctrl+A** — select all
-
-### New in v0.4.9
-- **Persistent settings** — settings modal changes (minimap, line numbers, tab width, etc.) are saved to `aura.toml` and survive restarts
-- **Ctrl+T terminal toggle fix** — `Ctrl+T` / `` Ctrl+` `` now correctly toggles the terminal closed when focused (previously the keystroke was swallowed by the PTY)
-- **Ctrl+G git panel toggle fix** — `Ctrl+G` now properly toggles the source control panel on/off (close branch was unreachable)
-- **`g` shortcut in git panel** — press `g` in the source control panel to generate an AI commit message (like `c` for commit)
-- **Indent guide rendering fix** — rainbow indent guides no longer render on top of code text for languages with mixed/tab indentation; guides use visual-column-aware counting and skip non-whitespace cells
-- **Agents tab in AI Visor** — `:visor` now has a 6th tab showing discovered agents from `.claude/agents/` (project) and `~/.claude/agents/` (global); press `6` or Tab to navigate, Enter to open agent file
-
-### New in v0.4.10
-- **AI Visor documentation** — new docs page covering all 6 visor tabs (Overview, Settings, Skills, Hooks, Plugins, Agents)
-- **Updated docs** — terminal, git, keybindings, and configuration pages updated with v0.4.9 features
-
-### New in v0.4.11
-- **Update notification `u` key** — press `u` to accept the update notification (click still works)
-- **`.aura` folder visible** — removed from file tree skip list so all dotfolders are browsable
-
-### New in v0.4.12
-- **File tree scroll fix** — expanding a folder no longer jumps the viewport; scroll offset is now persistent and only adjusts when the selection goes off-screen
-
-### New in v0.4.13
-- **Config moved to `.aura/aura.toml`** — configuration now lives inside the `.aura/` folder; legacy `aura.toml` in project root is still supported
-- **Crash fix** — opening `aura.toml` after changing settings no longer panics (ropey char-index-out-of-bounds); buffer is reloaded and cursor clamped after config save
-
-### New in v0.4.14
-- **Interactive rebase UI** — `:rebase` or `:rebase N` opens a visual `git rebase -i` modal with per-commit actions (pick/reword/edit/squash/fixup/drop), Alt+j/k to reorder, `w` to execute
-- Color-coded actions: green=pick, cyan=reword, yellow=edit, magenta=squash, blue=fixup, red=drop
-
-### New in v0.4.15
-- **Remote SSH editing** — `:ssh user@host:/path/to/file` opens and edits files on remote machines via SSH; saves go back to the remote host automatically
-- Uses your existing SSH config, keys, and known hosts — no extra setup needed
-- `Buffer::from_text()` and `Buffer::clear_modified()` added to core for remote file support
-
-### New in v0.4.16
-- **Plugin marketplace** — `:plugin search` opens a modal to browse, install, and uninstall plugins from a git-based registry
-- `:plugin install/uninstall/update/list` commands for CLI-style management
-- Plugins use `plugin.toml` for metadata (name, version, description, author)
-- Registry configurable in `aura.toml` via `[plugins] registry = "..."`
-- Color-coded: green=installed, yellow=update available, white=new
-
-### New in v0.4.17
-- **Discard staged changes** — press `d` on staged files to unstage and discard with `y` confirmation (previously only worked on unstaged changes)
-
-### New in v0.4.18
-- **Homebrew distribution** — `brew tap odtorres/aura && brew install aura` now works with prebuilt binaries for macOS (ARM/Intel) and Linux (ARM/x86)
-
-### New in v0.4.19
-- **File tree actions** — full file management in the sidebar:
-  - `r` rename, `D`/Delete delete (with `y` confirm), `a` new file, `A` new directory
-  - `y` copy, `x` cut, `p` paste — vim-style clipboard for files
-  - `.` reveal in Finder (macOS) / file manager (Linux) / Explorer (Windows)
-
-### New in v0.4.20
-- **Diff view as tabs** — opening a diff from the git panel now creates a real tab (`[diff] filename`), so you can switch between files and come back to the diff; close with `Esc`/`q` or the tab close button
-
-### New in v0.4.21
-- **Ctrl+T / Ctrl+N toggle fix** — panel toggle shortcuts now properly close panels on second press (state was cleared before checking, making the close branch unreachable)
-
-### New in v0.4.22
-- **Theme picker in settings** — 10 built-in themes selectable from the settings modal (`Ctrl+,`): Dark, Light, Monokai, Dracula, Nord, One Dark, Catppuccin, Gruvbox, Tokyo Night, Solarized Dark
-- Themes apply live and persist to `aura.toml`
-- Use Left/Right arrows or Enter to cycle through themes
-
-### New in v0.4.23
-- **Theme background fix** — themes now fill the entire screen with their background color; editor pane uses theme fg/bg so light themes actually look light
-
-### New in v0.4.24
-- **File tree `d` key fix** — lowercase `d` now works for delete (was only `D`/Delete)
-
-### New in v0.4.25
-- **Light theme readability** — completely reworked light theme with GitHub-inspired colors; dark readable syntax highlighting on white background
-- File tree sidebar now uses theme-aware colors instead of hardcoded cyan/white
-
-### New in v0.5.0
-- **Zen mode** — `:zen` hides all chrome (tab bar, status bar, terminal, sidebars, minimap) for distraction-free editing
-- **Breadcrumbs** — scope path (file > class > function) shown above the editor, updates on cursor movement
-- **Sticky scroll** — enclosing scope headers pinned at viewport top when scrolled past (up to 3 levels)
-- **Markdown live preview** — `:preview` splits the editor with rendered markdown (headers, code blocks, lists, tables, inline formatting)
-
-### New in v0.5.1
-- **Improved minimap** — uses Unicode half-block characters (▀▄█) for 2x vertical density, giving a VS Code-like tiny text appearance
+See [CHANGELOG.md](CHANGELOG.md) for the full version history from v0.1.x through v1.0.2.
 
 ## Documentation
 
