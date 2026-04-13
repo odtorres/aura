@@ -97,6 +97,10 @@ pub enum MentionItem {
     Buffer,
     /// Current LSP diagnostics.
     Diagnostics,
+    /// Last N lines of terminal output.
+    Terminal,
+    /// Current git diff output.
+    Diff,
     /// A documentation file from .aura/docs/.
     Docs {
         /// Doc name (filename without extension).
@@ -112,6 +116,8 @@ impl MentionItem {
             MentionItem::Selection => "@selection".to_string(),
             MentionItem::Buffer => "@buffer".to_string(),
             MentionItem::Diagnostics => "@errors".to_string(),
+            MentionItem::Terminal => "@terminal".to_string(),
+            MentionItem::Diff => "@diff".to_string(),
             MentionItem::Docs { name } => format!("@docs:{name}"),
         }
     }
@@ -123,6 +129,8 @@ impl MentionItem {
             MentionItem::Selection => "@selection ".to_string(),
             MentionItem::Buffer => "@buffer ".to_string(),
             MentionItem::Diagnostics => "@errors ".to_string(),
+            MentionItem::Terminal => "@terminal ".to_string(),
+            MentionItem::Diff => "@diff ".to_string(),
             MentionItem::Docs { name } => format!("@docs:{name} "),
         }
     }
@@ -674,6 +682,8 @@ impl ChatPanel {
             MentionItem::Selection,
             MentionItem::Buffer,
             MentionItem::Diagnostics,
+            MentionItem::Terminal,
+            MentionItem::Diff,
         ];
         for item in &specials {
             let label = item.label().to_lowercase();

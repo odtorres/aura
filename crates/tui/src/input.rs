@@ -2078,6 +2078,8 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Leader key sequences: <Space> followed by another key.
     if app.leader_pending {
         app.leader_pending = false;
+        app.which_key_visible = false;
+        app.which_key_items.clear();
         handle_leader(app, code);
         return;
     }
@@ -2612,6 +2614,23 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         // Leader key (configurable, default: Space)
         _ if app.config.keybindings.is_leader_key(code) => {
             app.leader_pending = true;
+            app.which_key_visible = true;
+            app.which_key_items = vec![
+                ('u', "Undo AI edits".into()),
+                ('a', "Toggle authorship".into()),
+                ('i', "Intent mode".into()),
+                ('e', "Explain code".into()),
+                ('f', "Fix errors".into()),
+                ('t', "Generate test".into()),
+                ('c', "Conversation history".into()),
+                ('d', "Recent decisions".into()),
+                ('g', "Cycle AI aggressiveness".into()),
+                ('b', "Toggle blame".into()),
+                ('s', "Semantic info".into()),
+                ('p', "File picker".into()),
+                ('n', "Next tab".into()),
+                ('w', "Close tab".into()),
+            ];
         }
 
         // Mode transitions
@@ -3796,6 +3815,9 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("session load", "Load named session", ""),
     ("session list", "List saved sessions", ""),
     ("session delete", "Delete named session", ""),
+    ("expand", "Expand selection to enclosing scope", ""),
+    ("shrink", "Shrink selection to inner scope", ""),
+    ("organize-imports", "Organize imports (LSP)", ""),
 ];
 
 /// Update command completions based on current input.
@@ -5750,6 +5772,71 @@ fn execute_command(app: &mut App, cmd: &str) {
                 app.mark_highlights_dirty();
             }
         }
+        // :expand — expand visual selection to next enclosing scope.
+        "expand" | "expand-selection" => {
+            let cursor_row = app.tab().cursor.row;
+            // Collect foldable ranges that contain the cursor line, sorted smallest first.
+            let mut enclosing: Vec<(usize, usize)> = app
+                .tab()
+                .foldable_ranges
+                .iter()
+                .filter(|(&start, &end)| start <= cursor_row && cursor_row <= end)
+                .map(|(&s, &e)| (s, e))
+                .collect();
+            enclosing.sort_by_key(|(s, e)| e - s);
+
+            // Find the smallest range that strictly contains the current selection.
+            let (cur_start, cur_end) = if let Some(anchor) = app.tab().visual_anchor {
+                let c = app.tab().cursor;
+                (anchor.row.min(c.row), anchor.row.max(c.row))
+            } else {
+                (cursor_row, cursor_row)
+            };
+
+            let target = enclosing.iter().find(|(s, e)| *s < cur_start || *e > cur_end);
+            if let Some(&(start, end)) = target {
+                app.mode = crate::app::Mode::Visual;
+                let line_end = app.tab().buffer.line_text(end).map(|l| l.len().saturating_sub(1)).unwrap_or(0);
+                app.tab_mut().visual_anchor = Some(aura_core::Cursor::new(start, 0));
+                app.tab_mut().cursor = aura_core::Cursor::new(end, line_end);
+                app.set_status(format!("Selection: lines {}-{}", start + 1, end + 1));
+            } else {
+                app.set_status("No enclosing scope found");
+            }
+        }
+        // :shrink — shrink visual selection to next inner scope.
+        "shrink" | "shrink-selection" => {
+            let (cur_start, cur_end) = if let Some(anchor) = app.tab().visual_anchor {
+                let c = app.tab().cursor;
+                (anchor.row.min(c.row), anchor.row.max(c.row))
+            } else {
+                let r = app.tab().cursor.row;
+                (r, r)
+            };
+
+            // Find the largest range that is strictly inside the current selection.
+            let mut inner: Vec<(usize, usize)> = app
+                .tab()
+                .foldable_ranges
+                .iter()
+                .filter(|(&start, &end)| start >= cur_start && end <= cur_end && (start > cur_start || end < cur_end))
+                .map(|(&s, &e)| (s, e))
+                .collect();
+            inner.sort_by_key(|(s, e)| std::cmp::Reverse(e - s));
+
+            if let Some(&(start, end)) = inner.first() {
+                app.mode = crate::app::Mode::Visual;
+                let line_end = app.tab().buffer.line_text(end).map(|l| l.len().saturating_sub(1)).unwrap_or(0);
+                app.tab_mut().visual_anchor = Some(aura_core::Cursor::new(start, 0));
+                app.tab_mut().cursor = aura_core::Cursor::new(end, line_end);
+                app.set_status(format!("Selection: lines {}-{}", start + 1, end + 1));
+            } else {
+                // No inner scope — cancel visual mode.
+                app.mode = crate::app::Mode::Normal;
+                app.tab_mut().visual_anchor = None;
+                app.set_status("No inner scope found");
+            }
+        }
         "noh" | "nohlsearch" => {
             app.clear_search();
             app.set_status("Search cleared");
@@ -5858,6 +5945,15 @@ fn execute_command(app: &mut App, cmd: &str) {
             if let Some(ref mut lsp) = app.tab_mut().lsp_client {
                 lsp.request_call_hierarchy(row, col);
                 app.set_status("Requesting callers...");
+            } else {
+                app.set_status("No LSP server");
+            }
+        }
+        // --- Organize imports (LSP code action) ---
+        "organize-imports" | "organize imports" | "oi" => {
+            if let Some(ref mut lsp) = app.tab_mut().lsp_client {
+                lsp.request_code_actions_with_kind("source.organizeImports");
+                app.set_status("Requesting organize imports...");
             } else {
                 app.set_status("No LSP server");
             }

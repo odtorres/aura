@@ -518,6 +518,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_close_tab_modal(frame, app, area);
         }
 
+        // Render which-key popup when leader key is pending.
+        if app.which_key_visible && !app.which_key_items.is_empty() {
+            draw_which_key_popup(frame, app, area);
+        }
+
         // Position the terminal cursor.
         if app.file_picker.visible {
             // No editor cursor while the file picker is open.
@@ -1985,6 +1990,13 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
             // Highlight selected cells.
             if in_selection {
                 style = style.bg(Color::Indexed(237)).fg(Color::White);
+            }
+            // Underline detected file links.
+            let in_link = app.terminal_links.iter().any(|(lr, lcs, lce, _, _, _)| {
+                *lr == row_idx && col < *lce && next > *lcs
+            });
+            if in_link {
+                style = style.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
             }
 
             // Show cursor as reversed when terminal is focused.
@@ -8356,4 +8368,52 @@ fn draw_close_tab_modal(frame: &mut Frame, app: &App, area: Rect) {
     ];
 
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Draw the which-key popup showing available leader key bindings.
+fn draw_which_key_popup(frame: &mut Frame, app: &App, area: Rect) {
+    let items = &app.which_key_items;
+    let cols: usize = 2;
+    let rows_per_col = (items.len() + cols - 1) / cols;
+    let col_width: u16 = 28;
+    let width = (col_width * cols as u16) + 3;
+    let height = (rows_per_col as u16) + 2;
+
+    // Position at bottom center of the screen.
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height + 2);
+    let popup = Rect::new(x, y, width.min(area.width), height.min(area.height));
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Leader (Space) ");
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    for (i, (key, desc)) in items.iter().enumerate() {
+        let col = i / rows_per_col;
+        let row = i % rows_per_col;
+        let x_off = inner.x + (col as u16) * col_width;
+        let y_off = inner.y + row as u16;
+        if y_off >= inner.y + inner.height {
+            break;
+        }
+        let line = ratatui::text::Line::from(vec![
+            Span::styled(
+                format!(" {} ", key),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(desc.as_str(), Style::default().fg(Color::White)),
+        ]);
+        let w = col_width.min(inner.width.saturating_sub(col as u16 * col_width));
+        frame.render_widget(
+            Paragraph::new(line),
+            Rect::new(x_off, y_off, w, 1),
+        );
+    }
 }

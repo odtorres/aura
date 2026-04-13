@@ -561,6 +561,26 @@ impl LspClient {
         );
     }
 
+    /// Request code actions filtered by a specific kind (e.g. "source.organizeImports").
+    pub fn request_code_actions_with_kind(&mut self, kind: &str) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/codeAction",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end":   { "line": 0, "character": 0 }
+                },
+                "context": {
+                    "diagnostics": [],
+                    "only": [kind]
+                }
+            }),
+        );
+    }
+
     /// Request all references to a symbol at the given position.
     pub fn references(&mut self, line: u32, character: u32) {
         let id = self.alloc_id();

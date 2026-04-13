@@ -266,6 +266,9 @@ pub fn editor_commands() -> Vec<PaletteItem> {
         cmd("scrollsync", "Toggle Split Scroll Sync", ""),
         cmd("debug", "Start Debug Session", ""),
         cmd("breakpoint", "Toggle Breakpoint", ""),
+        cmd("expand", "Expand Selection to Scope", ""),
+        cmd("shrink", "Shrink Selection to Scope", ""),
+        cmd("organize-imports", "Organize Imports (LSP)", ""),
     ]
 }
 

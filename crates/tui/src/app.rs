@@ -823,6 +823,16 @@ pub struct App {
     pub update_modal_visible: bool,
     /// Cached rect for the update notification (for mouse click detection).
     pub update_notification_rect: Rect,
+
+    // --- Which-Key popup ---
+    /// Whether the which-key popup is visible (shown after leader key press).
+    pub which_key_visible: bool,
+    /// Items to display in the which-key popup: (key, description).
+    pub which_key_items: Vec<(char, String)>,
+
+    // --- Terminal link detection ---
+    /// Detected file links in the terminal output: (row, col_start, col_end, path, line, col).
+    pub terminal_links: Vec<(usize, usize, usize, String, usize, usize)>,
 }
 
 /// A tool call pending execution or approval.
@@ -1252,6 +1262,9 @@ impl App {
             update_notification_visible: false,
             update_modal_visible: false,
             update_notification_rect: Rect::default(),
+            which_key_visible: false,
+            which_key_items: Vec::new(),
+            terminal_links: Vec::new(),
         };
         // Apply config settings.
         app.show_authorship = config.editor.show_authorship;
@@ -1435,6 +1448,10 @@ impl App {
             }
             self.update_matching_bracket();
             self.update_breadcrumbs();
+            // Detect clickable file links in terminal output.
+            if self.terminal().visible {
+                self.detect_terminal_links();
+            }
             terminal.draw(|frame| crate::render::draw(frame, self))?;
 
             // Set blinking bar cursor when chat input is focused, block otherwise.
@@ -6918,6 +6935,14 @@ impl App {
         }
 
         if self.terminal().visible && point_in(self.terminal_rect) {
+            // Check for file link clicks in the terminal.
+            let inner_x = self.terminal_rect.x + 1;
+            let inner_y = self.terminal_rect.y + 1;
+            let term_row = (row.saturating_sub(inner_y)) as usize;
+            let term_col = (col.saturating_sub(inner_x)) as usize;
+            if self.click_terminal_link(term_row, term_col) {
+                return;
+            }
             self.terminal_focused = true;
             self.file_tree_focused = false;
             self.source_control_focused = false;
@@ -8293,6 +8318,68 @@ impl App {
                             diagnostics.len(),
                             diagnostics.join("\n")
                         ));
+                    }
+                }
+                "terminal" => {
+                    // Include the last 50 lines of terminal output.
+                    let (snapshot, _, _) = self.terminal().snapshot();
+                    let total = snapshot.len();
+                    let start = total.saturating_sub(50);
+                    let mut lines = Vec::new();
+                    for row in &snapshot[start..] {
+                        let line: String = row.iter().map(|c| c.ch).collect();
+                        lines.push(line.trim_end().to_string());
+                    }
+                    // Remove trailing empty lines.
+                    while lines.last().is_some_and(|l| l.is_empty()) {
+                        lines.pop();
+                    }
+                    let output = lines.join("\n");
+                    if output.is_empty() {
+                        context.push_str(
+                            "\n--- @terminal ---\n(no terminal output)\n--- end @terminal ---\n",
+                        );
+                    } else {
+                        context.push_str(&format!(
+                            "\n--- @terminal (last {} lines) ---\n{}\n--- end @terminal ---\n",
+                            lines.len(),
+                            output
+                        ));
+                    }
+                }
+                "diff" => {
+                    // Include current git diff output.
+                    if let Some(ref repo) = self.git_repo {
+                        let diff_output = std::process::Command::new("git")
+                            .args(["diff"])
+                            .current_dir(repo.workdir())
+                            .output();
+                        match diff_output {
+                            Ok(output) if output.status.success() => {
+                                let diff_text = String::from_utf8_lossy(&output.stdout);
+                                if diff_text.is_empty() {
+                                    context.push_str(
+                                        "\n--- @diff ---\nNo unstaged changes.\n--- end @diff ---\n",
+                                    );
+                                } else {
+                                    let truncated: String =
+                                        diff_text.chars().take(30000).collect();
+                                    context.push_str(&format!(
+                                        "\n--- @diff ---\n{}\n--- end @diff ---\n",
+                                        truncated
+                                    ));
+                                }
+                            }
+                            _ => {
+                                context.push_str(
+                                    "\n--- @diff ---\n(git diff failed)\n--- end @diff ---\n",
+                                );
+                            }
+                        }
+                    } else {
+                        context.push_str(
+                            "\n--- @diff ---\n(not in a git repository)\n--- end @diff ---\n",
+                        );
                     }
                 }
                 mention if mention.starts_with("docs:") => {
@@ -10661,5 +10748,107 @@ impl App {
                 tracing::debug!("Formatter {cmd} not found, skipping format on save");
             }
         }
+    }
+
+    /// Detect file path links in terminal output (pattern: `file.ext:line:col`).
+    ///
+    /// Scans each terminal row for patterns like `path/file.rs:42:10` and stores
+    /// detected links for click handling and underline rendering.
+    pub fn detect_terminal_links(&mut self) {
+        self.terminal_links.clear();
+        let (snapshot, _, _) = self.terminal().snapshot();
+
+        for (row_idx, row) in snapshot.iter().enumerate() {
+            let line: String = row.iter().map(|c| c.ch).collect();
+            // Scan for file.ext:line[:col] patterns.
+            let chars: Vec<char> = line.chars().collect();
+            let len = chars.len();
+            let mut i = 0;
+            while i < len {
+                // Look for a colon followed by digits — then backtrack to find path.
+                if chars[i] == ':' && i + 1 < len && chars[i + 1].is_ascii_digit() {
+                    // Find start of path (backtrack past word chars, dots, slashes, dashes).
+                    let mut start = i;
+                    while start > 0 {
+                        let prev = chars[start - 1];
+                        if prev.is_alphanumeric()
+                            || prev == '.'
+                            || prev == '/'
+                            || prev == '_'
+                            || prev == '-'
+                        {
+                            start -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    // The path portion must contain a dot (file extension).
+                    let path_part: String = chars[start..i].iter().collect();
+                    if path_part.contains('.') && path_part.len() > 2 {
+                        // Parse :line
+                        let mut j = i + 1;
+                        while j < len && chars[j].is_ascii_digit() {
+                            j += 1;
+                        }
+                        let line_str: String = chars[i + 1..j].iter().collect();
+                        let line_num: usize = line_str.parse().unwrap_or(1);
+
+                        // Parse optional :col
+                        let mut col_num: usize = 1;
+                        let mut end = j;
+                        if j < len && chars[j] == ':' && j + 1 < len && chars[j + 1].is_ascii_digit()
+                        {
+                            let mut k = j + 1;
+                            while k < len && chars[k].is_ascii_digit() {
+                                k += 1;
+                            }
+                            let col_str: String = chars[j + 1..k].iter().collect();
+                            col_num = col_str.parse().unwrap_or(1);
+                            end = k;
+                        }
+
+                        self.terminal_links.push((
+                            row_idx, start, end, path_part, line_num, col_num,
+                        ));
+                        i = end;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
+    /// Open a terminal link at the given screen coordinates.
+    pub fn click_terminal_link(&mut self, row: usize, col: usize) -> bool {
+        let link = self.terminal_links.iter().find(|(r, cs, ce, _, _, _)| {
+            *r == row && col >= *cs && col < *ce
+        }).cloned();
+
+        if let Some((_, _, _, path, line_num, col_num)) = link {
+            // Try to resolve relative paths.
+            let full_path = if std::path::Path::new(&path).is_absolute() {
+                std::path::PathBuf::from(&path)
+            } else {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                cwd.join(&path)
+            };
+
+            if full_path.exists() {
+                if let Err(e) = self.open_file(full_path) {
+                    self.set_status(e);
+                } else {
+                    // Navigate to the line:col.
+                    let tab = self.tab_mut();
+                    tab.cursor.row = line_num.saturating_sub(1);
+                    tab.cursor.col = col_num.saturating_sub(1);
+                    self.clamp_cursor();
+                    self.terminal_focused = false;
+                    self.set_status(format!("Opened {path}:{line_num}:{col_num}"));
+                }
+                return true;
+            }
+        }
+        false
     }
 }

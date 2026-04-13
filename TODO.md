@@ -667,7 +667,7 @@ Organized by priority: features to add, existing features to improve.
 - [ ] **Incremental Selection (Expand/Shrink)** — Expand selection word → expression → statement → function via tree-sitter. (Neovim, Helix, Zed)
 - [ ] **Flash/Leap Two-Char Jump** — Two-character jump anywhere on screen (easymotion-style). (Neovim, Helix)
 - [ ] **Treesitter Text Objects** — Custom text objects from tree-sitter nodes (function, class, parameter). (Neovim, Helix)
-- [ ] **Which-Key Popup** — On leader key press, show available continuations with descriptions. (Neovim, Helix)
+- [x] **Which-Key Popup** — On leader key press, show available continuations with descriptions. (Neovim, Helix)
 - [ ] **Structural Search & Replace** — Search by AST pattern, not text. (JetBrains)
 - [ ] **Multi-Buffer View** — View/edit excerpts from multiple files in a single buffer. (Zed)
 
