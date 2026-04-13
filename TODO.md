@@ -638,7 +638,7 @@ Organized by priority: features to add, existing features to improve.
 
 ### 14.1 Critical (Must-Have)
 
-- [ ] **Navigate Back/Forward (Jump List)** — Cursor history jump stack: go back after go-to-definition, search, etc. (VS Code, JetBrains, Neovim)
+- [x] **Navigate Back/Forward (Jump List)** — Cursor history jump stack: go back after go-to-definition, search, etc. (VS Code, JetBrains, Neovim)
 - [ ] **Crash Recovery / Swap Files** — Auto-restore unsaved changes from swap files on crash. (Vim/Neovim, VS Code, JetBrains)
 - [ ] **Composer/Cascade Agent Panel** — Dedicated panel for multi-file agent workflows showing file tree of changes, inline diffs, and unified conversation. (Cursor, Windsurf)
 - [ ] **Multi-File Edit Orchestration UI** — Side panel showing ALL files being modified by AI with per-file accept/reject tree. (Cursor, Windsurf)

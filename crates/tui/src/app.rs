@@ -605,8 +605,14 @@ pub struct App {
     pub workspace_trusted: bool,
     /// Token usage tracker for AI cost monitoring.
     pub token_tracker: crate::token_tracker::TokenTracker,
+    /// Jump list for navigate back/forward (Ctrl+O / Ctrl+I).
+    pub jump_list: Vec<(std::path::PathBuf, usize, usize)>,
+    /// Current position in the jump list.
+    pub jump_pos: usize,
     /// Local file history manager.
     pub local_history: crate::local_history::LocalHistory,
+    /// Last time swap files were saved (for crash recovery).
+    pub last_swap_save: std::time::Instant,
     /// AI code explanation popup text.
     pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
@@ -1144,7 +1150,10 @@ impl App {
             inline_ai_active: false,
             workspace_trusted: true,
             token_tracker: crate::token_tracker::TokenTracker::new(),
+            jump_list: Vec::new(),
+            jump_pos: 0,
             local_history: crate::local_history::LocalHistory::new(),
+            last_swap_save: std::time::Instant::now(),
             code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
@@ -1499,6 +1508,12 @@ impl App {
             self.maybe_send_awareness();
             self.maybe_broadcast_terminal_snapshot();
 
+            // Auto-save swap files for crash recovery (every 30s).
+            if self.last_swap_save.elapsed() > std::time::Duration::from_secs(30) {
+                self.last_swap_save = std::time::Instant::now();
+                self.save_swap_files();
+            }
+
             // Poll for update check result.
             self.poll_update_check();
 
@@ -1623,6 +1638,8 @@ impl App {
 
         // Save session before shutting down.
         self.save_session();
+        // Clean up swap files on clean exit.
+        self.cleanup_swap_files();
 
         // Shutdown MCP server on exit.
         if let Some(server) = &self.mcp_server {
@@ -4383,6 +4400,98 @@ impl App {
                 line_len.saturating_sub(1)
             };
             tab.cursor.col = tab.cursor.col.min(max_col);
+        }
+    }
+
+    /// Save swap files for all modified buffers (crash recovery).
+    pub fn save_swap_files(&self) {
+        let swap_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".aura/swap");
+        let _ = std::fs::create_dir_all(&swap_dir);
+
+        for tab in self.tabs.tabs() {
+            if tab.buffer.is_modified() {
+                if let Some(path) = tab.buffer.file_path() {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("scratch");
+                    let swap_path = swap_dir.join(format!(".{}.swp", name));
+                    let content = tab.buffer.rope().to_string();
+                    let _ = std::fs::write(&swap_path, content);
+                }
+            }
+        }
+    }
+
+    /// Clean up swap files (called on clean exit).
+    pub fn cleanup_swap_files(&self) {
+        let swap_dir = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".aura/swap");
+        let _ = std::fs::remove_dir_all(&swap_dir);
+    }
+
+    /// Push current position to the jump list (call before navigation jumps).
+    pub fn push_jump(&mut self) {
+        let path = self
+            .tab()
+            .buffer
+            .file_path()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        let row = self.tab().cursor.row;
+        let col = self.tab().cursor.col;
+        // Truncate forward history when pushing new position.
+        self.jump_list.truncate(self.jump_pos);
+        self.jump_list.push((path, row, col));
+        self.jump_pos = self.jump_list.len();
+        // Cap at 100 entries.
+        if self.jump_list.len() > 100 {
+            self.jump_list.remove(0);
+            self.jump_pos = self.jump_list.len();
+        }
+    }
+
+    /// Navigate backward in the jump list (Ctrl+O).
+    pub fn jump_back(&mut self) {
+        if self.jump_pos == 0 || self.jump_list.is_empty() {
+            self.set_status("No previous position");
+            return;
+        }
+        // Save current position if at the end.
+        if self.jump_pos == self.jump_list.len() {
+            self.push_jump();
+            self.jump_pos = self.jump_pos.saturating_sub(1);
+        }
+        self.jump_pos = self.jump_pos.saturating_sub(1);
+        if let Some((path, row, col)) = self.jump_list.get(self.jump_pos).cloned() {
+            if !path.as_os_str().is_empty() {
+                let _ = self.open_file(path);
+            }
+            self.tab_mut().cursor.row = row;
+            self.tab_mut().cursor.col = col;
+            self.clamp_cursor();
+        }
+    }
+
+    /// Navigate forward in the jump list (Ctrl+I).
+    pub fn jump_forward(&mut self) {
+        if self.jump_pos + 1 >= self.jump_list.len() {
+            self.set_status("No next position");
+            return;
+        }
+        self.jump_pos += 1;
+        if let Some((path, row, col)) = self.jump_list.get(self.jump_pos).cloned() {
+            if !path.as_os_str().is_empty() {
+                let _ = self.open_file(path);
+            }
+            self.tab_mut().cursor.row = row;
+            self.tab_mut().cursor.col = col;
+            self.clamp_cursor();
         }
     }
 

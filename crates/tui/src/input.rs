@@ -2265,6 +2265,7 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 return;
             }
             KeyCode::Char('d') => {
+                app.push_jump();
                 app.lsp_goto_definition();
                 return;
             }
@@ -4861,6 +4862,13 @@ fn execute_command(app: &mut App, cmd: &str) {
         "trust off" | "untrust" => {
             app.workspace_trusted = false;
             app.set_status("Workspace restricted — plugins and terminal disabled");
+        }
+        // :back / :forward — jump list navigation.
+        "back" | "jumpback" => {
+            app.jump_back();
+        }
+        "forward" | "jumpforward" => {
+            app.jump_forward();
         }
         // :tokens — token usage dashboard.
         "tokens" | "usage" => {
