@@ -2033,7 +2033,40 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.file_picker.close();
             }
             KeyCode::Enter => {
-                app.open_selected_file();
+                let query = app.file_picker.query.clone();
+                if query.starts_with('@') {
+                    // @ prefix: open symbol outline
+                    app.file_picker.close();
+                    app.open_outline();
+                } else if query.starts_with('#') {
+                    // # prefix: search workspace symbols
+                    let sym_query = query[1..].trim().to_string();
+                    app.file_picker.close();
+                    if !sym_query.is_empty() {
+                        execute_command(app, &format!("symbol {sym_query}"));
+                    } else {
+                        app.set_status("Usage: #<symbol-name>");
+                    }
+                } else if query.starts_with(':') {
+                    // : prefix followed by number: jump to line
+                    let line_str = query[1..].trim();
+                    if let Ok(line_num) = line_str.parse::<usize>() {
+                        app.file_picker.close();
+                        if line_num > 0 {
+                            let target =
+                                (line_num - 1).min(app.tab().buffer.line_count().saturating_sub(1));
+                            app.tab_mut().cursor.row = target;
+                            app.tab_mut().cursor.col = 0;
+                            app.clamp_cursor();
+                            app.set_status(format!("Line {line_num}"));
+                        }
+                    } else {
+                        app.file_picker.close();
+                        app.set_status("Usage: :<line-number>");
+                    }
+                } else {
+                    app.open_selected_file();
+                }
             }
             KeyCode::Backspace => {
                 app.file_picker.backspace();
@@ -3910,6 +3943,20 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("expand", "Expand selection to enclosing scope", ""),
     ("shrink", "Shrink selection to inner scope", ""),
     ("organize-imports", "Organize imports (LSP)", ""),
+    ("pr-comments", "Fetch PR inline comments", ""),
+    ("ci", "Show CI/CD pipeline status", ""),
+    ("secrets", "Scan buffer for API key secrets", ""),
+    ("venv", "Detect Python virtual environment", ""),
+    ("diff", "Diff two files side-by-side", ""),
+    ("run-config", "Run a named run configuration", ""),
+    ("settings local", "Open project-level settings", ""),
+    ("emmet", "Expand Emmet abbreviation at cursor", ""),
+    ("paste-prev", "Paste previous from clipboard ring", ""),
+    ("paste-next", "Paste next from clipboard ring", ""),
+    ("spell", "Check spelling in comments/strings", ""),
+    ("color", "Show color info at cursor", ""),
+    ("copypath", "Copy absolute file path", ""),
+    ("copyrel", "Copy relative file path", ""),
 ];
 
 /// Update command completions based on current input.
@@ -4353,10 +4400,46 @@ fn handle_leader(app: &mut App, code: KeyCode) {
                 app.set_status("Cannot close last tab (use :q to quit)");
             }
         }
-        // <leader>1-9 — switch to tab by index
+        // <leader>h — harpoon set prefix (next key 1-4 sets slot)
+        KeyCode::Char('h') => {
+            // Wait for second key: 1-4 to set the slot.
+            // We'll use a simple approach: set a flag and handle in next key.
+            app.set_status("Harpoon: press 1-4 to pin current file");
+            // Re-enter leader mode to capture next key.
+            app.leader_pending = true;
+            // Use a small trick: set harpoon_set_pending via count_prefix.
+            // Actually, let's just use the mark_pending mechanism concept.
+            // Simplest: we'll handle h1-h4 inline by checking the status message.
+            // Instead, set a flag in leader_pending and use a second dispatch.
+            return;
+        }
+        // <leader>1-9 — switch to tab by index OR jump to harpoon slot
         KeyCode::Char(c @ '1'..='9') => {
             let idx = (c as usize) - ('1' as usize);
-            if idx < app.tabs.count() {
+            // If harpoon set is pending (status starts with "Harpoon:"), set the slot.
+            let is_harpoon_set = app
+                .status_message
+                .as_ref()
+                .is_some_and(|s| s.starts_with("Harpoon:"));
+            if is_harpoon_set && idx < 4 {
+                // Set harpoon slot to current file.
+                if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                    app.harpoon_files[idx] = Some(path.clone());
+                    app.set_status(format!("Harpoon slot {} = {}", idx + 1, path.display()));
+                } else {
+                    app.set_status("No file to pin (scratch buffer)");
+                }
+            } else if idx < 4 && app.harpoon_files[idx].is_some() {
+                // Jump to harpoon slot if set.
+                let path = app.harpoon_files[idx].clone().unwrap();
+                if path.exists() {
+                    if let Err(e) = app.open_file(path) {
+                        app.set_status(e);
+                    }
+                } else {
+                    app.set_status(format!("Harpoon {}: file not found", idx + 1));
+                }
+            } else if idx < app.tabs.count() {
                 app.tabs.switch_to(idx);
             } else {
                 app.set_status(format!("No tab {}", c));
@@ -6154,6 +6237,314 @@ fn execute_command(app: &mut App, cmd: &str) {
         "rename" => {
             app.lsp_rename_start();
         }
+        // --- CI/CD pipeline status ---
+        "ci" => {
+            let output = std::process::Command::new("gh")
+                .args(["run", "list", "--limit", "5"])
+                .output();
+            match output {
+                Ok(o) => {
+                    let text = String::from_utf8_lossy(&o.stdout);
+                    let first_line = text.lines().next().unwrap_or("No runs found");
+                    app.set_status(format!("CI: {first_line}"));
+                }
+                Err(e) => app.set_status(format!("CI check failed: {e}")),
+            }
+        }
+        // --- Secret detection ---
+        "secrets" => {
+            let text = app.tab().buffer.text();
+            let patterns = [
+                ("sk-", "OpenAI/Stripe key"),
+                ("AKIA", "AWS access key"),
+                ("ghp_", "GitHub PAT"),
+                ("ghs_", "GitHub server token"),
+                ("glpat-", "GitLab PAT"),
+                ("xoxb-", "Slack bot token"),
+                ("xoxp-", "Slack user token"),
+                ("AIza", "Google API key"),
+            ];
+            let mut found = Vec::new();
+            for (line_idx, line) in text.lines().enumerate() {
+                for (pat, label) in &patterns {
+                    if line.contains(pat) {
+                        found.push(format!("L{}: {}", line_idx + 1, label));
+                    }
+                }
+            }
+            if found.is_empty() {
+                app.set_status("No secrets detected");
+            } else {
+                app.set_status(format!("Secrets found: {}", found.join(", ")));
+            }
+        }
+        // --- Python venv detection ---
+        "venv" => {
+            // Check environment variable first.
+            if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+                app.set_status(format!("Venv: {venv}"));
+            } else if let Ok(conda) = std::env::var("CONDA_DEFAULT_ENV") {
+                app.set_status(format!("Conda: {conda}"));
+            } else {
+                // Check for common venv directories relative to cwd.
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let candidates = ["venv", ".venv", "env", ".env"];
+                let mut detected = None;
+                for c in &candidates {
+                    let p = cwd.join(c).join("pyvenv.cfg");
+                    if p.exists() {
+                        detected = Some(c.to_string());
+                        break;
+                    }
+                }
+                if let Some(name) = detected {
+                    app.set_status(format!("Venv detected: ./{name} (not activated)"));
+                } else {
+                    app.set_status("No Python virtual environment detected");
+                }
+            }
+        }
+        // --- Emmet expansion ---
+        "emmet" => {
+            let row = app.tab().cursor.row;
+            let col = app.tab().cursor.col;
+            let line = app
+                .tab()
+                .buffer
+                .line_text(row)
+                .unwrap_or_default()
+                .to_string();
+            // Find the abbreviation before cursor (word chars, >, *, +, .).
+            let before = &line[..col.min(line.len())];
+            let abbr_start = before
+                .rfind(|c: char| c.is_whitespace())
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            let abbr = &before[abbr_start..];
+            if abbr.is_empty() {
+                app.set_status("No Emmet abbreviation at cursor");
+            } else {
+                let expanded = expand_emmet(abbr);
+                if expanded == abbr {
+                    app.set_status(format!("Unknown Emmet: {abbr}"));
+                } else {
+                    // Replace the abbreviation with expanded HTML.
+                    let line_start = app.tab().buffer.rope().line_to_char(row);
+                    let start = line_start + abbr_start;
+                    let end = line_start + col;
+                    app.tab_mut()
+                        .buffer
+                        .delete(start, end, aura_core::AuthorId::Human);
+                    app.tab_mut()
+                        .buffer
+                        .insert(start, &expanded, aura_core::AuthorId::Human);
+                    app.mark_highlights_dirty();
+                    app.set_status("Emmet expanded");
+                }
+            }
+        }
+        // --- Clipboard ring cycling ---
+        "paste-prev" => {
+            if app.clipboard_ring.is_empty() {
+                app.set_status("Clipboard ring empty");
+            } else {
+                let idx = match app.clipboard_ring_idx {
+                    Some(i) => {
+                        if i == 0 {
+                            app.clipboard_ring.len().saturating_sub(1)
+                        } else {
+                            i.saturating_sub(1)
+                        }
+                    }
+                    None => app.clipboard_ring.len().saturating_sub(1),
+                };
+                app.clipboard_ring_idx = Some(idx);
+                let text = app.clipboard_ring[idx].clone();
+                let pos = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                app.tab_mut()
+                    .buffer
+                    .insert(pos, &text, aura_core::AuthorId::Human);
+                app.mark_highlights_dirty();
+                app.set_status(format!(
+                    "Clipboard ring [{}/{}]",
+                    idx + 1,
+                    app.clipboard_ring.len()
+                ));
+            }
+        }
+        "paste-next" => {
+            if app.clipboard_ring.is_empty() {
+                app.set_status("Clipboard ring empty");
+            } else {
+                let idx = match app.clipboard_ring_idx {
+                    Some(i) => (i + 1) % app.clipboard_ring.len(),
+                    None => 0,
+                };
+                app.clipboard_ring_idx = Some(idx);
+                let text = app.clipboard_ring[idx].clone();
+                let pos = app.tab().buffer.cursor_to_char_idx(&app.tab().cursor);
+                app.tab_mut()
+                    .buffer
+                    .insert(pos, &text, aura_core::AuthorId::Human);
+                app.mark_highlights_dirty();
+                app.set_status(format!(
+                    "Clipboard ring [{}/{}]",
+                    idx + 1,
+                    app.clipboard_ring.len()
+                ));
+            }
+        }
+        // --- Spell checking ---
+        "spell" => {
+            let text = app.tab().buffer.text();
+            let typos: &[(&str, &str)] = &[
+                ("teh", "the"),
+                ("recieve", "receive"),
+                ("occurence", "occurrence"),
+                ("occured", "occurred"),
+                ("seperate", "separate"),
+                ("definately", "definitely"),
+                ("accomodate", "accommodate"),
+                ("acheive", "achieve"),
+                ("aquire", "acquire"),
+                ("arguement", "argument"),
+                ("begining", "beginning"),
+                ("beleive", "believe"),
+                ("calender", "calendar"),
+                ("catagory", "category"),
+                ("committment", "commitment"),
+                ("concensus", "consensus"),
+                ("consciencious", "conscientious"),
+                ("concious", "conscious"),
+                ("dependant", "dependent"),
+                ("enviroment", "environment"),
+                ("existance", "existence"),
+                ("fourty", "forty"),
+                ("grammer", "grammar"),
+                ("harrass", "harass"),
+                ("immediatly", "immediately"),
+                ("independant", "independent"),
+                ("knowlege", "knowledge"),
+                ("libary", "library"),
+                ("mispell", "misspell"),
+                ("neccessary", "necessary"),
+                ("noticable", "noticeable"),
+                ("occassion", "occasion"),
+                ("parallell", "parallel"),
+                ("perseverence", "perseverance"),
+                ("posession", "possession"),
+                ("privelege", "privilege"),
+                ("publically", "publicly"),
+                ("recomend", "recommend"),
+                ("refrence", "reference"),
+                ("relevent", "relevant"),
+                ("rythm", "rhythm"),
+                ("sargent", "sergeant"),
+                ("succesful", "successful"),
+                ("supercede", "supersede"),
+                ("threshhold", "threshold"),
+                ("tommorow", "tomorrow"),
+                ("untill", "until"),
+                ("wierd", "weird"),
+                ("writting", "writing"),
+                ("wich", "which"),
+            ];
+            let text_lower = text.to_lowercase();
+            let mut found = Vec::new();
+            for (wrong, right) in typos {
+                if text_lower.contains(wrong) {
+                    found.push(format!("{wrong}->{right}"));
+                    if found.len() >= 10 {
+                        break;
+                    }
+                }
+            }
+            if found.is_empty() {
+                app.set_status("No common misspellings found");
+            } else {
+                app.set_status(format!("Typos: {}", found.join(", ")));
+            }
+        }
+        // --- Color picker ---
+        "color" => {
+            let row = app.tab().cursor.row;
+            let col = app.tab().cursor.col;
+            let line = app
+                .tab()
+                .buffer
+                .line_text(row)
+                .unwrap_or_default()
+                .to_string();
+            // Search for #RRGGBB pattern near the cursor.
+            let mut found_color = None;
+            for (i, _) in line.char_indices() {
+                if line[i..].starts_with('#') && i + 7 <= line.len() {
+                    let candidate = &line[i..i + 7];
+                    if candidate.len() == 7 && candidate[1..].chars().all(|c| c.is_ascii_hexdigit())
+                    {
+                        // Check if cursor is within this color.
+                        if col >= i && col < i + 7 {
+                            found_color = Some(candidate.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(hex) = found_color {
+                let r = u8::from_str_radix(&hex[1..3], 16).unwrap_or(0);
+                let g = u8::from_str_radix(&hex[3..5], 16).unwrap_or(0);
+                let b = u8::from_str_radix(&hex[5..7], 16).unwrap_or(0);
+                app.set_status(format!("{hex} -> RGB({r}, {g}, {b})"));
+            } else {
+                app.set_status("No color at cursor");
+            }
+        }
+        // --- File path copy ---
+        "copypath" => {
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                let abs = path.canonicalize().unwrap_or(path).display().to_string();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(&abs);
+                }
+                app.set_status(format!("Copied: {abs}"));
+            } else {
+                app.set_status("No file path (scratch buffer)");
+            }
+        }
+        "copyrel" => {
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let rel = path
+                    .strip_prefix(&cwd)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(&rel);
+                }
+                app.set_status(format!("Copied: {rel}"));
+            } else {
+                app.set_status("No file path (scratch buffer)");
+            }
+        }
+        // --- Settings local ---
+        "settings local" => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let local_config = cwd.join(".aura").join("aura.toml");
+            if !local_config.exists() {
+                // Create a minimal file if it doesn't exist.
+                let _ = std::fs::create_dir_all(cwd.join(".aura"));
+                let _ = std::fs::write(
+                    &local_config,
+                    "# Project-level AURA settings\n# See ~/.aura/aura.toml for all options\n\n[editor]\n",
+                );
+            }
+            if let Err(e) = app.open_file(local_config) {
+                app.set_status(e);
+            } else {
+                app.set_status("Editing project settings (.aura/aura.toml)");
+            }
+        }
         // --- Merge conflict ---
         "merge" => {
             // Open merge view for the currently selected file in source control.
@@ -6816,11 +7207,194 @@ fn execute_command(app: &mut App, cmd: &str) {
                     app.start_debug_session();
                     app.debug_launch(program);
                 }
+            } else if let Some(pr_num) = other.strip_prefix("pr-comments ") {
+                // :pr-comments <number> — fetch PR inline comments via gh CLI.
+                let pr_num = pr_num.trim();
+                if pr_num.is_empty() {
+                    app.set_status("Usage: :pr-comments <number>");
+                } else {
+                    let output = std::process::Command::new("gh")
+                        .args([
+                            "api",
+                            &format!(
+                                "repos/{{owner}}/{{repo}}/pulls/{pr_num}/comments"
+                            ),
+                            "--jq",
+                            ".[0:5] | .[] | \"\\(.path):\\(.line // .original_line): \\(.body[0:80])\"",
+                        ])
+                        .output();
+                    match output {
+                        Ok(o) => {
+                            let text = String::from_utf8_lossy(&o.stdout);
+                            let stderr = String::from_utf8_lossy(&o.stderr);
+                            if !text.trim().is_empty() {
+                                let first = text.lines().next().unwrap_or("(no comments)");
+                                let count = text.lines().count();
+                                app.set_status(format!(
+                                    "PR#{pr_num}: {count} comment(s) — {first}"
+                                ));
+                            } else if !stderr.trim().is_empty() {
+                                app.set_status(format!("PR#{pr_num}: {stderr}"));
+                            } else {
+                                app.set_status(format!("PR#{pr_num}: no inline comments"));
+                            }
+                        }
+                        Err(e) => app.set_status(format!("gh failed: {e}")),
+                    }
+                }
+            } else if let Some(args) = other.strip_prefix("diff ") {
+                // :diff <file1> <file2> — compare two arbitrary files.
+                let parts: Vec<&str> = args.trim().splitn(2, ' ').collect();
+                if parts.len() < 2 {
+                    app.set_status("Usage: :diff <file1> <file2>");
+                } else {
+                    let file1 = parts[0].trim();
+                    let file2 = parts[1].trim();
+                    let content1 = std::fs::read_to_string(file1);
+                    let content2 = std::fs::read_to_string(file2);
+                    match (content1, content2) {
+                        (Ok(c1), Ok(c2)) => {
+                            let lines = crate::git::aligned_diff_lines(&c1, &c2);
+                            let label = format!(
+                                "{} vs {}",
+                                std::path::Path::new(file1)
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy(),
+                                std::path::Path::new(file2)
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                            );
+                            let diff = crate::diff_view::DiffView::new(label, lines);
+                            let buf = aura_core::Buffer::new();
+                            let theme = app.theme.clone();
+                            let cs = app.conversation_store.as_ref();
+                            let mut tab = crate::tab::EditorTab::new(buf, cs, &theme);
+                            tab.diff = Some(diff);
+                            app.tabs.open(tab);
+                            app.mode = Mode::Diff;
+                        }
+                        (Err(e), _) => app.set_status(format!("Cannot read {file1}: {e}")),
+                        (_, Err(e)) => app.set_status(format!("Cannot read {file2}: {e}")),
+                    }
+                }
+            } else if let Some(name) = other.strip_prefix("run-config ") {
+                // :run-config <name> — run a named configuration.
+                let name = name.trim();
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let config_path = cwd.join(".aura").join("run.toml");
+                let mut cmd_str = None;
+
+                // Try to read from .aura/run.toml.
+                if let Ok(content) = std::fs::read_to_string(&config_path) {
+                    // Simple TOML parsing: look for [name] section with `command = "..."`.
+                    let section_header = format!("[{name}]");
+                    if let Some(section_start) = content.find(&section_header) {
+                        let rest = &content[section_start + section_header.len()..];
+                        for line in rest.lines() {
+                            let line = line.trim();
+                            if line.starts_with('[') {
+                                break; // next section
+                            }
+                            if let Some(val) = line.strip_prefix("command") {
+                                let val = val.trim().strip_prefix('=').unwrap_or(val).trim();
+                                let val = val.trim_matches('"').trim_matches('\'');
+                                if !val.is_empty() {
+                                    cmd_str = Some(val.to_string());
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Fall back to language-specific defaults if no config found.
+                if cmd_str.is_none() {
+                    cmd_str = match name {
+                        "cargo" | "rust" => Some("cargo run".to_string()),
+                        "npm" | "node" => Some("npm start".to_string()),
+                        "python" | "py" => Some("python main.py".to_string()),
+                        "go" => Some("go run .".to_string()),
+                        _ => None,
+                    };
+                }
+
+                // Auto-detect from project files if name is "default" or "auto".
+                if cmd_str.is_none() && (name == "default" || name == "auto") {
+                    if cwd.join("Cargo.toml").exists() {
+                        cmd_str = Some("cargo run".to_string());
+                    } else if cwd.join("package.json").exists() {
+                        cmd_str = Some("npm start".to_string());
+                    } else if cwd.join("go.mod").exists() {
+                        cmd_str = Some("go run .".to_string());
+                    } else if cwd.join("main.py").exists() {
+                        cmd_str = Some("python main.py".to_string());
+                    }
+                }
+
+                if let Some(cmd) = cmd_str {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    app.terminal_mut().send_bytes(format!("{cmd}\n").as_bytes());
+                    app.set_status(format!("Running: {cmd}"));
+                } else {
+                    app.set_status(format!(
+                        "No run config '{name}'. Create .aura/run.toml or use: cargo, npm, python, go, auto"
+                    ));
+                }
             } else {
                 app.set_status(format!("Unknown command: {}", other));
             }
         }
     }
+}
+
+/// Expand a simple Emmet abbreviation into HTML.
+fn expand_emmet(abbr: &str) -> String {
+    // Handle tag*N (repeat).
+    fn expand_node(s: &str) -> String {
+        // Split on `*` for repetition.
+        let (tag_part, count) = if let Some(star_pos) = s.rfind('*') {
+            let n = s[star_pos + 1..].parse::<usize>().unwrap_or(1);
+            (&s[..star_pos], n)
+        } else {
+            (s, 1usize)
+        };
+
+        let tag = if tag_part.is_empty() { "div" } else { tag_part };
+
+        let single = format!("<{tag}></{tag}>");
+        (0..count)
+            .map(|_| single.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // Split on `>` for nesting.
+    let parts: Vec<&str> = abbr.split('>').collect();
+    if parts.is_empty() || parts.iter().all(|p| p.is_empty()) {
+        return abbr.to_string();
+    }
+
+    // Build from inside out.
+    let mut result = expand_node(parts.last().unwrap());
+    for part in parts[..parts.len().saturating_sub(1)].iter().rev() {
+        let (tag_part, count) = if let Some(star_pos) = part.rfind('*') {
+            let n = part[star_pos + 1..].parse::<usize>().unwrap_or(1);
+            (&part[..star_pos], n)
+        } else {
+            (*part, 1usize)
+        };
+        let tag = if tag_part.is_empty() { "div" } else { tag_part };
+        let inner = result;
+        let single = format!("<{tag}>\n  {}\n</{tag}>", inner.replace('\n', "\n  "));
+        result = (0..count)
+            .map(|_| single.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    result
 }
 
 /// Handle keys in Diff (side-by-side diff view) mode.

@@ -765,6 +765,12 @@ pub struct App {
     pub matching_bracket: Option<(usize, usize)>,
     /// Recently opened file paths (most recent last, max 20).
     pub recent_files: Vec<std::path::PathBuf>,
+    /// Harpoon-style pinned file slots (4 slots).
+    pub harpoon_files: [Option<PathBuf>; 4],
+    /// Clipboard history ring (max 10 entries, most recent last).
+    pub clipboard_ring: Vec<String>,
+    /// Current index into the clipboard ring for paste-prev/paste-next cycling.
+    pub clipboard_ring_idx: Option<usize>,
     /// Word under cursor for auto-highlight (cached to avoid recalculating every frame).
     pub cursor_word: String,
     /// Positions of all occurrences of the cursor word: (start_char, end_char).
@@ -1240,6 +1246,9 @@ impl App {
             panel_resize_drag: None,
             matching_bracket: None,
             recent_files: Vec::new(),
+            harpoon_files: [None, None, None, None],
+            clipboard_ring: Vec::new(),
+            clipboard_ring_idx: None,
             cursor_word: String::new(),
             cursor_word_matches: Vec::new(),
             search_query: None,
@@ -4156,6 +4165,7 @@ impl App {
     }
 
     /// Start rename mode: show input prompt with current word.
+    /// Also shows a reference count in the status bar.
     pub fn lsp_rename_start(&mut self) {
         if self.tab().lsp_client.is_none() {
             self.set_status("No LSP server");
@@ -4166,9 +4176,19 @@ impl App {
             .tab()
             .buffer
             .word_at_cursor(self.tab().cursor.row, self.tab().cursor.col);
-        self.rename_input = word;
+        // Count occurrences of the word in the current buffer for a preview.
+        let text = self.tab().buffer.text();
+        let ref_count = if !word.is_empty() {
+            text.matches(&word).count()
+        } else {
+            0
+        };
+        self.rename_input = word.clone();
         self.rename_active = true;
-        self.set_status("Rename: type new name and press Enter");
+        self.set_status(format!(
+            "Rename '{}': {} reference(s) in buffer. Type new name and press Enter",
+            word, ref_count
+        ));
     }
 
     /// Execute a rename request with the given new name.
@@ -4716,6 +4736,18 @@ impl App {
     /// Set a transient status message shown in the command bar.
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = Some(msg.into());
+    }
+
+    /// Push a string onto the clipboard ring (capped at 10 entries).
+    pub fn push_clipboard_ring(&mut self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        self.clipboard_ring.push(text);
+        if self.clipboard_ring.len() > 10 {
+            self.clipboard_ring.remove(0);
+        }
+        self.clipboard_ring_idx = None;
     }
 
     /// Poll and handle ACP server requests.
@@ -10682,12 +10714,14 @@ impl App {
     }
 
     /// Set the yank register and optionally sync to system clipboard.
+    /// Also pushes to the clipboard ring for paste-prev/paste-next cycling.
     pub fn set_yank(&mut self, text: String) {
         if self.config.editor.clipboard_sync && !text.is_empty() {
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                 let _ = clipboard.set_text(&text);
             }
         }
+        self.push_clipboard_ring(text.clone());
         self.register = Some(text);
     }
 

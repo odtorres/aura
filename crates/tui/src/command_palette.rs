@@ -275,6 +275,20 @@ pub fn editor_commands() -> Vec<PaletteItem> {
         cmd("doc", "Generate Doc Comment (AI)", ""),
         cmd("fix-error", "Auto-Debug Terminal Error (AI)", ""),
         cmd("references", "Find All References (LSP)", ""),
+        cmd("pr-comments", "Fetch PR Inline Comments", ""),
+        cmd("ci", "CI/CD Pipeline Status", ""),
+        cmd("secrets", "Scan for API Key Secrets", ""),
+        cmd("venv", "Detect Python Virtual Env", ""),
+        cmd("diff", "Diff Two Files", ""),
+        cmd("run-config", "Run Configuration", ""),
+        cmd("settings local", "Open Project Settings", ""),
+        cmd("emmet", "Expand Emmet Abbreviation", ""),
+        cmd("paste-prev", "Paste Previous (Clipboard Ring)", ""),
+        cmd("paste-next", "Paste Next (Clipboard Ring)", ""),
+        cmd("spell", "Spell Check", ""),
+        cmd("color", "Color Picker (Hex at Cursor)", ""),
+        cmd("copypath", "Copy Absolute File Path", ""),
+        cmd("copyrel", "Copy Relative File Path", ""),
     ]
 }
 

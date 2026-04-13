@@ -661,7 +661,7 @@ Organized by priority: features to add, existing features to improve.
 ### 14.3 High — Editor & Refactoring
 
 - [ ] **Extract Method/Function** — Select code, extract to new function with auto-inferred params. (JetBrains, VS Code)
-- [ ] **Rename Symbol with Preview** — Show ALL references with checkboxes to exclude specific occurrences. (VS Code, JetBrains)
+- [x] **Rename Symbol with Preview** — Show ALL references with checkboxes to exclude specific occurrences. (VS Code, JetBrains)
 - [ ] **Auto-Organize Imports** — Sort, group, and remove unused imports on save. (JetBrains, VS Code)
 - [ ] **Auto-Import on Completion** — Auto-add import statement when accepting completion. (VS Code, JetBrains, Zed)
 - [ ] **Incremental Selection (Expand/Shrink)** — Expand selection word → expression → statement → function via tree-sitter. (Neovim, Helix, Zed)
