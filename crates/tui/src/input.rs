@@ -4650,6 +4650,98 @@ fn execute_command(app: &mut App, cmd: &str) {
                 }
             }
         }
+        // :e <filename> — open or create a file.
+        _ if cmd.trim().starts_with("e ") || cmd.trim().starts_with("edit ") => {
+            let filename = cmd
+                .trim()
+                .strip_prefix("edit ")
+                .or_else(|| cmd.trim().strip_prefix("e "))
+                .unwrap_or("")
+                .trim();
+            if filename.is_empty() {
+                app.set_status("Usage: :e <filename>");
+            } else {
+                let path = std::path::PathBuf::from(filename);
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                }
+                if !path.exists() {
+                    let _ = std::fs::write(&path, "");
+                }
+                if let Err(e) = app.open_file(path) {
+                    app.set_status(e);
+                }
+            }
+        }
+        // :w <filename> — save-as to a new file path.
+        _ if cmd.trim().starts_with("w ") => {
+            let parts: Vec<&str> = cmd.trim().splitn(2, ' ').collect();
+            let filename = parts.get(1).map(|s| s.trim());
+
+            // If a filename is provided, set the buffer path first.
+            if let Some(name) = filename {
+                if !name.is_empty() {
+                    let path = std::path::PathBuf::from(name);
+                    // Create parent directories if needed.
+                    if let Some(parent) = path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                    }
+                    app.tab_mut().buffer.set_file_path(&path);
+                }
+            }
+
+            // Apply .editorconfig rules before saving.
+            if let Some(path) = app.tab().buffer.file_path().map(|p| p.to_path_buf()) {
+                let ec = crate::config::lookup_editorconfig(&path);
+                if ec.trim_trailing_whitespace == Some(true) {
+                    app.trim_trailing_whitespace();
+                }
+                if ec.insert_final_newline == Some(true) {
+                    app.ensure_final_newline();
+                }
+            }
+            if app.config.editor.format_on_save {
+                app.format_current_buffer();
+            }
+
+            // Save the file.
+            let is_remote = app
+                .tab()
+                .buffer
+                .file_path()
+                .and_then(|p| app.remote_specs.get(p))
+                .is_some();
+            if is_remote {
+                match app.save_current_file() {
+                    Ok(_) => {}
+                    Err(e) => app.set_status(e),
+                }
+            } else if app.tab().buffer.file_path().is_none() {
+                app.set_status("No filename. Use :w <filename>");
+            } else {
+                // Save local history snapshot.
+                if let Some(path) = app.tab().buffer.file_path() {
+                    let _ = app.local_history.save_snapshot(path);
+                }
+                match app.tab_mut().buffer.save() {
+                    Ok(_) => {
+                        let name = app
+                            .tab()
+                            .buffer
+                            .file_path()
+                            .and_then(|p| p.file_name())
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("file");
+                        app.set_status(format!("Written: {}", name));
+                    }
+                    Err(e) => app.set_status(format!("Error: {}", e)),
+                }
+            }
+        }
         "q" => {
             if app.tabs.count() > 1 {
                 // Multiple tabs: close current tab.
