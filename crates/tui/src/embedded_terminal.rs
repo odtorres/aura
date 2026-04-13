@@ -991,8 +991,25 @@ impl EmbeddedTerminal {
         Self::with_env(cwd, &[])
     }
 
+    /// Create a new PTY-backed terminal with a specific shell program.
+    pub fn with_shell(cwd: PathBuf, shell_path: &str) -> Self {
+        Self::with_shell_and_env(cwd, shell_path, &[])
+    }
+
     /// Create a new PTY-backed terminal with extra environment variables.
     pub fn with_env(cwd: PathBuf, env_vars: &[(&str, &str)]) -> Self {
+        let default_shell = std::env::var("SHELL").unwrap_or_else(|_| {
+            if std::path::Path::new("/bin/zsh").exists() {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        });
+        Self::with_shell_and_env(cwd, &default_shell, env_vars)
+    }
+
+    /// Create a new PTY-backed terminal with a specific shell and extra environment variables.
+    pub fn with_shell_and_env(cwd: PathBuf, shell: &str, env_vars: &[(&str, &str)]) -> Self {
         let cols = 80u16;
         let rows = 10u16;
 
@@ -1028,15 +1045,6 @@ impl EmbeddedTerminal {
                 };
             }
         };
-
-        // Determine the shell to use.
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| {
-            if std::path::Path::new("/bin/zsh").exists() {
-                "/bin/zsh".to_string()
-            } else {
-                "/bin/bash".to_string()
-            }
-        });
 
         let mut cmd = CommandBuilder::new(&shell);
         cmd.cwd(&cwd);

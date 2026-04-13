@@ -605,6 +605,8 @@ pub struct App {
     pub inline_ai_active: bool,
     /// Whether the current workspace is trusted (allows plugins, terminal, etc.).
     pub workspace_trusted: bool,
+    /// Whether the sidebar (file tree) is on the right side.
+    pub sidebar_on_right: bool,
     /// Token usage tracker for AI cost monitoring.
     pub token_tracker: crate::token_tracker::TokenTracker,
     /// Jump list for navigate back/forward (Ctrl+O / Ctrl+I).
@@ -1168,6 +1170,7 @@ impl App {
             inline_ai_input: None,
             inline_ai_active: false,
             workspace_trusted: true,
+            sidebar_on_right: false,
             token_tracker: crate::token_tracker::TokenTracker::new(),
             jump_list: Vec::new(),
             jump_pos: 0,

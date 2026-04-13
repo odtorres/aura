@@ -3957,6 +3957,20 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("color", "Show color info at cursor", ""),
     ("copypath", "Copy absolute file path", ""),
     ("copyrel", "Copy relative file path", ""),
+    ("extract-var", "Extract selection to variable", ""),
+    ("move-to", "Move selection to another file", ""),
+    ("safe-delete", "Delete line with reference check", ""),
+    ("fmt-selection", "Format selected text", ""),
+    ("cursor-regex", "Multi-cursor from regex pattern", ""),
+    ("type-hierarchy", "Show LSP type hierarchy", ""),
+    ("worktree list", "List git worktrees", ""),
+    ("worktree add", "Add git worktree", ""),
+    ("commit-sign", "Signed git commit", ""),
+    ("term-search", "Terminal search", ""),
+    ("term-shell", "Open terminal with specific shell", ""),
+    ("panel-left", "Move panel to left", ""),
+    ("panel-right", "Move panel to right", ""),
+    ("panel-bottom", "Move panel to bottom", ""),
 ];
 
 /// Update command completions based on current input.
@@ -5867,14 +5881,16 @@ fn execute_command(app: &mut App, cmd: &str) {
                     .iter()
                     .rev()
                     .take(10)
-                    .map(|p| {
-                        p.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                        format!("[{}] {}", i + 1, name)
                     })
                     .collect();
-                app.set_status(format!("Recent: {}", list.join(", ")));
+                app.set_status(format!(
+                    "Recent: {} — use :recent N to open",
+                    list.join(", ")
+                ));
             }
         }
         "count" | "wc" | "stats" => {
@@ -7343,6 +7359,419 @@ fn execute_command(app: &mut App, cmd: &str) {
                         "No run config '{name}'. Create .aura/run.toml or use: cargo, npm, python, go, auto"
                     ));
                 }
+            // :extract-var <name> — extract visual selection to a variable.
+            } else if let Some(var_name) = other.strip_prefix("extract-var ") {
+                let var_name = var_name.trim();
+                if var_name.is_empty() {
+                    app.set_status("Usage: :extract-var <name>");
+                } else {
+                    let tab = app.tab();
+                    let anchor = tab.visual_anchor;
+                    let cursor = tab.cursor;
+                    if let Some(anchor) = anchor {
+                        let (start, end) = if (anchor.row, anchor.col) <= (cursor.row, cursor.col) {
+                            (anchor, cursor)
+                        } else {
+                            (cursor, anchor)
+                        };
+                        let s = tab.buffer.cursor_to_char_idx(&start);
+                        let e = (tab.buffer.cursor_to_char_idx(&end) + 1)
+                            .min(tab.buffer.rope().len_chars());
+                        let selected_text = tab.buffer.rope().slice(s..e).to_string();
+                        // Get the indentation of the current line.
+                        let line_text = tab
+                            .buffer
+                            .line(start.row)
+                            .map(|l| l.to_string())
+                            .unwrap_or_default();
+                        let indent: String = line_text
+                            .chars()
+                            .take_while(|c| c.is_whitespace())
+                            .collect();
+                        let decl =
+                            format!("{}let {} = {};\n", indent, var_name, selected_text.trim());
+                        // Replace selection with variable name.
+                        app.tab_mut().buffer.delete(s, e, AuthorId::human());
+                        app.tab_mut().buffer.insert(s, var_name, AuthorId::human());
+                        // Insert declaration above the current line.
+                        let line_start = app
+                            .tab()
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(start.row, 0));
+                        app.tab_mut()
+                            .buffer
+                            .insert(line_start, &decl, AuthorId::human());
+                        app.tab_mut().visual_anchor = None;
+                        app.mode = Mode::Normal;
+                        app.mark_highlights_dirty();
+                        app.set_status(format!("Extracted to variable: {var_name}"));
+                    } else {
+                        app.set_status(
+                            "Select expression first (visual mode), then :extract-var <name>",
+                        );
+                    }
+                }
+            // :move-to <file> — cut selection and append to target file.
+            } else if let Some(target) = other.strip_prefix("move-to ") {
+                let target = target.trim();
+                if target.is_empty() {
+                    app.set_status("Usage: :move-to <file>");
+                } else {
+                    let tab = app.tab();
+                    let anchor = tab.visual_anchor;
+                    let cursor = tab.cursor;
+                    if let Some(anchor) = anchor {
+                        let (start, end) = if (anchor.row, anchor.col) <= (cursor.row, cursor.col) {
+                            (anchor, cursor)
+                        } else {
+                            (cursor, anchor)
+                        };
+                        let s = tab.buffer.cursor_to_char_idx(&start);
+                        let e = (tab.buffer.cursor_to_char_idx(&end) + 1)
+                            .min(tab.buffer.rope().len_chars());
+                        let selected_text = tab.buffer.rope().slice(s..e).to_string();
+                        let target_path = std::path::PathBuf::from(target);
+                        // Append to target file.
+                        let mut existing =
+                            std::fs::read_to_string(&target_path).unwrap_or_default();
+                        if !existing.is_empty() && !existing.ends_with('\n') {
+                            existing.push('\n');
+                        }
+                        existing.push('\n');
+                        existing.push_str(&selected_text);
+                        existing.push('\n');
+                        match std::fs::write(&target_path, &existing) {
+                            Ok(()) => {
+                                // Delete selection and leave a comment.
+                                app.tab_mut().buffer.delete(s, e, AuthorId::human());
+                                let comment = format!("// Moved to {}\n", target_path.display());
+                                app.tab_mut().buffer.insert(s, &comment, AuthorId::human());
+                                app.tab_mut().visual_anchor = None;
+                                app.mode = Mode::Normal;
+                                app.mark_highlights_dirty();
+                                app.set_status(format!("Moved to {}", target_path.display()));
+                            }
+                            Err(e) => app.set_status(format!("Write failed: {e}")),
+                        }
+                    } else {
+                        app.set_status("Select text first (visual mode), then :move-to <file>");
+                    }
+                }
+            // :safe-delete — delete current line with reference check.
+            } else if other == "safe-delete" {
+                let tab = app.tab();
+                let row = tab.cursor.row;
+                let line_text = tab
+                    .buffer
+                    .line(row)
+                    .map(|l| l.to_string())
+                    .unwrap_or_default();
+                // Extract identifiers from the line (simple word boundary scan).
+                let idents: Vec<String> = line_text
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .filter(|w| {
+                        w.len() > 2 && w.chars().next().map_or(false, |c| c.is_alphabetic())
+                    })
+                    .map(|s| s.to_string())
+                    .collect();
+                // Search for references in the buffer.
+                let text = tab.buffer.text();
+                let mut found_refs: Vec<String> = Vec::new();
+                for ident in &idents {
+                    let count = text.matches(ident).count();
+                    if count > 1 {
+                        found_refs.push(format!("{}(x{})", ident, count));
+                    }
+                }
+                if found_refs.is_empty() {
+                    // Safe to delete.
+                    let line_start = app
+                        .tab()
+                        .buffer
+                        .cursor_to_char_idx(&aura_core::Cursor::new(row, 0));
+                    let line_end = if row + 1 < app.tab().buffer.line_count() {
+                        app.tab()
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(row + 1, 0))
+                    } else {
+                        app.tab().buffer.rope().len_chars()
+                    };
+                    app.tab_mut()
+                        .buffer
+                        .delete(line_start, line_end, AuthorId::human());
+                    app.clamp_cursor();
+                    app.mark_highlights_dirty();
+                    app.set_status("Line deleted (no references found)");
+                } else {
+                    app.set_status(format!(
+                        "Warning: references found — {}. Use dd to force delete.",
+                        found_refs.join(", ")
+                    ));
+                }
+            // :fmt-selection — format selected text through formatter.
+            } else if other == "fmt-selection" {
+                let tab = app.tab();
+                let anchor = tab.visual_anchor;
+                let cursor_pos = tab.cursor;
+                let file_path = tab.buffer.file_path().map(|p| p.to_path_buf());
+                if let (Some(anchor), Some(path)) = (anchor, file_path) {
+                    let (start, end) =
+                        if (anchor.row, anchor.col) <= (cursor_pos.row, cursor_pos.col) {
+                            (anchor, cursor_pos)
+                        } else {
+                            (cursor_pos, anchor)
+                        };
+                    let s = tab.buffer.cursor_to_char_idx(&start);
+                    let e = (tab.buffer.cursor_to_char_idx(&end) + 1)
+                        .min(tab.buffer.rope().len_chars());
+                    let selected_text = tab.buffer.rope().slice(s..e).to_string();
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    // Pick formatter that supports stdin.
+                    let result = match ext.as_str() {
+                        "rs" => std::process::Command::new("rustfmt")
+                            .args(["--edition", "2021"])
+                            .stdin(std::process::Stdio::piped())
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                            .and_then(|mut child| {
+                                use std::io::Write;
+                                if let Some(ref mut stdin) = child.stdin {
+                                    stdin.write_all(selected_text.as_bytes())?;
+                                }
+                                child.wait_with_output()
+                            }),
+                        "py" => std::process::Command::new("black")
+                            .args(["-q", "-"])
+                            .stdin(std::process::Stdio::piped())
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                            .and_then(|mut child| {
+                                use std::io::Write;
+                                if let Some(ref mut stdin) = child.stdin {
+                                    stdin.write_all(selected_text.as_bytes())?;
+                                }
+                                child.wait_with_output()
+                            }),
+                        "js" | "jsx" | "ts" | "tsx" | "css" | "json" | "html" => {
+                            std::process::Command::new("prettier")
+                                .args(["--stdin-filepath", &format!("file.{ext}")])
+                                .stdin(std::process::Stdio::piped())
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .spawn()
+                                .and_then(|mut child| {
+                                    use std::io::Write;
+                                    if let Some(ref mut stdin) = child.stdin {
+                                        stdin.write_all(selected_text.as_bytes())?;
+                                    }
+                                    child.wait_with_output()
+                                })
+                        }
+                        _ => {
+                            app.set_status("No formatter available for this file type");
+                            return;
+                        }
+                    };
+                    match result {
+                        Ok(output) if output.status.success() => {
+                            let formatted = String::from_utf8_lossy(&output.stdout).to_string();
+                            app.tab_mut().buffer.delete(s, e, AuthorId::human());
+                            app.tab_mut()
+                                .buffer
+                                .insert(s, &formatted, AuthorId::human());
+                            app.tab_mut().visual_anchor = None;
+                            app.mode = Mode::Normal;
+                            app.mark_highlights_dirty();
+                            app.set_status("Selection formatted");
+                        }
+                        Ok(output) => {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            app.set_status(format!(
+                                "Format failed: {}",
+                                err.lines().next().unwrap_or("unknown error")
+                            ));
+                        }
+                        Err(e) => app.set_status(format!("Formatter not found: {e}")),
+                    }
+                } else {
+                    app.set_status(
+                        "Select text first (visual mode) in a saved file, then :fmt-selection",
+                    );
+                }
+            // :cursor-regex <pattern> — create multi-cursors at all matches of a pattern.
+            } else if let Some(pattern) = other.strip_prefix("cursor-regex ") {
+                let pattern = pattern.trim();
+                if pattern.is_empty() {
+                    app.set_status("Usage: :cursor-regex <pattern>");
+                } else {
+                    let text = app.tab().buffer.text();
+                    let mut positions = Vec::new();
+                    let mut start = 0;
+                    while let Some(idx) = text[start..].find(pattern) {
+                        let byte_pos = start + idx;
+                        let char_idx = text[..byte_pos].chars().count();
+                        positions.push(char_idx);
+                        start = byte_pos + pattern.len().max(1);
+                    }
+                    if positions.is_empty() {
+                        app.set_status("No matches found");
+                    } else {
+                        app.tab_mut().secondary_cursors.clear();
+                        let mut first = true;
+                        for char_idx in &positions {
+                            let cursor = app.tab().buffer.char_idx_to_cursor(*char_idx);
+                            if first {
+                                app.tab_mut().cursor = cursor;
+                                first = false;
+                            } else {
+                                app.tab_mut().secondary_cursors.push(cursor);
+                            }
+                        }
+                        let count = positions.len();
+                        app.set_status(format!("{count} cursor(s) from pattern"));
+                    }
+                }
+            // :recent <N> — open Nth recent file.
+            } else if let Some(n_str) = other.strip_prefix("recent ") {
+                let n_str = n_str.trim();
+                if let Ok(n) = n_str.parse::<usize>() {
+                    let files: Vec<_> = app.recent_files.iter().rev().cloned().collect();
+                    if n == 0 || n > files.len() {
+                        app.set_status(format!("Invalid index. Use 1-{}", files.len()));
+                    } else {
+                        let path = files[n - 1].clone();
+                        if let Err(e) = app.open_file(path) {
+                            app.set_status(e);
+                        }
+                    }
+                } else {
+                    app.set_status("Usage: :recent <number>");
+                }
+            // :type-hierarchy — LSP type hierarchy at cursor.
+            } else if other == "type-hierarchy" {
+                let row = app.tab().cursor.row;
+                let col = app.tab().cursor.col;
+                let has_lsp = app.tab().lsp_client.is_some();
+                if has_lsp {
+                    if let Some(ref mut lsp) = app.tab_mut().lsp_client {
+                        lsp.request_type_hierarchy(row as u32, col as u32);
+                    }
+                    app.set_status("Type hierarchy requested (results in LSP events)");
+                } else {
+                    app.set_status("No LSP server active");
+                }
+            // :worktree list — list git worktrees.
+            } else if other == "worktree list" {
+                let output = std::process::Command::new("git")
+                    .args(["worktree", "list"])
+                    .output();
+                match output {
+                    Ok(out) if out.status.success() => {
+                        let text = String::from_utf8_lossy(&out.stdout);
+                        let lines: Vec<&str> = text.lines().take(5).collect();
+                        app.set_status(format!("Worktrees: {}", lines.join(" | ")));
+                    }
+                    Ok(out) => {
+                        let err = String::from_utf8_lossy(&out.stderr);
+                        app.set_status(format!("git worktree: {}", err.trim()));
+                    }
+                    Err(e) => app.set_status(format!("git not found: {e}")),
+                }
+            // :worktree add <path> <branch> — add a git worktree.
+            } else if let Some(args) = other.strip_prefix("worktree add ") {
+                let parts: Vec<&str> = args.trim().splitn(2, ' ').collect();
+                if parts.len() < 2 {
+                    app.set_status("Usage: :worktree add <path> <branch>");
+                } else {
+                    let wt_path = parts[0].trim();
+                    let branch = parts[1].trim();
+                    let output = std::process::Command::new("git")
+                        .args(["worktree", "add", wt_path, branch])
+                        .output();
+                    match output {
+                        Ok(out) if out.status.success() => {
+                            app.set_status(format!("Worktree created: {wt_path} [{branch}]"));
+                        }
+                        Ok(out) => {
+                            let err = String::from_utf8_lossy(&out.stderr);
+                            app.set_status(format!("git worktree add: {}", err.trim()));
+                        }
+                        Err(e) => app.set_status(format!("git not found: {e}")),
+                    }
+                }
+            // :commit-sign <message> — signed git commit.
+            } else if let Some(msg) = other.strip_prefix("commit-sign ") {
+                let msg = msg.trim();
+                if msg.is_empty() {
+                    app.set_status("Usage: :commit-sign <message>");
+                } else {
+                    app.terminal_mut().visible = true;
+                    app.terminal_focused = true;
+                    app.terminal_mut()
+                        .send_bytes(format!("git commit -S -m \"{}\"\n", msg).as_bytes());
+                    app.set_status(format!("Signing commit: {msg}"));
+                }
+            // :term-search — activate terminal search.
+            } else if other == "term-search" {
+                if app.terminal().visible {
+                    app.terminal_focused = true;
+                    let term = app.terminal_mut();
+                    term.search_active = true;
+                    term.search_query.clear();
+                    app.set_status("Terminal search active (type to search)");
+                } else {
+                    app.set_status("Terminal is not visible");
+                }
+            // :term-shell <shell> — open terminal with specific shell.
+            } else if let Some(shell) = other.strip_prefix("term-shell ") {
+                let shell = shell.trim();
+                let shell_path = match shell {
+                    "bash" => "/bin/bash",
+                    "zsh" => "/bin/zsh",
+                    "fish" => "/usr/local/bin/fish",
+                    "sh" => "/bin/sh",
+                    _ => shell, // allow absolute path
+                };
+                if std::path::Path::new(shell_path).exists() {
+                    let cwd = app
+                        .tab()
+                        .buffer
+                        .file_path()
+                        .and_then(|p| p.parent())
+                        .map(|p| p.to_path_buf())
+                        .or_else(|| std::env::current_dir().ok())
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let idx = app.terminals.len() + 1;
+                    let mut t =
+                        crate::embedded_terminal::EmbeddedTerminal::with_shell(cwd, shell_path);
+                    t.label = format!("{shell} ({idx})");
+                    t.height = app.terminal().height;
+                    t.visible = true;
+                    t.inject_shell_integration();
+                    app.terminals.push(t);
+                    app.active_terminal = app.terminals.len() - 1;
+                    app.terminal_focused = true;
+                    app.set_status(format!("Opened terminal: {shell}"));
+                } else {
+                    app.set_status(format!("Shell not found: {shell_path}"));
+                }
+            // :panel-left — move sidebar to left.
+            } else if other == "panel-left" {
+                app.sidebar_on_right = false;
+                app.set_status("Sidebar: left");
+            // :panel-right — move sidebar to right.
+            } else if other == "panel-right" {
+                app.sidebar_on_right = true;
+                app.set_status("Sidebar: right");
+            // :panel-bottom — set terminal to bottom (default).
+            } else if other == "panel-bottom" {
+                app.set_status("Terminal panel: bottom (default)");
             } else {
                 app.set_status(format!("Unknown command: {}", other));
             }

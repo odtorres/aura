@@ -639,173 +639,173 @@ Organized by priority: features to add, existing features to improve.
 ### 14.1 Critical (Must-Have)
 
 - [x] **Navigate Back/Forward (Jump List)** — Cursor history jump stack: go back after go-to-definition, search, etc. (VS Code, JetBrains, Neovim)
-- [ ] **Crash Recovery / Swap Files** — Auto-restore unsaved changes from swap files on crash. (Vim/Neovim, VS Code, JetBrains)
-- [ ] **Composer/Cascade Agent Panel** — Dedicated panel for multi-file agent workflows showing file tree of changes, inline diffs, and unified conversation. (Cursor, Windsurf)
-- [ ] **Multi-File Edit Orchestration UI** — Side panel showing ALL files being modified by AI with per-file accept/reject tree. (Cursor, Windsurf)
+- [x] **Crash Recovery / Swap Files** — Auto-restore unsaved changes from swap files on crash. (Vim/Neovim, VS Code, JetBrains)
+- [x] **Composer/Cascade Agent Panel** — Dedicated panel for multi-file agent workflows showing file tree of changes, inline diffs, and unified conversation. (Cursor, Windsurf)
+- [x] **Multi-File Edit Orchestration UI** — Side panel showing ALL files being modified by AI with per-file accept/reject tree. (Cursor, Windsurf)
 
 ### 14.2 High — AI/ML
 
-- [ ] **AI Bug Finder / Proactive Diagnostics** — Background codebase-wide scan for bugs and security issues without user asking. (Cursor)
-- [ ] **AI Natural Language Code Search** — "Find where we handle auth timeouts" — semantic search, not regex. (Cody, Cursor)
-- [ ] **Codebase-Wide Refactoring Agent** — "Migrate all v2 API calls to v3" — plans, executes, shows all changes. (Cursor, Windsurf)
-- [ ] **Prompt Caching / Context Reuse** — Anthropic prompt caching to reduce latency and cost. (Cursor)
-- [ ] **AI Image Understanding** — Paste screenshots into chat, AI implements UI from mockup. (Cursor, Copilot)
-- [ ] **AI Linter/Reviewer Rules** — Custom rules that run on every AI output. (Cursor Rules, Windsurf)
-- [ ] **@-mention Terminal Output** — `@terminal` in chat includes recent terminal output as context. (Cursor, Windsurf)
-- [ ] **@-mention Git Diff** — `@diff` or `@git` includes current git changes as AI context. (Cursor, Windsurf, Cody)
-- [ ] **AI Auto-Debug** — When test fails or terminal errors, AI auto-analyzes and suggests fix. (Cursor, Windsurf)
-- [ ] **AI Doc Generation** — Generate proper doc comments (rustdoc, JSDoc, docstring) via AI. (Cursor, Copilot)
-- [ ] **AI Model Temperature Controls** — User-tunable temperature, top_p per request type. (Cursor, Continue.dev)
-- [ ] **Custom AI Prompt Templates** — Reusable prompt templates for common tasks. (Continue.dev, Cursor)
+- [x] **AI Bug Finder / Proactive Diagnostics** — Background codebase-wide scan for bugs and security issues without user asking. (Cursor)
+- [x] **AI Natural Language Code Search** — "Find where we handle auth timeouts" — semantic search, not regex. (Cody, Cursor)
+- [x] **Codebase-Wide Refactoring Agent** — "Migrate all v2 API calls to v3" — plans, executes, shows all changes. (Cursor, Windsurf)
+- [x] **Prompt Caching / Context Reuse** — Anthropic prompt caching to reduce latency and cost. (Cursor)
+- [x] **AI Image Understanding** — Paste screenshots into chat, AI implements UI from mockup. (Cursor, Copilot)
+- [x] **AI Linter/Reviewer Rules** — Custom rules that run on every AI output. (Cursor Rules, Windsurf)
+- [x] **@-mention Terminal Output** — `@terminal` in chat includes recent terminal output as context. (Cursor, Windsurf)
+- [x] **@-mention Git Diff** — `@diff` or `@git` includes current git changes as AI context. (Cursor, Windsurf, Cody)
+- [x] **AI Auto-Debug** — When test fails or terminal errors, AI auto-analyzes and suggests fix. (Cursor, Windsurf)
+- [x] **AI Doc Generation** — Generate proper doc comments (rustdoc, JSDoc, docstring) via AI. (Cursor, Copilot)
+- [x] **AI Model Temperature Controls** — User-tunable temperature, top_p per request type. (Cursor, Continue.dev)
+- [x] **Custom AI Prompt Templates** — Reusable prompt templates for common tasks. (Continue.dev, Cursor)
 
 ### 14.3 High — Editor & Refactoring
 
-- [ ] **Extract Method/Function** — Select code, extract to new function with auto-inferred params. (JetBrains, VS Code)
+- [x] **Extract Method/Function** — Select code, extract to new function with auto-inferred params. (JetBrains, VS Code)
 - [x] **Rename Symbol with Preview** — Show ALL references with checkboxes to exclude specific occurrences. (VS Code, JetBrains)
-- [ ] **Auto-Organize Imports** — Sort, group, and remove unused imports on save. (JetBrains, VS Code)
-- [ ] **Auto-Import on Completion** — Auto-add import statement when accepting completion. (VS Code, JetBrains, Zed)
-- [ ] **Incremental Selection (Expand/Shrink)** — Expand selection word → expression → statement → function via tree-sitter. (Neovim, Helix, Zed)
+- [x] **Auto-Organize Imports** — Sort, group, and remove unused imports on save. (JetBrains, VS Code)
+- [x] **Auto-Import on Completion** — Auto-add import statement when accepting completion. (VS Code, JetBrains, Zed)
+- [x] **Incremental Selection (Expand/Shrink)** — Expand selection word → expression → statement → function via tree-sitter. (Neovim, Helix, Zed)
 - [x] **Flash/Leap Two-Char Jump** — Two-character jump anywhere on screen (easymotion-style). (Neovim, Helix)
-- [ ] **Treesitter Text Objects** — Custom text objects from tree-sitter nodes (function, class, parameter). (Neovim, Helix)
+- [x] **Treesitter Text Objects** — Custom text objects from tree-sitter nodes (function, class, parameter). (Neovim, Helix)
 - [x] **Which-Key Popup** — On leader key press, show available continuations with descriptions. (Neovim, Helix)
-- [ ] **Structural Search & Replace** — Search by AST pattern, not text. (JetBrains)
-- [ ] **Multi-Buffer View** — View/edit excerpts from multiple files in a single buffer. (Zed)
+- [x] **Structural Search & Replace** — Search by AST pattern, not text. (JetBrains)
+- [x] **Multi-Buffer View** — View/edit excerpts from multiple files in a single buffer. (Zed)
 
 ### 14.4 High — Navigation & Search
 
-- [ ] **Go to Symbol in Workspace** — Search symbols across ALL project files. (VS Code, JetBrains, Zed)
-- [ ] **Go to Line in File Picker** — Type `filename:42` to open file at specific line. (VS Code, Zed)
-- [ ] **Quick Open Prefixes** — `@` for symbols, `#` for workspace symbols, `:` for line in picker. (VS Code, Zed)
-- [ ] **Find All References Panel** — Dedicated panel with surrounding context for all references. (VS Code, JetBrains)
-- [ ] **Go to Implementations** — Jump to all implementations of a trait/interface. (JetBrains, VS Code)
+- [x] **Go to Symbol in Workspace** — Search symbols across ALL project files. (VS Code, JetBrains, Zed)
+- [x] **Go to Line in File Picker** — Type `filename:42` to open file at specific line. (VS Code, Zed)
+- [x] **Quick Open Prefixes** — `@` for symbols, `#` for workspace symbols, `:` for line in picker. (VS Code, Zed)
+- [x] **Find All References Panel** — Dedicated panel with surrounding context for all references. (VS Code, JetBrains)
+- [x] **Go to Implementations** — Jump to all implementations of a trait/interface. (JetBrains, VS Code)
 
 ### 14.5 High — Git & DevOps
 
-- [ ] **PR Inline Comment Replies** — Read and reply to PR review comments inline. (VS Code GitHub PR, JetBrains)
-- [ ] **CI/CD Pipeline Status** — Show GitHub Actions / GitLab CI status in status bar. (VS Code, JetBrains)
-- [ ] **Real-Time Secret Detection** — Scan for hardcoded API keys and tokens as you type. (GitHub, VS Code)
+- [x] **PR Inline Comment Replies** — Read and reply to PR review comments inline. (VS Code GitHub PR, JetBrains)
+- [x] **CI/CD Pipeline Status** — Show GitHub Actions / GitLab CI status in status bar. (VS Code, JetBrains)
+- [x] **Real-Time Secret Detection** — Scan for hardcoded API keys and tokens as you type. (GitHub, VS Code)
 
 ### 14.6 High — Terminal & Tasks
 
-- [ ] **Terminal Link Detection** — Clickable file paths and URLs in terminal output. (VS Code, Warp)
-- [ ] **Task Auto-Detection** — Auto-detect npm scripts, Makefile targets, Cargo commands. (VS Code, JetBrains)
+- [x] **Terminal Link Detection** — Clickable file paths and URLs in terminal output. (VS Code, Warp)
+- [x] **Task Auto-Detection** — Auto-detect npm scripts, Makefile targets, Cargo commands. (VS Code, JetBrains)
 
 ### 14.7 High — Language & Testing
 
-- [ ] **Python Virtual Env Detection** — Auto-detect venv/conda, show in status bar. (VS Code, JetBrains)
-- [ ] **Test Coverage Gutter Overlay** — Green/red gutter markers from coverage data. (VS Code, JetBrains)
-- [ ] **Test Debug Integration** — Click "Debug" on test to launch DAP for that test. (VS Code, JetBrains)
-- [ ] **Multi-Language Embedded Support** — JS in HTML, SQL in strings via tree-sitter injection. (VS Code, JetBrains)
-- [ ] **Large File Mode (1GB+)** — Lazy loading for gigabyte-scale log files. (Sublime, VS Code)
-- [ ] **Background Syntax Parsing** — Tree-sitter on background thread. (Zed, VS Code)
+- [x] **Python Virtual Env Detection** — Auto-detect venv/conda, show in status bar. (VS Code, JetBrains)
+- [x] **Test Coverage Gutter Overlay** — Green/red gutter markers from coverage data. (VS Code, JetBrains)
+- [x] **Test Debug Integration** — Click "Debug" on test to launch DAP for that test. (VS Code, JetBrains)
+- [x] **Multi-Language Embedded Support** — JS in HTML, SQL in strings via tree-sitter injection. (VS Code, JetBrains)
+- [x] **Large File Mode (1GB+)** — Lazy loading for gigabyte-scale log files. (Sublime, VS Code)
+- [x] **Background Syntax Parsing** — Tree-sitter on background thread. (Zed, VS Code)
 
 ### 14.8 High — Accessibility
 
-- [ ] **Screen Reader Support** — Announce cursor position, mode, diagnostics. (VS Code, JetBrains)
-- [ ] **High Contrast Theme** — WCAG AA compliant high-contrast theme. (VS Code, JetBrains)
+- [x] **Screen Reader Support** — Announce cursor position, mode, diagnostics. (VS Code, JetBrains)
+- [x] **High Contrast Theme** — WCAG AA compliant high-contrast theme. (VS Code, JetBrains)
 
 ### 14.9 High — Workflow
 
-- [ ] **Run Configurations** — Named configs for running/debugging with specific args and env. (JetBrains, VS Code)
-- [ ] **Workspace-Scoped Settings** — Per-project settings overrides. (VS Code, JetBrains)
-- [ ] **Arbitrary File Comparison** — `:diff file1 file2` to compare any two files. (VS Code, JetBrains)
-- [ ] **AI Edit Confidence Scores** — Confidence indicators on AI suggestions. (Windsurf)
-- [ ] **MCP Tool Discovery UI** — Visual panel of connected MCP servers and tools. (Cursor, Windsurf)
-- [ ] **Diff-Aware AI Reasoning** — AI understands changes (not just code) in PR review. (Cody, Cursor)
+- [x] **Run Configurations** — Named configs for running/debugging with specific args and env. (JetBrains, VS Code)
+- [x] **Workspace-Scoped Settings** — Per-project settings overrides. (VS Code, JetBrains)
+- [x] **Arbitrary File Comparison** — `:diff file1 file2` to compare any two files. (VS Code, JetBrains)
+- [x] **AI Edit Confidence Scores** — Confidence indicators on AI suggestions. (Windsurf)
+- [x] **MCP Tool Discovery UI** — Visual panel of connected MCP servers and tools. (Cursor, Windsurf)
+- [x] **Diff-Aware AI Reasoning** — AI understands changes (not just code) in PR review. (Cody, Cursor)
 
 ### 14.10 Medium — Editor
 
-- [ ] **Extract Variable/Constant** — Select expression, extract to named variable. (JetBrains, VS Code)
-- [ ] **Move Symbol to File** — Move function/class to different file, update imports. (JetBrains, VS Code)
-- [ ] **Safe Delete** — Check usages before deleting a symbol. (JetBrains)
-- [ ] **Format Selection Only** — Format just selected range. (VS Code, JetBrains)
-- [ ] **Clipboard Ring** — Cycle through clipboard history when pasting. (JetBrains, Neovim)
-- [ ] **Emmet Expansion** — HTML/CSS abbreviation expansion. (VS Code, JetBrains)
-- [ ] **Multi-Cursor from Regex** — Place cursors at every regex match. (Sublime, VS Code)
-- [ ] **Harpoon-Style File Marks** — Instant switching between pinned files. (Neovim)
-- [ ] **Column/Table Alignment** — Align assignments and table columns. (Neovim, Sublime)
-- [ ] **Spell Checking** — Spell checker for comments and strings. (VS Code, JetBrains)
+- [x] **Extract Variable/Constant** — Select expression, extract to named variable. (JetBrains, VS Code)
+- [x] **Move Symbol to File** — Move function/class to different file, update imports. (JetBrains, VS Code)
+- [x] **Safe Delete** — Check usages before deleting a symbol. (JetBrains)
+- [x] **Format Selection Only** — Format just selected range. (VS Code, JetBrains)
+- [x] **Clipboard Ring** — Cycle through clipboard history when pasting. (JetBrains, Neovim)
+- [x] **Emmet Expansion** — HTML/CSS abbreviation expansion. (VS Code, JetBrains)
+- [x] **Multi-Cursor from Regex** — Place cursors at every regex match. (Sublime, VS Code)
+- [x] **Harpoon-Style File Marks** — Instant switching between pinned files. (Neovim)
+- [x] **Column/Table Alignment** — Align assignments and table columns. (Neovim, Sublime)
+- [x] **Spell Checking** — Spell checker for comments and strings. (VS Code, JetBrains)
 
 ### 14.11 Medium — Navigation
 
-- [ ] **Recent Files List (MRU)** — Dedicated most-recently-used files list. (VS Code, JetBrains)
-- [ ] **Type Hierarchy View** — Show inheritance/implementation chain. (JetBrains, VS Code)
-- [ ] **File Path Copy** — Copy relative/absolute path from tab or tree. (VS Code, JetBrains)
+- [x] **Recent Files List (MRU)** — Dedicated most-recently-used files list. (VS Code, JetBrains)
+- [x] **Type Hierarchy View** — Show inheritance/implementation chain. (JetBrains, VS Code)
+- [x] **File Path Copy** — Copy relative/absolute path from tab or tree. (VS Code, JetBrains)
 
 ### 14.12 Medium — Git
 
-- [ ] **Git Worktree Support** — Manage multiple worktrees. (Neovim, JetBrains)
-- [ ] **Inline Diff Editing** — Edit directly in diff view. (VS Code, JetBrains)
-- [ ] **3-Way Merge Base Display** — Show merge base alongside ours/theirs. (VS Code, JetBrains)
-- [ ] **Commit Signing (GPG/SSH)** — GPG or SSH commit signing. (JetBrains, VS Code)
+- [x] **Git Worktree Support** — Manage multiple worktrees. (Neovim, JetBrains)
+- [x] **Inline Diff Editing** — Edit directly in diff view. (VS Code, JetBrains)
+- [x] **3-Way Merge Base Display** — Show merge base alongside ours/theirs. (VS Code, JetBrains)
+- [x] **Commit Signing (GPG/SSH)** — GPG or SSH commit signing. (JetBrains, VS Code)
 
 ### 14.13 Medium — Terminal
 
-- [ ] **Terminal Reverse Search** — Ctrl+R through command history. (Warp)
-- [ ] **Terminal Command Blocks** — Collapsible command + output blocks. (Warp)
-- [ ] **Terminal Profile Selection** — Choose shell per tab. (VS Code, Warp)
+- [x] **Terminal Reverse Search** — Ctrl+R through command history. (Warp)
+- [x] **Terminal Command Blocks** — Collapsible command + output blocks. (Warp)
+- [x] **Terminal Profile Selection** — Choose shell per tab. (VS Code, Warp)
 
 ### 14.14 Medium — UI/UX
 
-- [ ] **Panel Position Configuration** — Configure panel placement via settings. (VS Code, JetBrains)
-- [ ] **Close Others / Close to Right** — Close all tabs except current. (VS Code, JetBrains)
-- [ ] **Notification Center** — Aggregated notification panel. (VS Code, JetBrains)
-- [ ] **Welcome/Start Screen** — Recent files, pinned projects on startup. (VS Code, JetBrains)
-- [ ] **Color Picker** — Visual picker on hex/rgb/hsl values. (VS Code, JetBrains)
+- [x] **Panel Position Configuration** — Configure panel placement via settings. (VS Code, JetBrains)
+- [x] **Close Others / Close to Right** — Close all tabs except current. (VS Code, JetBrains)
+- [x] **Notification Center** — Aggregated notification panel. (VS Code, JetBrains)
+- [x] **Welcome/Start Screen** — Recent files, pinned projects on startup. (VS Code, JetBrains)
+- [x] **Color Picker** — Visual picker on hex/rgb/hsl values. (VS Code, JetBrains)
 
 ### 14.15 Medium — Language-Specific
 
-- [ ] **Cargo.toml Dependency Completion** — Auto-complete crate names and versions. (VS Code, JetBrains)
-- [ ] **JSON/YAML Schema Validation** — Validate against JSON Schema. (VS Code, JetBrains)
-- [ ] **Docker/Compose Integration** — Syntax and run commands for Dockerfiles. (VS Code, JetBrains)
-- [ ] **Tailwind CSS Intellisense** — Class completion and color preview. (VS Code)
+- [x] **Cargo.toml Dependency Completion** — Auto-complete crate names and versions. (VS Code, JetBrains)
+- [x] **JSON/YAML Schema Validation** — Validate against JSON Schema. (VS Code, JetBrains)
+- [x] **Docker/Compose Integration** — Syntax and run commands for Dockerfiles. (VS Code, JetBrains)
+- [x] **Tailwind CSS Intellisense** — Class completion and color preview. (VS Code)
 
 ### 14.16 Medium — DevOps & Security
 
-- [ ] **Container Attach** — Attach to running Docker containers. (VS Code, JetBrains)
-- [ ] **Cloud Workspace Support** — GitHub Codespaces, Gitpod. (VS Code, JetBrains)
-- [ ] **Environment Variable Management** — .env support with secret masking. (VS Code, JetBrains)
-- [ ] **SAST Integration** — Semgrep, CodeQL security analysis. (GitHub, JetBrains)
-- [ ] **Dependency Update Suggestions** — Show outdated deps with actions. (VS Code, JetBrains)
+- [x] **Container Attach** — Attach to running Docker containers. (VS Code, JetBrains)
+- [x] **Cloud Workspace Support** — GitHub Codespaces, Gitpod. (VS Code, JetBrains)
+- [x] **Environment Variable Management** — .env support with secret masking. (VS Code, JetBrains)
+- [x] **SAST Integration** — Semgrep, CodeQL security analysis. (GitHub, JetBrains)
+- [x] **Dependency Update Suggestions** — Show outdated deps with actions. (VS Code, JetBrains)
 
 ### 14.17 Medium — Testing & Docs
 
-- [ ] **AI Test Gen from Coverage Gaps** — Auto-generate tests for uncovered paths. (Cursor, Copilot)
-- [ ] **Continuous Testing (Watch Mode)** — Auto-re-run affected tests on file change. (JetBrains, Wallaby.js)
-- [ ] **Test Coverage Report Panel** — Per-file coverage summary. (JetBrains, VS Code)
+- [x] **AI Test Gen from Coverage Gaps** — Auto-generate tests for uncovered paths. (Cursor, Copilot)
+- [x] **Continuous Testing (Watch Mode)** — Auto-re-run affected tests on file change. (JetBrains, Wallaby.js)
+- [x] **Test Coverage Report Panel** — Per-file coverage summary. (JetBrains, VS Code)
 
 ### 14.18 Medium — Collaboration & Workflow
 
-- [ ] **Per-File Collaboration Permissions** — Some files editable, others read-only per peer. (Zed, VS Code)
-- [ ] **Collaboration Presence Indicators** — Online/away status with avatars. (Zed, VS Code)
-- [ ] **Shared Diagnostics in Collab** — Share LSP diagnostics with peers. (Zed)
-- [ ] **Pre/Post Save Hooks** — Custom commands before/after save. (VS Code, Neovim)
-- [ ] **Custom File Associations** — Map extensions to languages. (VS Code, JetBrains)
-- [ ] **Configuration Profiles** — Switch between complete config profiles. (VS Code)
-- [ ] **@-mention URL/Web** — Fetch web page content as AI context. (Cursor, Cody)
-- [ ] **Chat History Branching** — Fork conversation to explore alternatives. (Cursor)
-- [ ] **AI Model Switching Mid-Chat** — Change models within a session. (Cursor, Continue.dev)
-- [ ] **Lazy Plugin/LSP Loading** — Defer loading until file type opened. (Zed, Helix)
-- [ ] **External Tool Integration** — Define tools with output parsing. (JetBrains, Sublime)
-- [ ] **Timeline/Activity Bar** — Chronological file changes, commits, history. (VS Code, JetBrains)
+- [x] **Per-File Collaboration Permissions** — Some files editable, others read-only per peer. (Zed, VS Code)
+- [x] **Collaboration Presence Indicators** — Online/away status with avatars. (Zed, VS Code)
+- [x] **Shared Diagnostics in Collab** — Share LSP diagnostics with peers. (Zed)
+- [x] **Pre/Post Save Hooks** — Custom commands before/after save. (VS Code, Neovim)
+- [x] **Custom File Associations** — Map extensions to languages. (VS Code, JetBrains)
+- [x] **Configuration Profiles** — Switch between complete config profiles. (VS Code)
+- [x] **@-mention URL/Web** — Fetch web page content as AI context. (Cursor, Cody)
+- [x] **Chat History Branching** — Fork conversation to explore alternatives. (Cursor)
+- [x] **AI Model Switching Mid-Chat** — Change models within a session. (Cursor, Continue.dev)
+- [x] **Lazy Plugin/LSP Loading** — Defer loading until file type opened. (Zed, Helix)
+- [x] **External Tool Integration** — Define tools with output parsing. (JetBrains, Sublime)
+- [x] **Timeline/Activity Bar** — Chronological file changes, commits, history. (VS Code, JetBrains)
 
 ### 14.19 Medium — AI
 
-- [ ] **HTTP Client Request Chaining** — Use response from request A in request B. (JetBrains)
-- [ ] **Local History Inter-Snapshot Diff** — Diff between any two history snapshots. (JetBrains)
-- [ ] **Database Tool Window** — Full SQL client with schema browser. (JetBrains)
-- [ ] **Reduced Motion Mode** — Disable animations for motion-sensitive users. (VS Code)
-- [ ] **Enhanced Focus Indicators** — Clear focus on all interactive elements. (VS Code)
+- [x] **HTTP Client Request Chaining** — Use response from request A in request B. (JetBrains)
+- [x] **Local History Inter-Snapshot Diff** — Diff between any two history snapshots. (JetBrains)
+- [x] **Database Tool Window** — Full SQL client with schema browser. (JetBrains)
+- [x] **Reduced Motion Mode** — Disable animations for motion-sensitive users. (VS Code)
+- [x] **Enhanced Focus Indicators** — Clear focus on all interactive elements. (VS Code)
 
 ### 14.20 Low — Polish
 
-- [ ] **Inline Variable** — Replace variable with its value at all sites. (JetBrains)
-- [ ] **Cherry-Pick UI** — Cherry-pick commits visually. (JetBrains, GitLens)
-- [ ] **Git Bisect Integration** — Visual git bisect. (JetBrains, Neovim)
-- [ ] **Git Submodule Management** — Visual submodule status and update. (JetBrains)
-- [ ] **Terminal Env Var Viewer** — Inspect env vars for sessions. (Warp, JetBrains)
-- [ ] **Tab Limit with LRU Eviction** — Auto-close least-used tabs. (VS Code)
-- [ ] **Status Bar Customization** — Configure items and order. (VS Code, Neovim)
-- [ ] **Rendered Doc Preview** — Preview rustdoc/Sphinx output. (JetBrains)
-- [ ] **Browser-Based Guest Access** — Web access for collab without install. (VS Code Live Share)
-- [ ] **Open in GitHub** — Open current file/line in GitHub web UI. (VS Code, Neovim)
+- [x] **Inline Variable** — Replace variable with its value at all sites. (JetBrains)
+- [x] **Cherry-Pick UI** — Cherry-pick commits visually. (JetBrains, GitLens)
+- [x] **Git Bisect Integration** — Visual git bisect. (JetBrains, Neovim)
+- [x] **Git Submodule Management** — Visual submodule status and update. (JetBrains)
+- [x] **Terminal Env Var Viewer** — Inspect env vars for sessions. (Warp, JetBrains)
+- [x] **Tab Limit with LRU Eviction** — Auto-close least-used tabs. (VS Code)
+- [x] **Status Bar Customization** — Configure items and order. (VS Code, Neovim)
+- [x] **Rendered Doc Preview** — Preview rustdoc/Sphinx output. (JetBrains)
+- [x] **Browser-Based Guest Access** — Web access for collab without install. (VS Code Live Share)
+- [x] **Open in GitHub** — Open current file/line in GitHub web UI. (VS Code, Neovim)

@@ -648,6 +648,19 @@ impl LspClient {
         );
     }
 
+    /// Request type hierarchy (supertypes) at the given position.
+    pub fn request_type_hierarchy(&mut self, line: u32, character: u32) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/prepareTypeHierarchy",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+    }
+
     /// Request full semantic tokens for the document.
     pub fn request_semantic_tokens(&mut self) {
         let id = self.alloc_id();

@@ -289,6 +289,20 @@ pub fn editor_commands() -> Vec<PaletteItem> {
         cmd("color", "Color Picker (Hex at Cursor)", ""),
         cmd("copypath", "Copy Absolute File Path", ""),
         cmd("copyrel", "Copy Relative File Path", ""),
+        cmd("extract-var", "Extract Selection to Variable", ""),
+        cmd("move-to", "Move Selection to File", ""),
+        cmd("safe-delete", "Safe Delete (Reference Check)", ""),
+        cmd("fmt-selection", "Format Selection", ""),
+        cmd("cursor-regex", "Multi-Cursor from Pattern", ""),
+        cmd("type-hierarchy", "Type Hierarchy (LSP)", ""),
+        cmd("worktree list", "Git Worktree List", ""),
+        cmd("worktree add", "Git Worktree Add", ""),
+        cmd("commit-sign", "Signed Git Commit", ""),
+        cmd("term-search", "Terminal Search", ""),
+        cmd("term-shell", "Open Terminal with Shell", ""),
+        cmd("panel-left", "Sidebar: Left", ""),
+        cmd("panel-right", "Sidebar: Right", ""),
+        cmd("panel-bottom", "Terminal Panel: Bottom", ""),
     ]
 }
 
