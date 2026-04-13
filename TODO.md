@@ -665,7 +665,7 @@ Organized by priority: features to add, existing features to improve.
 - [ ] **Auto-Organize Imports** — Sort, group, and remove unused imports on save. (JetBrains, VS Code)
 - [ ] **Auto-Import on Completion** — Auto-add import statement when accepting completion. (VS Code, JetBrains, Zed)
 - [ ] **Incremental Selection (Expand/Shrink)** — Expand selection word → expression → statement → function via tree-sitter. (Neovim, Helix, Zed)
-- [ ] **Flash/Leap Two-Char Jump** — Two-character jump anywhere on screen (easymotion-style). (Neovim, Helix)
+- [x] **Flash/Leap Two-Char Jump** — Two-character jump anywhere on screen (easymotion-style). (Neovim, Helix)
 - [ ] **Treesitter Text Objects** — Custom text objects from tree-sitter nodes (function, class, parameter). (Neovim, Helix)
 - [x] **Which-Key Popup** — On leader key press, show available continuations with descriptions. (Neovim, Helix)
 - [ ] **Structural Search & Replace** — Search by AST pattern, not text. (JetBrains)

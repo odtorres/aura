@@ -99,6 +99,33 @@ impl FilePicker {
             .map(|rel| self.root.join(rel))
     }
 
+    /// Parse a `filename:line` pattern from the query.
+    /// Returns `(file_query, Some(line_number))` if the pattern is detected,
+    /// otherwise `(query, None)`.
+    pub fn parse_goto_line(&self) -> Option<usize> {
+        // Check if query contains `:` followed by digits at the end.
+        if let Some(colon_pos) = self.query.rfind(':') {
+            let after_colon = &self.query[colon_pos + 1..];
+            if let Ok(line) = after_colon.parse::<usize>() {
+                if line > 0 {
+                    return Some(line);
+                }
+            }
+        }
+        None
+    }
+
+    /// Return the query part without the `:line` suffix.
+    pub fn file_query(&self) -> &str {
+        if let Some(colon_pos) = self.query.rfind(':') {
+            let after_colon = &self.query[colon_pos + 1..];
+            if after_colon.parse::<usize>().is_ok() {
+                return &self.query[..colon_pos];
+            }
+        }
+        &self.query
+    }
+
     /// Re-scan the directory and refresh the filtered list.
     pub fn refresh(&mut self) {
         self.scan_entries();

@@ -269,6 +269,12 @@ pub fn editor_commands() -> Vec<PaletteItem> {
         cmd("expand", "Expand Selection to Scope", ""),
         cmd("shrink", "Shrink Selection to Scope", ""),
         cmd("organize-imports", "Organize Imports (LSP)", ""),
+        cmd("impl", "Go to Implementation (LSP)", ""),
+        cmd("symbol", "Go to Symbol in Workspace", ""),
+        cmd("extract", "Extract Selection to Function", ""),
+        cmd("doc", "Generate Doc Comment (AI)", ""),
+        cmd("fix-error", "Auto-Debug Terminal Error (AI)", ""),
+        cmd("references", "Find All References (LSP)", ""),
     ]
 }
 

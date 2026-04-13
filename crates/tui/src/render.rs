@@ -1992,9 +1992,10 @@ fn draw_terminal(frame: &mut Frame, app: &App, area: Rect) {
                 style = style.bg(Color::Indexed(237)).fg(Color::White);
             }
             // Underline detected file links.
-            let in_link = app.terminal_links.iter().any(|(lr, lcs, lce, _, _, _)| {
-                *lr == row_idx && col < *lce && next > *lcs
-            });
+            let in_link = app
+                .terminal_links
+                .iter()
+                .any(|(lr, lcs, lce, _, _, _)| *lr == row_idx && col < *lce && next > *lcs);
             if in_link {
                 style = style.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED);
             }
@@ -8411,9 +8412,6 @@ fn draw_which_key_popup(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(desc.as_str(), Style::default().fg(Color::White)),
         ]);
         let w = col_width.min(inner.width.saturating_sub(col as u16 * col_width));
-        frame.render_widget(
-            Paragraph::new(line),
-            Rect::new(x_off, y_off, w, 1),
-        );
+        frame.render_widget(Paragraph::new(line), Rect::new(x_off, y_off, w, 1));
     }
 }

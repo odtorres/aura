@@ -455,6 +455,8 @@ pub struct App {
     pub count_prefix: Option<usize>,
     /// Character search pending (f/F/t/T pressed, waiting for char).
     pub find_char_pending: Option<FindCharMode>,
+    /// Flash/Leap two-char jump: first char waiting for second.
+    pub flash_pending: Option<char>,
     /// Last character search for ; and , repeat.
     pub last_find_char: Option<(FindCharMode, char)>,
     /// Replace char pending (r pressed, waiting for char).
@@ -1070,6 +1072,7 @@ impl App {
             pending_operator: None,
             count_prefix: None,
             find_char_pending: None,
+            flash_pending: None,
             last_find_char: None,
             replace_char_pending: false,
             text_object_pending: None,
@@ -2757,56 +2760,81 @@ impl App {
                 },
             );
         } else if root.join("package.json").exists() {
-            tasks.insert(
-                "build".into(),
-                TaskConfig {
-                    command: "npm run build".into(),
-                    description: "Build the project".into(),
-                },
-            );
-            tasks.insert(
-                "test".into(),
-                TaskConfig {
-                    command: "npm test".into(),
-                    description: "Run tests".into(),
-                },
-            );
-            tasks.insert(
-                "lint".into(),
-                TaskConfig {
-                    command: "npm run lint".into(),
-                    description: "Run lints".into(),
-                },
-            );
-            tasks.insert(
-                "dev".into(),
-                TaskConfig {
-                    command: "npm run dev".into(),
-                    description: "Start dev server".into(),
-                },
-            );
+            // Parse actual scripts from package.json.
+            if let Ok(content) = std::fs::read_to_string(root.join("package.json")) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
+                        for (name, cmd) in scripts {
+                            if let Some(cmd_str) = cmd.as_str() {
+                                tasks.insert(
+                                    name.clone(),
+                                    TaskConfig {
+                                        command: format!("npm run {name}"),
+                                        description: cmd_str.chars().take(60).collect::<String>(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            // Fallback if no scripts parsed.
+            if tasks.is_empty() {
+                tasks.insert(
+                    "build".into(),
+                    TaskConfig {
+                        command: "npm run build".into(),
+                        description: "Build the project".into(),
+                    },
+                );
+                tasks.insert(
+                    "test".into(),
+                    TaskConfig {
+                        command: "npm test".into(),
+                        description: "Run tests".into(),
+                    },
+                );
+            }
         } else if root.join("Makefile").exists() || root.join("makefile").exists() {
-            tasks.insert(
-                "build".into(),
-                TaskConfig {
-                    command: "make".into(),
-                    description: "Build (default target)".into(),
-                },
-            );
-            tasks.insert(
-                "test".into(),
-                TaskConfig {
-                    command: "make test".into(),
-                    description: "Run tests".into(),
-                },
-            );
-            tasks.insert(
-                "clean".into(),
-                TaskConfig {
-                    command: "make clean".into(),
-                    description: "Clean build artifacts".into(),
-                },
-            );
+            // Parse actual Makefile targets.
+            let makefile_path = if root.join("Makefile").exists() {
+                root.join("Makefile")
+            } else {
+                root.join("makefile")
+            };
+            if let Ok(content) = std::fs::read_to_string(&makefile_path) {
+                for line in content.lines() {
+                    // Match lines like `target_name:` (not starting with tab/space, not `.PHONY`).
+                    if let Some(colon_pos) = line.find(':') {
+                        let target = line[..colon_pos].trim();
+                        if !target.is_empty()
+                            && !target.starts_with('.')
+                            && !target.starts_with('#')
+                            && !target.starts_with('\t')
+                            && !target.contains(' ')
+                            && !target.contains('$')
+                        {
+                            tasks.insert(
+                                target.to_string(),
+                                TaskConfig {
+                                    command: format!("make {target}"),
+                                    description: format!("make {target}"),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            // Fallback if nothing parsed.
+            if tasks.is_empty() {
+                tasks.insert(
+                    "build".into(),
+                    TaskConfig {
+                        command: "make".into(),
+                        description: "Build (default target)".into(),
+                    },
+                );
+            }
         } else if root.join("go.mod").exists() {
             tasks.insert(
                 "build".into(),
@@ -3869,6 +3897,15 @@ impl App {
                         self.references_panel = Some(ReferencesPanel::new(locations));
                     }
                 }
+                LspEvent::Implementation(locations) => {
+                    if locations.is_empty() {
+                        self.set_status("No implementations found");
+                    } else {
+                        let count = locations.len();
+                        self.set_status(format!("{count} implementation(s) found"));
+                        self.references_panel = Some(ReferencesPanel::new(locations));
+                    }
+                }
                 LspEvent::RenameApplied(edits) => {
                     self.apply_rename_edits(edits);
                 }
@@ -4101,6 +4138,18 @@ impl App {
         if let Some(client) = &mut self.tab_mut().lsp_client {
             client.references(row, col);
             self.set_status("Finding references...");
+        } else {
+            self.set_status("No LSP server");
+        }
+    }
+
+    /// Request implementations of the symbol at the cursor (LSP textDocument/implementation).
+    pub fn lsp_implementation(&mut self) {
+        let row = self.tab().cursor.row as u32;
+        let col = self.tab().cursor.col as u32;
+        if let Some(client) = &mut self.tab_mut().lsp_client {
+            client.implementation(row, col);
+            self.set_status("Finding implementations...");
         } else {
             self.set_status("No LSP server");
         }
@@ -8362,8 +8411,7 @@ impl App {
                                         "\n--- @diff ---\nNo unstaged changes.\n--- end @diff ---\n",
                                     );
                                 } else {
-                                    let truncated: String =
-                                        diff_text.chars().take(30000).collect();
+                                    let truncated: String = diff_text.chars().take(30000).collect();
                                     context.push_str(&format!(
                                         "\n--- @diff ---\n{}\n--- end @diff ---\n",
                                         truncated
@@ -9239,6 +9287,7 @@ impl App {
     /// then close the picker. If no file is selected, or loading fails, a
     /// status message is shown instead.
     pub fn open_selected_file(&mut self) {
+        let goto_line = self.file_picker.parse_goto_line();
         let path = match self.file_picker.selected_path() {
             Some(p) => p,
             None => {
@@ -9249,6 +9298,16 @@ impl App {
         self.file_picker.close();
         if let Err(e) = self.open_file(path) {
             self.set_status(e);
+            return;
+        }
+        // Jump to line if `filename:line` pattern was detected.
+        if let Some(line) = goto_line {
+            let target =
+                (line.saturating_sub(1)).min(self.tab().buffer.line_count().saturating_sub(1));
+            self.tab_mut().cursor.row = target;
+            self.tab_mut().cursor.col = 0;
+            self.clamp_cursor();
+            self.set_status(format!("Line {line}"));
         }
     }
 
@@ -10796,7 +10855,10 @@ impl App {
                         // Parse optional :col
                         let mut col_num: usize = 1;
                         let mut end = j;
-                        if j < len && chars[j] == ':' && j + 1 < len && chars[j + 1].is_ascii_digit()
+                        if j < len
+                            && chars[j] == ':'
+                            && j + 1 < len
+                            && chars[j + 1].is_ascii_digit()
                         {
                             let mut k = j + 1;
                             while k < len && chars[k].is_ascii_digit() {
@@ -10807,9 +10869,8 @@ impl App {
                             end = k;
                         }
 
-                        self.terminal_links.push((
-                            row_idx, start, end, path_part, line_num, col_num,
-                        ));
+                        self.terminal_links
+                            .push((row_idx, start, end, path_part, line_num, col_num));
                         i = end;
                         continue;
                     }
@@ -10821,9 +10882,11 @@ impl App {
 
     /// Open a terminal link at the given screen coordinates.
     pub fn click_terminal_link(&mut self, row: usize, col: usize) -> bool {
-        let link = self.terminal_links.iter().find(|(r, cs, ce, _, _, _)| {
-            *r == row && col >= *cs && col < *ce
-        }).cloned();
+        let link = self
+            .terminal_links
+            .iter()
+            .find(|(r, cs, ce, _, _, _)| *r == row && col >= *cs && col < *ce)
+            .cloned();
 
         if let Some((_, _, _, path, line_num, col_num)) = link {
             // Try to resolve relative paths.

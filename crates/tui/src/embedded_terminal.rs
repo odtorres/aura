@@ -1546,6 +1546,26 @@ impl EmbeddedTerminal {
         }
     }
 
+    /// Get the last `n` visible lines of terminal output as strings.
+    pub fn visible_lines(&self, n: usize) -> Vec<String> {
+        let scr = self.screen.lock().expect("terminal screen lock");
+        let mut lines: Vec<String> = Vec::new();
+        for row_idx in 0..scr.rows {
+            if row_idx < scr.cells.len() {
+                let line: String = scr.cells[row_idx]
+                    .iter()
+                    .take(scr.cols)
+                    .map(|c| c.ch)
+                    .collect();
+                lines.push(line.trim_end().to_string());
+            }
+        }
+        // Return the last `n` non-empty lines.
+        let non_empty: Vec<String> = lines.into_iter().filter(|l| !l.is_empty()).collect();
+        let start = non_empty.len().saturating_sub(n);
+        non_empty[start..].to_vec()
+    }
+
     /// Execute a search across the terminal scrollback and screen buffer.
     ///
     /// Updates `search_matches` with (row_in_all_lines, col, length) triples.

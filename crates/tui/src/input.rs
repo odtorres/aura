@@ -2380,6 +2380,53 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         return;
     }
 
+    // --- Flash/Leap two-char jump (s + {char1} + {char2}) ---
+    if let Some(first_char) = app.flash_pending.take() {
+        if let KeyCode::Char(ch) = code {
+            if first_char == '\0' {
+                // Waiting for first char — store it and wait for second.
+                app.flash_pending = Some(ch);
+                return;
+            }
+            // We have both chars now — search and jump.
+            let needle = format!("{}{}", first_char, ch);
+            let cursor_row = app.tab().cursor.row;
+            let cursor_col = app.tab().cursor.col;
+            let line_count = app.tab().buffer.line_count();
+            let mut target: Option<(usize, usize)> = None;
+            for offset in 0..line_count {
+                let row = (cursor_row + offset) % line_count;
+                let search_start = if row == cursor_row {
+                    cursor_col.saturating_add(1)
+                } else {
+                    0
+                };
+                let line_text = app
+                    .tab()
+                    .buffer
+                    .line_text(row)
+                    .unwrap_or_default()
+                    .to_string();
+                if search_start < line_text.len() {
+                    if let Some(col) = line_text[search_start..].find(&needle) {
+                        target = Some((row, search_start + col));
+                        break;
+                    }
+                }
+            }
+            if let Some((row, col)) = target {
+                app.tab_mut().cursor.row = row;
+                app.tab_mut().cursor.col = col;
+                app.clamp_cursor();
+            } else {
+                app.set_status(format!("Flash: '{needle}' not found"));
+            }
+        } else if code == KeyCode::Esc {
+            // Cancel flash mode.
+        }
+        return;
+    }
+
     // --- Count prefix accumulation ---
     if let KeyCode::Char(c @ '1'..='9') = code {
         if app.pending_operator.is_none() || app.count_prefix.is_some() {
@@ -2439,6 +2486,51 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     } else {
                         Some(tab.buffer.find_around_word(pos))
                     }
+                }
+                // af/if — around/inside function, ac/ic — around/inside class (treesitter).
+                'f' | 'c' => {
+                    let cursor_row = tab.cursor.row;
+                    // Find the enclosing foldable range containing the cursor.
+                    let ranges = &tab.foldable_ranges;
+                    let mut best: Option<(usize, usize)> = None;
+                    for (&start_line, &end_line) in ranges {
+                        if start_line <= cursor_row && cursor_row <= end_line {
+                            // Pick the smallest enclosing range.
+                            if let Some((bs, be)) = best {
+                                if (end_line - start_line) < (be - bs) {
+                                    best = Some((start_line, end_line));
+                                }
+                            } else {
+                                best = Some((start_line, end_line));
+                            }
+                        }
+                    }
+                    best.map(|(start_line, end_line)| {
+                        let start_char = tab
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(start_line, 0));
+                        let end_char = if end_line + 1 < tab.buffer.line_count() {
+                            tab.buffer
+                                .cursor_to_char_idx(&aura_core::Cursor::new(end_line + 1, 0))
+                        } else {
+                            tab.buffer.len_chars()
+                        };
+                        if is_inner {
+                            // Inner: skip the first line (signature) and last line (closing brace).
+                            let inner_start = if start_line + 1 < tab.buffer.line_count() {
+                                tab.buffer
+                                    .cursor_to_char_idx(&aura_core::Cursor::new(start_line + 1, 0))
+                            } else {
+                                start_char
+                            };
+                            let inner_end = tab
+                                .buffer
+                                .cursor_to_char_idx(&aura_core::Cursor::new(end_line, 0));
+                            (inner_start, inner_end.max(inner_start))
+                        } else {
+                            (start_char, end_char)
+                        }
+                    })
                 }
                 _ => None,
             };
@@ -2898,15 +2990,10 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                 app.mark_highlights_dirty();
             }
         }
-        // s — substitute: delete char and enter Insert.
+        // s — flash/leap two-char jump (like vim-sneak).
         KeyCode::Char('s') if !app.source_control_focused => {
-            let tab = app.tab_mut();
-            let pos = tab.buffer.cursor_to_char_idx(&tab.cursor);
-            if pos < tab.buffer.len_chars() {
-                tab.buffer.delete(pos, pos + 1, AuthorId::human());
-                app.mark_highlights_dirty();
-            }
-            app.mode = Mode::Insert;
+            app.flash_pending = Some('\0'); // Sentinel: waiting for first char.
+            app.set_status("Flash: type 2 chars to jump...");
         }
         // S — substitute line: delete line content and enter Insert.
         KeyCode::Char('S') => {
@@ -3785,6 +3872,11 @@ const COMMAND_LIST: &[(&str, &str, &str)] = &[
     ("visor", "Claude Code config browser", "Ctrl+I"),
     ("ai-visor", "Claude Code config browser", "Ctrl+I"),
     ("references", "LSP find references", ""),
+    ("impl", "Go to implementation (LSP)", ""),
+    ("symbol", "Go to symbol in workspace", ""),
+    ("extract", "Extract selection to function", ""),
+    ("doc", "Generate doc comment (AI)", ""),
+    ("fix-error", "Auto-debug last terminal error (AI)", ""),
     ("rename", "LSP rename symbol", ""),
     ("merge", "Open merge conflict view", ""),
     ("debug", "Start debug session", ""),
@@ -5364,11 +5456,6 @@ fn execute_command(app: &mut App, cmd: &str) {
             let state = if app.split_scroll_sync { "on" } else { "off" };
             app.set_status(format!("Scroll sync: {state}"));
         }
-        // :pin — pin the current tab.
-        "pin" => {
-            app.tab_mut().pinned = true;
-            app.set_status("Tab pinned");
-        }
         // :unpin — unpin the current tab.
         "unpin" => {
             app.tab_mut().pinned = false;
@@ -5793,10 +5880,17 @@ fn execute_command(app: &mut App, cmd: &str) {
                 (cursor_row, cursor_row)
             };
 
-            let target = enclosing.iter().find(|(s, e)| *s < cur_start || *e > cur_end);
+            let target = enclosing
+                .iter()
+                .find(|(s, e)| *s < cur_start || *e > cur_end);
             if let Some(&(start, end)) = target {
                 app.mode = crate::app::Mode::Visual;
-                let line_end = app.tab().buffer.line_text(end).map(|l| l.len().saturating_sub(1)).unwrap_or(0);
+                let line_end = app
+                    .tab()
+                    .buffer
+                    .line_text(end)
+                    .map(|l| l.len().saturating_sub(1))
+                    .unwrap_or(0);
                 app.tab_mut().visual_anchor = Some(aura_core::Cursor::new(start, 0));
                 app.tab_mut().cursor = aura_core::Cursor::new(end, line_end);
                 app.set_status(format!("Selection: lines {}-{}", start + 1, end + 1));
@@ -5819,14 +5913,21 @@ fn execute_command(app: &mut App, cmd: &str) {
                 .tab()
                 .foldable_ranges
                 .iter()
-                .filter(|(&start, &end)| start >= cur_start && end <= cur_end && (start > cur_start || end < cur_end))
+                .filter(|(&start, &end)| {
+                    start >= cur_start && end <= cur_end && (start > cur_start || end < cur_end)
+                })
                 .map(|(&s, &e)| (s, e))
                 .collect();
             inner.sort_by_key(|(s, e)| std::cmp::Reverse(e - s));
 
             if let Some(&(start, end)) = inner.first() {
                 app.mode = crate::app::Mode::Visual;
-                let line_end = app.tab().buffer.line_text(end).map(|l| l.len().saturating_sub(1)).unwrap_or(0);
+                let line_end = app
+                    .tab()
+                    .buffer
+                    .line_text(end)
+                    .map(|l| l.len().saturating_sub(1))
+                    .unwrap_or(0);
                 app.tab_mut().visual_anchor = Some(aura_core::Cursor::new(start, 0));
                 app.tab_mut().cursor = aura_core::Cursor::new(end, line_end);
                 app.set_status(format!("Selection: lines {}-{}", start + 1, end + 1));
@@ -5927,11 +6028,21 @@ fn execute_command(app: &mut App, cmd: &str) {
             if tasks.is_empty() {
                 app.set_status("No tasks available. Add [tasks] to aura.toml");
             } else {
-                let list: Vec<String> = tasks
+                let mut list: Vec<String> = tasks
                     .iter()
                     .map(|(name, t)| format!("{name}: {}", t.description))
                     .collect();
-                app.set_status(format!("Tasks: {}", list.join(" | ")));
+                list.sort();
+                let source = if !app.config.tasks.is_empty() {
+                    "aura.toml"
+                } else {
+                    "auto-detected"
+                };
+                app.set_status(format!(
+                    "Tasks ({source}, {} found): {}",
+                    list.len(),
+                    list.join(" | ")
+                ));
             }
         }
         // --- Navigation ---
@@ -6078,7 +6189,179 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.debug_panel.toggle();
             app.debug_panel_focused = app.debug_panel.visible;
         }
+        // --- Go to implementations (LSP) ---
+        "impl" | "implementation" => {
+            app.lsp_implementation();
+        }
+        // --- AI doc generation ---
+        "doc" => {
+            // Get the enclosing function from foldable_ranges.
+            let cursor_row = app.tab().cursor.row;
+            let ranges = app.tab().foldable_ranges.clone();
+            let mut best: Option<(usize, usize)> = None;
+            for (&start_line, &end_line) in &ranges {
+                if start_line <= cursor_row && cursor_row <= end_line {
+                    if let Some((bs, be)) = best {
+                        if (end_line - start_line) < (be - bs) {
+                            best = Some((start_line, end_line));
+                        }
+                    } else {
+                        best = Some((start_line, end_line));
+                    }
+                }
+            }
+            if let Some((start_line, end_line)) = best {
+                let mut func_text = String::new();
+                for row in start_line..=end_line {
+                    if let Some(line) = app.tab().buffer.line_text(row) {
+                        func_text.push_str(&line);
+                    }
+                }
+                let prompt = format!(
+                    "Generate a doc comment for the following function. \
+                     Output ONLY the doc comment (no code), in the appropriate \
+                     language style (/// for Rust, /** */ for JS/TS, # for Python, etc.):\n\n```\n{}\n```",
+                    func_text
+                );
+                app.chat_panel.visible = true;
+                app.chat_panel_focused = true;
+                app.chat_panel.input = prompt;
+                app.send_chat_message();
+                app.set_status("Generating doc comment...");
+            } else {
+                app.set_status("No function found at cursor");
+            }
+        }
+        // --- AI auto-debug ---
+        "fix-error" => {
+            // Get the last terminal output and send to AI with fix prompt.
+            let term_output = {
+                let term = &app.terminals[app.active_terminal];
+                let lines = term.visible_lines(50);
+                lines.join("\n")
+            };
+            if term_output.trim().is_empty() {
+                app.set_status("No terminal output to diagnose");
+            } else {
+                let prompt = format!(
+                    "Fix this error from my terminal. Explain the cause and provide the fix:\n\n```\n{}\n```",
+                    term_output
+                );
+                app.chat_panel.visible = true;
+                app.chat_panel_focused = true;
+                app.chat_panel.input = prompt;
+                app.send_chat_message();
+                app.set_status("Diagnosing error...");
+            }
+        }
         other => {
+            // :symbol <query> — Go to symbol in workspace (search foldable_ranges across tabs).
+            if let Some(query) = other.strip_prefix("symbol ") {
+                let query = query.trim().to_lowercase();
+                if query.is_empty() {
+                    app.set_status("Usage: :symbol <name>");
+                    return;
+                }
+                let mut matches: Vec<(usize, usize, String)> = Vec::new(); // (tab_idx, line, label)
+                for (tab_idx, tab) in app.tabs.tabs().iter().enumerate() {
+                    for (&start_line, _) in &tab.foldable_ranges {
+                        if let Some(line_text) = tab.buffer.line_text(start_line) {
+                            let line_lower = line_text.to_lowercase();
+                            if line_lower.contains(&query) {
+                                let label = line_text.trim().to_string();
+                                matches.push((tab_idx, start_line, label));
+                            }
+                        }
+                    }
+                }
+                if matches.is_empty() {
+                    app.set_status(format!("No symbol matching '{query}'"));
+                } else {
+                    let (tab_idx, line, label) = &matches[0];
+                    let tab_idx = *tab_idx;
+                    let line = *line;
+                    let label = label.clone();
+                    let count = matches.len();
+                    app.tabs.switch_to(tab_idx);
+                    app.tab_mut().cursor.row = line;
+                    app.tab_mut().cursor.col = 0;
+                    app.clamp_cursor();
+                    app.set_status(format!("{count} match(es) — {}", label));
+                }
+                return;
+            }
+
+            // :extract <name> — Extract selection into a new function.
+            if let Some(func_name) = other.strip_prefix("extract ") {
+                let func_name = func_name.trim();
+                if func_name.is_empty() {
+                    app.set_status("Usage: :extract <function_name>");
+                    return;
+                }
+                let tab = app.tab();
+                let anchor = tab.visual_anchor;
+                let cursor = tab.cursor;
+                if let Some(anchor) = anchor {
+                    let (start, end) = if (anchor.row, anchor.col) <= (cursor.row, cursor.col) {
+                        (anchor, cursor)
+                    } else {
+                        (cursor, anchor)
+                    };
+                    let s = tab.buffer.cursor_to_char_idx(&start);
+                    let e = (tab.buffer.cursor_to_char_idx(&end) + 1)
+                        .min(tab.buffer.rope().len_chars());
+                    let selected_text = tab.buffer.rope().slice(s..e).to_string();
+                    let indent = "    ";
+                    // Find the end of the enclosing function to insert after it.
+                    let enclosing_end = {
+                        let ranges = &tab.foldable_ranges;
+                        let mut best_end: Option<usize> = None;
+                        for (&range_start, &range_end) in ranges {
+                            if range_start <= start.row && end.row <= range_end {
+                                if let Some(be) = best_end {
+                                    if range_end < be {
+                                        best_end = Some(range_end);
+                                    }
+                                } else {
+                                    best_end = Some(range_end);
+                                }
+                            }
+                        }
+                        best_end.unwrap_or(end.row)
+                    };
+                    // Build new function text.
+                    let new_func = format!(
+                        "\n\nfn {func_name}() {{\n{indent}{}\n}}\n",
+                        selected_text.trim()
+                    );
+                    let call_text = format!("{func_name}();");
+                    // Replace selected text with call.
+                    app.tab_mut().buffer.delete(s, e, AuthorId::human());
+                    app.tab_mut()
+                        .buffer
+                        .insert(s, &call_text, AuthorId::human());
+                    // Insert new function after enclosing function.
+                    let insert_line = enclosing_end + 1;
+                    let insert_pos = if insert_line < app.tab().buffer.line_count() {
+                        app.tab()
+                            .buffer
+                            .cursor_to_char_idx(&aura_core::Cursor::new(insert_line, 0))
+                    } else {
+                        app.tab().buffer.len_chars()
+                    };
+                    app.tab_mut()
+                        .buffer
+                        .insert(insert_pos, &new_func, AuthorId::human());
+                    app.tab_mut().visual_anchor = None;
+                    app.mode = Mode::Normal;
+                    app.mark_highlights_dirty();
+                    app.set_status(format!("Extracted to {func_name}()"));
+                } else {
+                    app.set_status("Select code first (visual mode), then :extract <name>");
+                }
+                return;
+            }
+
             // :workspace add/remove/list — multi-root workspace management.
             if let Some(ws_cmd) = other.strip_prefix("workspace ") {
                 let ws_cmd = ws_cmd.trim();

@@ -176,6 +176,8 @@ pub enum LspEvent {
     CodeActions(Vec<CodeAction>),
     /// Response to a textDocument/references request.
     References(Vec<LspLocation>),
+    /// Response to a textDocument/implementation request.
+    Implementation(Vec<LspLocation>),
     /// Response to a textDocument/rename request (uri → edits).
     RenameApplied(HashMap<String, Vec<TextEdit>>),
     /// Inlay hints for the visible range.
@@ -595,6 +597,19 @@ impl LspClient {
         );
     }
 
+    /// Request textDocument/implementation at the cursor position.
+    pub fn implementation(&mut self, line: u32, character: u32) {
+        let id = self.alloc_id();
+        self.send_request(
+            id,
+            "textDocument/implementation",
+            serde_json::json!({
+                "textDocument": { "uri": self.document_uri },
+                "position": { "line": line, "character": character }
+            }),
+        );
+    }
+
     /// Request signature help at the cursor position.
     pub fn request_signature_help(&mut self, line: u32, character: u32) {
         let id = self.alloc_id();
@@ -835,6 +850,18 @@ fn reader_thread(
                                 serde_json::from_value::<Vec<LspLocation>>(result.clone())
                             {
                                 let _ = tx.send(LspEvent::References(locations));
+                            }
+                            continue;
+                        }
+                        "textDocument/implementation" => {
+                            if let Ok(locations) =
+                                serde_json::from_value::<Vec<LspLocation>>(result.clone())
+                            {
+                                let _ = tx.send(LspEvent::Implementation(locations));
+                            } else if let Ok(loc) =
+                                serde_json::from_value::<LspLocation>(result.clone())
+                            {
+                                let _ = tx.send(LspEvent::Implementation(vec![loc]));
                             }
                             continue;
                         }
