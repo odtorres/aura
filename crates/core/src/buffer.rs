@@ -160,11 +160,11 @@ impl Buffer {
         let start_line = self.rope.char_to_line(clamped);
         let new_lines = text.chars().filter(|c| *c == '\n').count();
         if new_lines > 0 {
-            // Insert new line entries after the current line.
+            // Bulk insert new line entries (avoid O(n²) individual inserts).
             let insert_pos = (start_line + 1).min(self.line_authors.len());
-            for _ in 0..new_lines {
-                self.line_authors.insert(insert_pos, author.clone());
-            }
+            let new_entries = vec![author.clone(); new_lines];
+            self.line_authors
+                .splice(insert_pos..insert_pos, new_entries);
         }
         // Mark the affected line as modified by this author.
         if start_line < self.line_authors.len() {
