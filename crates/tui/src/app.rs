@@ -617,6 +617,10 @@ pub struct App {
     pub local_history: crate::local_history::LocalHistory,
     /// Last time swap files were saved (for crash recovery).
     pub last_swap_save: std::time::Instant,
+    /// Last time we checked open files for external modifications.
+    pub last_file_check: std::time::Instant,
+    /// Cached modification times for open file tabs (path → mtime).
+    pub file_mtimes: std::collections::HashMap<std::path::PathBuf, std::time::SystemTime>,
     /// AI code explanation popup text.
     pub code_explanation: Option<String>,
     /// Claude Code activity watcher.
@@ -1176,6 +1180,8 @@ impl App {
             jump_pos: 0,
             local_history: crate::local_history::LocalHistory::new(),
             last_swap_save: std::time::Instant::now(),
+            last_file_check: std::time::Instant::now(),
+            file_mtimes: std::collections::HashMap::new(),
             code_explanation: None,
             claude_watcher: crate::claude_watcher::ClaudeWatcher::start(&terminal_cwd),
             split_active: false,
@@ -1539,6 +1545,12 @@ impl App {
             self.apply_follow_viewport();
             self.maybe_send_awareness();
             self.maybe_broadcast_terminal_snapshot();
+
+            // Check for external file changes (every 2s).
+            if self.last_file_check.elapsed() > std::time::Duration::from_secs(2) {
+                self.last_file_check = std::time::Instant::now();
+                self.check_external_file_changes();
+            }
 
             // Auto-save swap files for crash recovery (every 30s).
             if self.last_swap_save.elapsed() > std::time::Duration::from_secs(30) {
@@ -4489,6 +4501,67 @@ impl App {
                 line_len.saturating_sub(1)
             };
             tab.cursor.col = tab.cursor.col.min(max_col);
+        }
+    }
+
+    /// Check open file tabs for external modifications and auto-reload.
+    ///
+    /// Runs every 2 seconds. If a file's mtime has changed on disk and the
+    /// buffer has no unsaved changes, the buffer is reloaded automatically.
+    /// If the buffer has unsaved changes, a status message warns the user.
+    pub fn check_external_file_changes(&mut self) {
+        let mut reloads: Vec<(usize, std::path::PathBuf)> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
+
+        for (idx, tab) in self.tabs.tabs().iter().enumerate() {
+            if let Some(path) = tab.buffer.file_path() {
+                let current_mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+
+                if let Some(mtime) = current_mtime {
+                    let cached = self.file_mtimes.get(path).copied();
+                    if cached.is_none() {
+                        // First time seeing this file — cache its mtime.
+                        self.file_mtimes.insert(path.to_path_buf(), mtime);
+                    } else if Some(mtime) != cached {
+                        // File changed on disk!
+                        self.file_mtimes.insert(path.to_path_buf(), mtime);
+                        if tab.buffer.is_modified() {
+                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                            warnings.push(format!(
+                                "{name} changed on disk (unsaved changes — use :e to reload)"
+                            ));
+                        } else {
+                            reloads.push((idx, path.to_path_buf()));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Auto-reload unmodified buffers.
+        for (idx, path) in &reloads {
+            if let Ok(buf) = aura_core::Buffer::from_file(path) {
+                if *idx < self.tabs.tabs_mut().len() {
+                    let tab = &mut self.tabs.tabs_mut()[*idx];
+                    let cursor_row = tab.cursor.row;
+                    let cursor_col = tab.cursor.col;
+                    tab.buffer = buf;
+                    tab.cursor.row = cursor_row.min(tab.buffer.line_count().saturating_sub(1));
+                    tab.cursor.col = cursor_col;
+                    tab.mark_highlights_dirty();
+                }
+            }
+        }
+
+        if !reloads.is_empty() {
+            let names: Vec<String> = reloads
+                .iter()
+                .filter_map(|(_, p)| p.file_name().and_then(|n| n.to_str()).map(String::from))
+                .collect();
+            self.set_status(format!("Reloaded: {}", names.join(", ")));
+        }
+        for w in warnings {
+            self.set_status(w);
         }
     }
 
