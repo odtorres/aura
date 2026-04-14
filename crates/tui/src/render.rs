@@ -8397,7 +8397,7 @@ fn draw_close_tab_modal(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_which_key_popup(frame: &mut Frame, app: &App, area: Rect) {
     let items = &app.which_key_items;
     let cols: usize = 2;
-    let rows_per_col = (items.len() + cols - 1) / cols;
+    let rows_per_col = items.len().div_ceil(cols);
     let col_width: u16 = 28;
     let width = (col_width * cols as u16) + 3;
     let height = (rows_per_col as u16) + 2;

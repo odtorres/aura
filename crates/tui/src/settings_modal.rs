@@ -147,7 +147,7 @@ impl SettingsModal {
                 value: SettingValue::Select {
                     current: config.ai.model.clone(),
                     options: {
-                        let provider = aura_ai::ProviderType::from_str(&config.ai.provider)
+                        let provider = aura_ai::ProviderType::parse(&config.ai.provider)
                             .unwrap_or(aura_ai::ProviderType::Anthropic);
                         provider
                             .common_models()

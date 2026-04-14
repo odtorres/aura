@@ -35,10 +35,11 @@ impl PinnedContext {
     /// Display label for the pinned item.
     pub fn label(&self) -> String {
         match self {
-            Self::File { path } => format!(
-                "{}",
-                path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
-            ),
+            Self::File { path } => path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string(),
             Self::Symbol { name, path, .. } => format!(
                 "{}:{}",
                 path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),

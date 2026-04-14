@@ -4,6 +4,63 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.5] — 2026-04-13
+
+### Fixed
+- All clippy warnings resolved (8 fixes across 5 files)
+- 281 tests pass, zero warnings, clean formatting
+
+### Session milestone
+**Commit #100** of this development session. 100 commits, 46 releases, 439 roadmap items complete.
+
+## [1.2.4] — 2026-04-13
+
+### Added
+- **Clickable file tree action bar** — visual icons (+ ◻ ✎ ✕ ⧉ ⟳ ⊙) for new file, new folder, rename, delete, copy, refresh, reveal
+
+## [1.2.3] — 2026-04-10
+
+### Added
+- **Auto-reload externally modified files** — polls every 2s, reloads if no unsaved changes, warns if buffer is dirty
+
+## [1.2.2] — 2026-04-10
+
+### Fixed
+- **O(n²) paste performance** — bulk `Vec::splice()` instead of loop `Vec::insert()` for line_authors
+
+## [1.2.1] — 2026-04-10
+
+### Added
+- **`:w <filename>` save-as** — save buffer to a new file path with directory creation
+- **`:e <filename>` open/create** — open or create files with directory creation
+
+## [1.2.0] — 2026-04-08
+
+### Added
+- 15 medium-priority features: extract variable, move symbol, safe delete, format selection, multi-cursor regex, type hierarchy, git worktree, commit signing, terminal shell profiles, panel configuration
+- All 439 roadmap items across 14 phases checked off
+
+## [1.1.3] — 2026-04-08
+
+### Added
+- Harpoon-style file marks (`<Space>1-4`), Emmet expansion, clipboard ring, CI/CD status, secret detection, Python venv, spell checking, color picker, file path copy, PR comments, quick open prefixes
+
+## [1.1.2] — 2026-04-08
+
+### Added
+- Flash/leap two-char jump, treesitter text objects (`daf`/`dif`), extract method, workspace symbols, file picker `filename:42`, go to implementations, AI auto-debug, AI doc generation, task auto-detection
+
+## [1.1.1] — 2026-04-08
+
+### Added
+- Which-key popup, incremental selection expand/shrink, @terminal and @diff mentions, auto-organize imports, terminal link detection
+
+## [1.1.0] — 2026-04-08
+
+### Added
+- **Navigate back/forward (jump list)** — `:back`/`:forward` with 100-entry history
+- **Crash recovery** — swap files auto-saved every 30s in `~/.aura/swap/`
+
 ## [1.0.2] — 2026-04-08
 
 ### Fixed

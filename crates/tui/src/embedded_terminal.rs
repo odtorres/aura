@@ -1046,7 +1046,7 @@ impl EmbeddedTerminal {
             }
         };
 
-        let mut cmd = CommandBuilder::new(&shell);
+        let mut cmd = CommandBuilder::new(shell);
         cmd.cwd(&cwd);
         // Ensure interactive shell with login.
         cmd.arg("-l");

@@ -34,8 +34,8 @@ pub enum ProviderType {
 }
 
 impl ProviderType {
-    /// Parse from a string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse from a string label.
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "anthropic" | "claude" => Some(Self::Anthropic),
             "openai" | "gpt" => Some(Self::OpenAI),

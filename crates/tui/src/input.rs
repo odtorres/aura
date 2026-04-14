@@ -2038,18 +2038,18 @@ pub fn handle_normal(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
                     // @ prefix: open symbol outline
                     app.file_picker.close();
                     app.open_outline();
-                } else if query.starts_with('#') {
+                } else if let Some(rest) = query.strip_prefix('#') {
                     // # prefix: search workspace symbols
-                    let sym_query = query[1..].trim().to_string();
+                    let sym_query = rest.trim().to_string();
                     app.file_picker.close();
                     if !sym_query.is_empty() {
                         execute_command(app, &format!("symbol {sym_query}"));
                     } else {
                         app.set_status("Usage: #<symbol-name>");
                     }
-                } else if query.starts_with(':') {
+                } else if let Some(rest) = query.strip_prefix(':') {
                     // : prefix followed by number: jump to line
-                    let line_str = query[1..].trim();
+                    let line_str = rest.trim();
                     if let Ok(line_num) = line_str.parse::<usize>() {
                         app.file_picker.close();
                         if line_num > 0 {
@@ -4425,7 +4425,6 @@ fn handle_leader(app: &mut App, code: KeyCode) {
             // Actually, let's just use the mark_pending mechanism concept.
             // Simplest: we'll handle h1-h4 inline by checking the status message.
             // Instead, set a flag in leader_pending and use a second dispatch.
-            return;
         }
         // <leader>1-9 — switch to tab by index OR jump to harpoon slot
         KeyCode::Char(c @ '1'..='9') => {
@@ -6763,7 +6762,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                 }
                 let mut matches: Vec<(usize, usize, String)> = Vec::new(); // (tab_idx, line, label)
                 for (tab_idx, tab) in app.tabs.tabs().iter().enumerate() {
-                    for (&start_line, _) in &tab.foldable_ranges {
+                    for &start_line in tab.foldable_ranges.keys() {
                         if let Some(line_text) = tab.buffer.line_text(start_line) {
                             let line_lower = line_text.to_lowercase();
                             if line_lower.contains(&query) {
@@ -7561,9 +7560,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                 // Extract identifiers from the line (simple word boundary scan).
                 let idents: Vec<String> = line_text
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
-                    .filter(|w| {
-                        w.len() > 2 && w.chars().next().map_or(false, |c| c.is_alphabetic())
-                    })
+                    .filter(|w| w.len() > 2 && w.chars().next().is_some_and(|c| c.is_alphabetic()))
                     .map(|s| s.to_string())
                     .collect();
                 // Search for references in the buffer.
