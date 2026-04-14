@@ -2155,12 +2155,34 @@ fn draw_file_tree(frame: &mut Frame, app: &mut App, area: Rect) {
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
 
-    // Adjust inner area below the tab header.
+    // Action bar row with clickable icons.
+    if inner.height > 2 {
+        let action_bar = Line::from(vec![
+            Span::styled(
+                " + ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("◻ ", Style::default().fg(Color::Cyan)),
+            Span::styled("✎ ", Style::default().fg(Color::Yellow)),
+            Span::styled("✕ ", Style::default().fg(Color::Red)),
+            Span::styled("⧉ ", Style::default().fg(Color::Magenta)),
+            Span::styled("⟳ ", Style::default().fg(Color::Blue)),
+            Span::styled("⊙ ", Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(
+            Paragraph::new(action_bar),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+    }
+
+    // Adjust inner area below the tab header + action bar.
     let tree_inner = Rect::new(
         inner.x,
-        inner.y + 1,
+        inner.y + 2,
         inner.width,
-        inner.height.saturating_sub(1),
+        inner.height.saturating_sub(2),
     );
 
     if tree_inner.height == 0 || app.file_tree.entries.is_empty() {

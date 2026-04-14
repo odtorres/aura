@@ -7109,9 +7109,10 @@ impl App {
             self.conversation_history_focused = false;
             self.chat_panel_focused = false;
 
-            // Layout: border (1) + tab header row (1) + entries.
+            // Layout: border (1) + tab header row (1) + action bar (1) + entries.
             let tab_header_y = self.file_tree_rect.y + 1; // border
-            let entries_start_y = tab_header_y + 1;
+            let action_bar_y = tab_header_y + 1;
+            let entries_start_y = action_bar_y + 1;
 
             // Click on the "Files | Git" tab header → switch sidebar view.
             if row == tab_header_y {
@@ -7128,6 +7129,116 @@ impl App {
                     self.source_control_focused = true;
                     self.file_tree_focused = false;
                     self.refresh_source_control();
+                }
+            } else if row == action_bar_y && self.sidebar_view == SidebarView::Files {
+                // Action bar click: + ◻ ✎ ✕ ⧉ ⟳ ⊙
+                self.file_tree_focused = true;
+                let local_x = col.saturating_sub(self.file_tree_rect.x + 1) as usize;
+                // Each icon is ~2 chars wide: + (0-1), ◻ (2-3), ✎ (4-5), ✕ (6-7), ⧉ (8-9), ⟳ (10-11), ⊙ (12-13)
+                match local_x {
+                    0..=2 => {
+                        // + New file
+                        let path = self
+                            .file_tree
+                            .entries
+                            .get(self.file_tree.selected)
+                            .map(|e| {
+                                if e.is_dir {
+                                    e.path.clone()
+                                } else {
+                                    e.path.parent().unwrap_or(&e.path).to_path_buf()
+                                }
+                            })
+                            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                        self.file_tree_input = Some(crate::app::FileTreeAction::NewFile {
+                            parent: path,
+                            input: String::new(),
+                        });
+                        self.set_status("New file: type name, Enter to create, Esc to cancel");
+                    }
+                    3..=4 => {
+                        // ◻ New folder
+                        let path = self
+                            .file_tree
+                            .entries
+                            .get(self.file_tree.selected)
+                            .map(|e| {
+                                if e.is_dir {
+                                    e.path.clone()
+                                } else {
+                                    e.path.parent().unwrap_or(&e.path).to_path_buf()
+                                }
+                            })
+                            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                        self.file_tree_input = Some(crate::app::FileTreeAction::NewDir {
+                            parent: path,
+                            input: String::new(),
+                        });
+                        self.set_status("New directory: type name, Enter to create, Esc to cancel");
+                    }
+                    5..=6 => {
+                        // ✎ Rename
+                        if let Some(entry) = self.file_tree.entries.get(self.file_tree.selected) {
+                            let name = entry.name.clone();
+                            let path = entry.path.clone();
+                            self.file_tree_input = Some(crate::app::FileTreeAction::Rename {
+                                original: path,
+                                input: name,
+                            });
+                            self.set_status(
+                                "Rename: type new name, Enter to confirm, Esc to cancel",
+                            );
+                        }
+                    }
+                    7..=8 => {
+                        // ✕ Delete
+                        if let Some(entry) = self.file_tree.entries.get(self.file_tree.selected) {
+                            let name = entry.name.clone();
+                            let path = entry.path.clone();
+                            let is_dir = entry.is_dir;
+                            let kind = if is_dir { "directory" } else { "file" };
+                            self.set_status(format!("Delete {kind} '{name}'? (y to confirm)"));
+                            self.file_tree_input =
+                                Some(crate::app::FileTreeAction::ConfirmDelete { path, is_dir });
+                        }
+                    }
+                    9..=10 => {
+                        // ⧉ Copy
+                        if let Some(entry) = self.file_tree.entries.get(self.file_tree.selected) {
+                            let name = entry.name.clone();
+                            let path = entry.path.clone();
+                            self.file_tree_input =
+                                Some(crate::app::FileTreeAction::Copied { path });
+                            self.set_status(format!(
+                                "Copied: {name} — select destination and press 'p'"
+                            ));
+                        }
+                    }
+                    11..=12 => {
+                        // ⟳ Refresh
+                        self.file_tree.refresh();
+                        self.set_status("File tree refreshed");
+                    }
+                    13..=14 => {
+                        // ⊙ Reveal in Finder
+                        if let Some(entry) = self.file_tree.entries.get(self.file_tree.selected) {
+                            let target = if entry.is_dir {
+                                entry.path.clone()
+                            } else {
+                                entry.path.parent().unwrap_or(&entry.path).to_path_buf()
+                            };
+                            #[cfg(target_os = "macos")]
+                            {
+                                let _ = std::process::Command::new("open").arg(&target).spawn();
+                            }
+                            #[cfg(target_os = "linux")]
+                            {
+                                let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
+                            }
+                            self.set_status(format!("Opened: {}", target.display()));
+                        }
+                    }
+                    _ => {}
                 }
             } else if self.sidebar_view == SidebarView::Git {
                 self.source_control_focused = true;
