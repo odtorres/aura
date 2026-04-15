@@ -7384,15 +7384,18 @@ impl App {
     ///
     /// The git panel layout (below the tab header) is:
     ///   branch line, blank, commit header, message lines (1-3), blank,
-    ///   staged header, staged entries, blank, changed header, changed entries.
+    ///   [merge changes header, merge entries, blank,]
+    ///   staged header, staged entries, blank, changed header, changed entries,
+    ///   [blank, stashes header, stash entries].
+    ///
+    /// `entries_start_y` points to the row after the branch line (i.e. the
+    /// blank separator between the branch line and the commit message header).
     fn handle_git_panel_click(&mut self, row: u16, entries_start_y: u16) {
         use crate::source_control::GitPanelSection;
 
         let mut y = entries_start_y as usize;
 
-        // Branch line.
-        y += 1;
-        // Blank separator.
+        // Blank separator (between branch line and commit message).
         y += 1;
         // Commit message header.
         y += 1;
@@ -7407,6 +7410,30 @@ impl App {
         y += 1;
 
         let click = row as usize;
+
+        // Merge changes section (only present when there are conflicts).
+        if !self.source_control.merge_changes.is_empty() {
+            let merge_header_y = y;
+            y += 1;
+            let merge_start = y;
+            let merge_count = self.source_control.merge_changes.len();
+            y += merge_count;
+
+            if click >= merge_start && click < merge_start + merge_count {
+                let idx = click - merge_start;
+                self.source_control.focused_section = GitPanelSection::MergeChanges;
+                self.source_control.selected = idx;
+                return;
+            }
+            if click == merge_header_y {
+                self.source_control.focused_section = GitPanelSection::MergeChanges;
+                self.source_control.selected = 0;
+                return;
+            }
+
+            // Blank separator after merge changes.
+            y += 1;
+        }
 
         // Staged header.
         let staged_header_y = y;
@@ -7449,6 +7476,30 @@ impl App {
         if click == changed_header_y {
             self.source_control.focused_section = GitPanelSection::ChangedFiles;
             self.source_control.selected = 0;
+            return;
+        }
+
+        // Stashes section (only present when there are stashes).
+        if !self.source_control.stashes.is_empty() {
+            // Blank separator.
+            y += changed_count;
+            y += 1;
+
+            let stash_header_y = y;
+            y += 1;
+            let stash_start = y;
+            let stash_count = self.source_control.stashes.len();
+
+            if click >= stash_start && click < stash_start + stash_count {
+                let idx = click - stash_start;
+                self.source_control.focused_section = GitPanelSection::Stashes;
+                self.source_control.selected = idx;
+                return;
+            }
+            if click == stash_header_y {
+                self.source_control.focused_section = GitPanelSection::Stashes;
+                self.source_control.selected = 0;
+            }
         }
     }
 
