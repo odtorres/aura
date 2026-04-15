@@ -253,81 +253,88 @@ impl ClaudeCodeClient {
                         Err(_) => continue,
                     };
 
-                    // ── Handle stream_event wrapped Anthropic API events ──
-                    if let Some(event) = v.get("event") {
-                        let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    // Determine the API event payload: either nested under an
+                    // `"event"` wrapper (older stream-json format) or at the
+                    // top level (current format).
+                    let event_type_raw = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    let (api_event, event_type) = if let Some(inner) = v.get("event") {
+                        let et = inner.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                        (inner, et)
+                    } else {
+                        (&v, event_type_raw)
+                    };
 
-                        match event_type {
-                            "content_block_start" => {
-                                if let Some(cb) = event.get("content_block") {
-                                    let block_type =
-                                        cb.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                                    if block_type == "tool_use" {
-                                        // Claude Code's own tool — display as activity only.
-                                        current_native_tool_name = cb
-                                            .get("name")
-                                            .and_then(|v| v.as_str())
-                                            .map(String::from);
-                                        current_native_tool_json.clear();
-
-                                        if let Some(name) = &current_native_tool_name {
-                                            let _ = tx.send(AiEvent::Activity(format!(
-                                                "Using tool: {name}..."
-                                            )));
-                                        }
-                                    }
-                                }
-                            }
-                            "content_block_delta" => {
-                                if let Some(delta) = event.get("delta") {
-                                    let delta_type =
-                                        delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-                                    match delta_type {
-                                        "text_delta" => {
-                                            if let Some(text) =
-                                                delta.get("text").and_then(|t| t.as_str())
-                                            {
-                                                accumulated_text.push_str(text);
-                                                let _ = tx.send(AiEvent::Token(text.to_string()));
-                                            }
-                                        }
-                                        "input_json_delta" => {
-                                            // Accumulate native tool input for activity display.
-                                            if let Some(partial) =
-                                                delta.get("partial_json").and_then(|t| t.as_str())
-                                            {
-                                                current_native_tool_json.push_str(partial);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            "content_block_stop" => {
-                                // Finalize native tool use — show activity with input summary.
-                                if let Some(name) = current_native_tool_name.take() {
-                                    let input_summary =
-                                        Self::summarize_tool_input(&current_native_tool_json);
+                    // ── Handle Anthropic streaming API events ──
+                    match event_type {
+                        "content_block_start" => {
+                            if let Some(cb) = api_event.get("content_block") {
+                                let block_type =
+                                    cb.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                if block_type == "tool_use" {
+                                    // Claude Code's own tool — display as activity only.
+                                    current_native_tool_name =
+                                        cb.get("name").and_then(|v| v.as_str()).map(String::from);
                                     current_native_tool_json.clear();
-                                    if !input_summary.is_empty() {
+
+                                    if let Some(name) = &current_native_tool_name {
                                         let _ = tx.send(AiEvent::Activity(format!(
-                                            "Tool {name}: {input_summary}"
+                                            "Using tool: {name}..."
                                         )));
                                     }
                                 }
                             }
-                            _ => {}
                         }
-                        continue;
-                    }
+                        "content_block_delta" => {
+                            if let Some(delta) = api_event.get("delta") {
+                                let delta_type =
+                                    delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-                    // ── Handle top-level Claude Code events ──
-                    let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                match delta_type {
+                                    "text_delta" => {
+                                        if let Some(text) =
+                                            delta.get("text").and_then(|t| t.as_str())
+                                        {
+                                            accumulated_text.push_str(text);
+                                            let _ = tx.send(AiEvent::Token(text.to_string()));
+                                        }
+                                    }
+                                    "input_json_delta" => {
+                                        // Accumulate native tool input for activity display.
+                                        if let Some(partial) =
+                                            delta.get("partial_json").and_then(|t| t.as_str())
+                                        {
+                                            current_native_tool_json.push_str(partial);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        "content_block_stop" => {
+                            // Finalize native tool use — show activity with input summary.
+                            if let Some(name) = current_native_tool_name.take() {
+                                let input_summary =
+                                    Self::summarize_tool_input(&current_native_tool_json);
+                                current_native_tool_json.clear();
+                                if !input_summary.is_empty() {
+                                    let _ = tx.send(AiEvent::Activity(format!(
+                                        "Tool {name}: {input_summary}"
+                                    )));
+                                }
+                            }
+                        }
 
-                    match event_type {
+                        // ── Top-level Claude Code events ──
                         "result" => {
+                            // The `result` field may be a string or an object with
+                            // a nested text field — handle both.
                             if let Some(text) = v.get("result").and_then(|r| r.as_str()) {
+                                result_text = Some(text.to_string());
+                            } else if let Some(text) = v
+                                .get("result")
+                                .and_then(|r| r.get("text"))
+                                .and_then(|t| t.as_str())
+                            {
                                 result_text = Some(text.to_string());
                             }
                         }

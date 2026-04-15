@@ -679,6 +679,8 @@ pub struct App {
     pub rename_input: String,
     /// Last time the source control panel was refreshed.
     last_sc_refresh: std::time::Instant,
+    /// Last time the file tree sidebar was refreshed.
+    last_file_tree_refresh: std::time::Instant,
     /// Last time auto-save was performed.
     auto_save_last: std::time::Instant,
     /// Right-side AI conversation history panel.
@@ -1209,6 +1211,7 @@ impl App {
             rename_active: false,
             rename_input: String::new(),
             last_sc_refresh: std::time::Instant::now(),
+            last_file_tree_refresh: std::time::Instant::now(),
             auto_save_last: std::time::Instant::now(),
             conversation_history: ConversationHistoryPanel::new(30),
             conversation_history_focused: false,
@@ -1623,13 +1626,32 @@ impl App {
                 self.refresh_source_control();
             }
 
+            // Auto-refresh file tree every 2 seconds when visible.
+            if self.file_tree.visible
+                && self.last_file_tree_refresh.elapsed() > Duration::from_secs(2)
+            {
+                self.last_file_tree_refresh = std::time::Instant::now();
+                self.file_tree.refresh();
+            }
+
             // Auto-save modified buffers on interval.
             let auto_secs = self.config.editor.auto_save_seconds;
             if auto_secs > 0 && self.auto_save_last.elapsed() > Duration::from_secs(auto_secs) {
                 self.auto_save_last = std::time::Instant::now();
+                let mut saved_paths: Vec<std::path::PathBuf> = Vec::new();
                 for tab in self.tabs.tabs_mut() {
-                    if tab.buffer.is_modified() && tab.buffer.file_path().is_some() {
-                        let _ = tab.buffer.save();
+                    if tab.buffer.is_modified() {
+                        if let Some(path) = tab.buffer.file_path().map(|p| p.to_path_buf()) {
+                            if tab.buffer.save().is_ok() {
+                                saved_paths.push(path);
+                            }
+                        }
+                    }
+                }
+                // Update mtime cache for auto-saved files.
+                for path in saved_paths {
+                    if let Ok(mtime) = std::fs::metadata(&path).and_then(|m| m.modified()) {
+                        self.file_mtimes.insert(path, mtime);
                     }
                 }
             }
@@ -6045,17 +6067,26 @@ impl App {
         let client = match &self.ai_client {
             Some(c) => c,
             None => {
-                self.set_status("No API key for commit message generation");
+                tracing::warn!("No AI backend available for commit message generation");
+                self.set_status("No AI backend — set ANTHROPIC_API_KEY or install Claude Code");
                 return;
             }
         };
 
+        if self.git_repo.is_none() {
+            self.set_status("Not in a git repository");
+            return;
+        }
+
         // Get the full staged diff for better AI context.
-        let diff_stat = self
-            .git_repo
-            .as_ref()
-            .and_then(|repo| repo.staged_diff_summary().ok())
-            .unwrap_or_default();
+        let diff_stat = match self.git_repo.as_ref().unwrap().staged_diff_summary() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Failed to get staged diff summary: {e}");
+                self.set_status(format!("Git error: {e}"));
+                return;
+            }
+        };
 
         if diff_stat.trim().is_empty() {
             self.set_status("No staged changes to describe");
@@ -6112,13 +6143,15 @@ impl App {
                     break;
                 }
                 Ok(AiEvent::Error(e)) => {
+                    tracing::warn!("AI commit message error: {e}");
                     self.set_status(format!("AI error: {e}"));
                     done = true;
                     break;
                 }
-                Ok(_) => {} // Ignore tool use events.
+                Ok(_) => {} // Ignore tool use / activity events.
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
+                    tracing::warn!("AI commit message channel disconnected unexpectedly");
                     done = true;
                     break;
                 }
@@ -9377,6 +9410,13 @@ impl App {
             .buffer
             .save()
             .map_err(|e| format!("Save failed: {e}"))?;
+        // Update mtime cache so the external-change detector doesn't
+        // misinterpret our own save as an external modification.
+        if let Some(path) = self.tab().buffer.file_path() {
+            if let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) {
+                self.file_mtimes.insert(path.to_path_buf(), mtime);
+            }
+        }
         self.set_status("Saved");
         Ok(())
     }

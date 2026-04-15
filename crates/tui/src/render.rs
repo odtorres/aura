@@ -1175,14 +1175,23 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
     let viewport_height = left_inner.height as usize;
 
     // Update the diff view's scroll clamp with actual viewport height.
-    if let Some(dv) = &mut app.diff_view {
+    // Check tab-based diff first, then fall back to old overlay.
+    let has_tab_diff = app.tab().diff.is_some();
+    if has_tab_diff {
+        if let Some(dv) = app.tab_mut().diff.as_mut() {
+            let max_scroll = dv.lines.len().saturating_sub(viewport_height);
+            if dv.scroll > max_scroll {
+                dv.scroll = max_scroll;
+            }
+        }
+    } else if let Some(dv) = &mut app.diff_view {
         let max_scroll = dv.lines.len().saturating_sub(viewport_height);
         if dv.scroll > max_scroll {
             dv.scroll = max_scroll;
         }
     }
 
-    let dv = match &app.diff_view {
+    let dv = match app.tab().diff.as_ref().or(app.diff_view.as_ref()) {
         Some(dv) => dv,
         None => return,
     };
@@ -7282,10 +7291,19 @@ fn draw_command_bar(frame: &mut Frame, app: &App, area: Rect) {
                 }
             }
             _ => {
-                // Show ghost suggestion status if available, otherwise status message.
-                app.ghost_suggestion_status()
-                    .or_else(|| app.status_message.clone())
-                    .unwrap_or_default()
+                // When the source control panel is focused or an AI commit message
+                // is being generated, prioritise the status message so that errors
+                // and progress are not hidden by ghost suggestion text.
+                if app.source_control_focused || app.is_generating_commit_msg() {
+                    app.status_message
+                        .clone()
+                        .or_else(|| app.ghost_suggestion_status())
+                        .unwrap_or_default()
+                } else {
+                    app.ghost_suggestion_status()
+                        .or_else(|| app.status_message.clone())
+                        .unwrap_or_default()
+                }
             }
         }
     };

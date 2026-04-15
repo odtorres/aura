@@ -4,6 +4,17 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.6] — 2026-04-15
+
+### Fixed
+- **Diff view not showing changes** — tab-based diff rendering silently returned early because scroll clamping and re-borrow only checked the old overlay field, not the tab's diff
+- **AI commit message generation broken with no error shown** — ghost suggestion status in the command bar was hiding all error/progress messages; Claude Code stream-json event parsing missed top-level API events; git errors in staged diff were silently swallowed
+- **Open buffers not detecting external file changes** — `file_mtimes` cache was not updated after manual or auto-saves, causing false positives and missed real external modifications
+
+### Added
+- **File tree auto-refresh** — sidebar now polls every 2 seconds when visible, so new files created by AI tools, git, or external processes appear automatically without restart
+- **Status bar priority for source control** — error and progress messages from commit generation now take priority over ghost suggestion text when the source control panel is focused
+
 ## [1.2.5] — 2026-04-13
 
 ### Fixed
