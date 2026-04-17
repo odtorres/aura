@@ -4442,9 +4442,8 @@ fn handle_leader(app: &mut App, code: KeyCode) {
                 } else {
                     app.set_status("No file to pin (scratch buffer)");
                 }
-            } else if idx < 4 && app.harpoon_files[idx].is_some() {
+            } else if let Some(path) = app.harpoon_files.get(idx).and_then(|p| p.clone()) {
                 // Jump to harpoon slot if set.
-                let path = app.harpoon_files[idx].clone().unwrap();
                 if path.exists() {
                     if let Err(e) = app.open_file(path) {
                         app.set_status(e);
@@ -7928,49 +7927,43 @@ pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.source_control_focused = true;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            let has_tab_diff = app.tab().diff.is_some();
-            if has_tab_diff {
-                app.tab_mut().diff.as_mut().unwrap().scroll_down(1, 20);
+            if let Some(diff) = &mut app.tab_mut().diff {
+                diff.scroll_down(1, 20);
             } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_down(1, 20);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let has_tab_diff = app.tab().diff.is_some();
-            if has_tab_diff {
-                app.tab_mut().diff.as_mut().unwrap().scroll_up(1);
+            if let Some(diff) = &mut app.tab_mut().diff {
+                diff.scroll_up(1);
             } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_up(1);
             }
         }
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
-            let has_tab_diff = app.tab().diff.is_some();
-            if has_tab_diff {
-                app.tab_mut().diff.as_mut().unwrap().scroll_down(10, 20);
+            if let Some(diff) = &mut app.tab_mut().diff {
+                diff.scroll_down(10, 20);
             } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_down(10, 20);
             }
         }
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
-            let has_tab_diff = app.tab().diff.is_some();
-            if has_tab_diff {
-                app.tab_mut().diff.as_mut().unwrap().scroll_up(10);
+            if let Some(diff) = &mut app.tab_mut().diff {
+                diff.scroll_up(10);
             } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_up(10);
             }
         }
         KeyCode::Char('G') => {
-            let has_tab_diff = app.tab().diff.is_some();
-            if has_tab_diff {
-                app.tab_mut().diff.as_mut().unwrap().scroll_to_bottom(20);
+            if let Some(diff) = &mut app.tab_mut().diff {
+                diff.scroll_to_bottom(20);
             } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_to_bottom(20);
             }
         }
         KeyCode::Char('g') => {
-            let has_tab_diff = app.tab().diff.is_some();
-            if has_tab_diff {
-                app.tab_mut().diff.as_mut().unwrap().scroll_to_top();
+            if let Some(diff) = &mut app.tab_mut().diff {
+                diff.scroll_to_top();
             } else if let Some(dv) = &mut app.diff_view {
                 dv.scroll_to_top();
             }
