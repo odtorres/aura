@@ -599,6 +599,10 @@ pub struct App {
     pub bookmarks: crate::bookmarks::BookmarkManager,
     /// Codebase RAG index for AI context retrieval.
     pub rag_index: Option<crate::rag_index::RagIndex>,
+    /// Receiver for a RAG index being built on a background thread. `Some`
+    /// during startup while the index is being constructed; resolved into
+    /// `rag_index` on the first tick that sees a completed build.
+    rag_index_pending: Option<std::sync::mpsc::Receiver<crate::rag_index::RagIndex>>,
     /// AI checkpoints for rollback.
     pub checkpoints: crate::checkpoints::CheckpointManager,
     /// Pinned context for AI prompts.
@@ -1176,6 +1180,7 @@ impl App {
             marketplace: crate::marketplace::MarketplaceModal::new(),
             bookmarks: crate::bookmarks::BookmarkManager::new(),
             rag_index: None,
+            rag_index_pending: None,
             checkpoints: crate::checkpoints::CheckpointManager::new(),
             context_pins: crate::context_pin::ContextPinManager::new(),
             inline_ai_input: None,
@@ -1329,19 +1334,18 @@ impl App {
             app.status_message = Some(format!("AI ready ({})", backend.label()));
         }
 
-        // Build RAG index in background.
+        // Build RAG index on a background thread so startup doesn't block on
+        // walking the project directory. The result is applied on the first
+        // event-loop tick that sees a completed build.
         {
             let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let mut index = crate::rag_index::RagIndex::new(root);
-            index.build();
-            if !index.chunks.is_empty() {
-                tracing::info!(
-                    "RAG index: {} chunks from {} files",
-                    index.chunks.len(),
-                    index.file_count
-                );
-                app.rag_index = Some(index);
-            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut index = crate::rag_index::RagIndex::new(root);
+                index.build();
+                let _ = tx.send(index);
+            });
+            app.rag_index_pending = Some(rx);
         }
 
         // Register initial watchable paths with the OS-level watcher.
@@ -1410,6 +1414,34 @@ impl App {
             self.check_external_file_changes();
         }
         true
+    }
+
+    /// Promote a background-built RAG index into the active slot once its
+    /// builder thread finishes. Called every tick; the first completed build
+    /// wins and the receiver is dropped afterwards.
+    fn poll_rag_index_ready(&mut self) {
+        let Some(rx) = self.rag_index_pending.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(index) => {
+                if !index.chunks.is_empty() {
+                    tracing::info!(
+                        "RAG index: {} chunks from {} files",
+                        index.chunks.len(),
+                        index.file_count
+                    );
+                    self.rag_index = Some(index);
+                }
+                self.rag_index_pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.rag_index_pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                // Still indexing.
+            }
+        }
     }
 
     /// Reload `aura.toml` from disk and apply it immediately. Extracted so
@@ -1641,6 +1673,9 @@ impl App {
             self.apply_follow_viewport();
             self.maybe_send_awareness();
             self.maybe_broadcast_terminal_snapshot();
+
+            // Apply a background-built RAG index once it's ready.
+            self.poll_rag_index_ready();
 
             // Handle external file changes via the OS-level watcher. Only
             // fall back to the 2 s mtime poll if the watcher failed to start

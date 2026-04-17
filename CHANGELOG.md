@@ -22,6 +22,7 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 ### Changed
 - **Filesystem watching** — replaced the 2 s mtime polling loop with a native `notify` file watcher (kqueue on macOS, inotify on Linux, ReadDirectoryChangesW on Windows). External file edits and `aura.toml` hot-reload now take effect near-instantly instead of up to 2 s later. The mtime poll is kept as a fallback when the native backend fails to start.
 - **Deferred LSP startup** — language servers (rust-analyzer, jdtls, etc.) now spawn on a background thread. Opening a file no longer blocks the UI for 1–2 s while the server initialises; the editor comes up immediately and LSP features activate as soon as the handshake completes.
+- **Deferred RAG index build** — codebase RAG indexing (walks every file in the project) now runs on a background thread. On large repositories startup no longer blocks on the walk; the index becomes available to AI features on the first tick after the build completes.
 
 ## [1.2.6] — 2026-04-15
 
