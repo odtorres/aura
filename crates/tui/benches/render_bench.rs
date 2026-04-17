@@ -117,6 +117,56 @@ fn bench_scroll_and_render(c: &mut Criterion) {
     });
 }
 
+/// Render a 100K-line file repeatedly without any buffer edits. Exercises the
+/// per-frame hot paths (bracket-depth scan, scope queries) that used to be
+/// O(total_lines). With caches in place, steady-state renders should stay in
+/// the <1 ms range.
+fn bench_render_frame_100k(c: &mut Criterion) {
+    let mut app = make_app(100_000);
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Prime caches.
+    terminal
+        .draw(|frame| aura_tui::render::draw(frame, &mut app))
+        .unwrap();
+
+    c.bench_function("render_frame_100k_lines", |b| {
+        b.iter(|| {
+            terminal
+                .draw(|frame| aura_tui::render::draw(frame, &mut app))
+                .unwrap();
+            black_box(());
+        });
+    });
+}
+
+/// Scroll through a 100K-line file. Verifies that scrolling alone doesn't
+/// invalidate cached bracket depths (they should be a one-time build).
+fn bench_scroll_and_render_100k(c: &mut Criterion) {
+    let mut app = make_app(100_000);
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Prime caches.
+    terminal
+        .draw(|frame| aura_tui::render::draw(frame, &mut app))
+        .unwrap();
+
+    c.bench_function("scroll_and_render_100k", |b| {
+        b.iter(|| {
+            let scroll = app.tab().scroll_row;
+            let new_scroll = (scroll + 40) % 99_960;
+            app.tab_mut().scroll_row = new_scroll;
+            app.tab_mut().cursor.row = new_scroll + 20;
+            terminal
+                .draw(|frame| aura_tui::render::draw(frame, &mut app))
+                .unwrap();
+            black_box(());
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_render_frame,
@@ -124,5 +174,7 @@ criterion_group!(
     bench_keystroke_insert_render,
     bench_render_with_highlights,
     bench_scroll_and_render,
+    bench_render_frame_100k,
+    bench_scroll_and_render_100k,
 );
 criterion_main!(benches);

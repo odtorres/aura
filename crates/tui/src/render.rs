@@ -5703,83 +5703,12 @@ fn draw_editor(
     let gutter_width = 6u16;
     let text_width = area.width.saturating_sub(gutter_width);
 
-    let mut visible_lines = area.height as usize;
+    let visible_lines = area.height as usize;
     let mut lines: Vec<Line> = Vec::with_capacity(visible_lines);
-    let tab = app.tab();
 
-    // --- Sticky scroll: show enclosing scope headers at top ---
-    let mut sticky_height = 0u16;
-    if tab.scroll_row > 0 {
-        if let Some(ref highlighter) = tab.highlighter {
-            let source = tab.buffer.rope().to_string();
-            let scopes = highlighter.enclosing_scopes(tab.scroll_row, &source);
-            let max_sticky = 3.min(visible_lines / 4); // At most 3 lines or 25% of viewport
-            for (_, scope_line) in scopes.iter().take(max_sticky) {
-                let display: String = scope_line
-                    .chars()
-                    .take(area.width.saturating_sub(gutter_width) as usize)
-                    .collect();
-                let sticky_spans = vec![
-                    Span::styled(
-                        "      ", // gutter placeholder
-                        Style::default().bg(Color::Rgb(30, 30, 30)),
-                    ),
-                    Span::styled(
-                        display,
-                        Style::default()
-                            .fg(Color::Rgb(140, 140, 140))
-                            .bg(Color::Rgb(30, 30, 30)),
-                    ),
-                ];
-                lines.push(Line::from(sticky_spans));
-                sticky_height += 1;
-            }
-            if sticky_height > 0 {
-                // Add a thin separator line.
-                let sep: String = "─".repeat(area.width as usize);
-                lines.push(Line::from(Span::styled(
-                    sep,
-                    Style::default().fg(Color::Rgb(50, 50, 50)),
-                )));
-                sticky_height += 1;
-                visible_lines = visible_lines.saturating_sub(sticky_height as usize);
-            }
-        }
-    }
-
-    // --- Breadcrumbs: show scope path at cursor ---
-    if let Some(ref highlighter) = tab.highlighter {
-        let source = tab.buffer.rope().to_string();
-        let scopes = highlighter.enclosing_scopes(tab.cursor.row, &source);
-        if !scopes.is_empty() {
-            let file_name = tab.file_name();
-            let mut crumb_spans = vec![
-                Span::styled("      ", Style::default().fg(Color::DarkGray)), // gutter placeholder
-                Span::styled(file_name.to_string(), Style::default().fg(Color::Cyan)),
-            ];
-            for (_, scope_text) in &scopes {
-                // Extract just the signature (first meaningful part).
-                let label: String = scope_text
-                    .trim()
-                    .chars()
-                    .take(40)
-                    .collect::<String>()
-                    .replace('{', "")
-                    .trim()
-                    .to_string();
-                crumb_spans.push(Span::styled(
-                    " > ",
-                    Style::default().fg(Color::Rgb(80, 80, 80)),
-                ));
-                crumb_spans.push(Span::styled(
-                    label,
-                    Style::default().fg(Color::Rgb(180, 180, 180)),
-                ));
-            }
-            lines.push(Line::from(crumb_spans));
-            visible_lines = visible_lines.saturating_sub(1);
-        }
-    }
+    // Sticky scroll and breadcrumbs are rendered by draw_editor_pane using cached
+    // foldable_ranges and app.breadcrumbs. Doing them here would duplicate the work
+    // and call enclosing_scopes() with a full rope-to-string clone every frame.
 
     let selection = app.visual_selection_range();
     let theme = &app.theme;
@@ -5805,38 +5734,11 @@ fn draw_editor(
         }
     }
 
-    // Compute bracket depth for rainbow coloring on visible lines.
-    let bracket_depths: std::collections::HashMap<usize, Vec<(usize, u8)>> = {
-        let mut depths = std::collections::HashMap::new();
-        let mut depth: i32 = 0;
-        // Scan from start of file to build accurate depth.
-        let total_lines = tab.buffer.line_count();
-        for line_idx in 0..total_lines {
-            if let Some(rope_line) = tab.buffer.line(line_idx) {
-                let mut line_brackets = Vec::new();
-                for (col, ch) in rope_line.chars().enumerate() {
-                    if ch == '\n' || ch == '\r' {
-                        continue;
-                    }
-                    match ch {
-                        '(' | '{' | '[' => {
-                            line_brackets.push((col, (depth.max(0) as u8) % 6));
-                            depth += 1;
-                        }
-                        ')' | '}' | ']' => {
-                            depth -= 1;
-                            line_brackets.push((col, (depth.max(0) as u8) % 6));
-                        }
-                        _ => {}
-                    }
-                }
-                if !line_brackets.is_empty() && visible_buffer_lines.contains(&line_idx) {
-                    depths.insert(line_idx, line_brackets);
-                }
-            }
-        }
-        depths
-    };
+    // Use the tab's cached bracket depths (warmed in draw_editor_pane before this call).
+    // Falls back to an empty map if the cache is somehow missing so rendering still works.
+    let empty_bracket_map = std::collections::HashMap::new();
+    let bracket_depths: &std::collections::HashMap<usize, Vec<(usize, u8)>> =
+        tab.bracket_cache.as_ref().unwrap_or(&empty_bracket_map);
 
     for &line_idx in &visible_buffer_lines {
         if let Some(rope_line) = tab.buffer.line(line_idx) {
@@ -6342,6 +6244,9 @@ fn draw_editor_pane(
         }
         status
     };
+
+    // Warm the bracket-depth cache; draw_editor only has &App and can't rebuild it.
+    app.tabs.tabs_mut()[tab_idx].bracket_depths();
 
     draw_editor(frame, app, content_area, &git_status);
     // Semantic highlighting from LSP (drawn first so tree-sitter colors are overridden).

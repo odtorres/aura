@@ -1452,7 +1452,12 @@ impl App {
     /// Run the main event loop.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         while !self.should_quit {
-            if self.tab().highlights_dirty {
+            // Debounce syntax highlighting so a continuous burst of keystrokes
+            // doesn't trigger a full-file reparse per tick. During a typing
+            // pause (40ms+) the most recent state gets highlighted.
+            if self.tab().highlights_dirty
+                && self.tab().lsp_last_change.elapsed() >= std::time::Duration::from_millis(40)
+            {
                 self.refresh_highlights();
             }
             // Update live selection context indicator for the chat panel.

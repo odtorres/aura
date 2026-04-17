@@ -465,6 +465,9 @@ impl SyntaxHighlighter {
     /// otherwise built-in defaults are applied.
     pub fn highlight(&mut self, source: &str, theme: Option<&Theme>) -> Vec<HighlightedLine> {
         // Re-parse the tree so node-at-position queries stay current.
+        // Incremental reparse would require calling tree.edit() with edit ranges
+        // at the call site before each reparse; until that's wired, a full
+        // reparse each call is correct if not optimal.
         if let Some(parser) = &mut self.parser {
             self.last_tree = parser.parse(source, None);
         }

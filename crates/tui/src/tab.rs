@@ -152,6 +152,10 @@ pub struct EditorTab {
     pub test_lines: Vec<(usize, String)>,
     /// Side-by-side diff view attached to this tab (None for normal editing).
     pub diff: Option<crate::diff_view::DiffView>,
+    /// Cached bracket depths for rainbow colouring, keyed by line index.
+    /// `None` means the cache is stale and must be recomputed on next access.
+    /// Rebuilt at most once per edit instead of once per frame.
+    pub bracket_cache: Option<std::collections::HashMap<usize, Vec<(usize, u8)>>>,
 }
 
 impl EditorTab {
@@ -240,6 +244,7 @@ impl EditorTab {
             signature_help: None,
             test_lines: Vec::new(),
             diff: None,
+            bracket_cache: None,
         };
         tab.refresh_semantic_index();
         tab
@@ -278,6 +283,48 @@ impl EditorTab {
         self.semantic_dirty = true;
         self.lsp_change_pending = true;
         self.lsp_last_change = Instant::now();
+        self.bracket_cache = None;
+    }
+
+    /// Return the bracket-depth cache, rebuilding it from the buffer if stale.
+    ///
+    /// The cache is keyed by line index and lists `(column, depth_mod_6)` pairs
+    /// for every `(`/`)`/`{`/`}`/`[`/`]` on that line. Depth is cumulative from
+    /// the start of the file so rainbow colouring stays consistent across
+    /// viewport scrolls.
+    pub fn bracket_depths(&mut self) -> &std::collections::HashMap<usize, Vec<(usize, u8)>> {
+        if self.bracket_cache.is_none() {
+            let mut depths: std::collections::HashMap<usize, Vec<(usize, u8)>> =
+                std::collections::HashMap::new();
+            let mut depth: i32 = 0;
+            let total_lines = self.buffer.line_count();
+            for line_idx in 0..total_lines {
+                if let Some(rope_line) = self.buffer.line(line_idx) {
+                    let mut line_brackets = Vec::new();
+                    for (col, ch) in rope_line.chars().enumerate() {
+                        if ch == '\n' || ch == '\r' {
+                            continue;
+                        }
+                        match ch {
+                            '(' | '{' | '[' => {
+                                line_brackets.push((col, (depth.max(0) as u8) % 6));
+                                depth += 1;
+                            }
+                            ')' | '}' | ']' => {
+                                depth -= 1;
+                                line_brackets.push((col, (depth.max(0) as u8) % 6));
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !line_brackets.is_empty() {
+                        depths.insert(line_idx, line_brackets);
+                    }
+                }
+            }
+            self.bracket_cache = Some(depths);
+        }
+        self.bracket_cache.as_ref().expect("just populated")
     }
 
     /// Regenerate syntax highlights from the current buffer content.
