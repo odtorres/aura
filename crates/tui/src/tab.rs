@@ -110,6 +110,12 @@ pub struct EditorTab {
     pub highlights_dirty: bool,
     /// Active LSP client (None if no server available).
     pub lsp_client: Option<LspClient>,
+    /// Pending LSP client spawn. `Some` while the language server is being
+    /// started on a background thread; resolves into `lsp_client` once the
+    /// child process exists and its reader/writer threads are up. This lets
+    /// opening a tab for a slow-starting server (e.g. rust-analyzer, jdtls)
+    /// return control to the UI immediately.
+    pub lsp_pending: Option<std::sync::mpsc::Receiver<anyhow::Result<LspClient>>>,
     /// Current diagnostics for the open file.
     pub diagnostics: Vec<Diagnostic>,
     /// Hover information to display as a popup.
@@ -193,17 +199,28 @@ impl EditorTab {
             })
             .unwrap_or_default();
 
-        // Try to start a language server.
-        let lsp_client = buffer
+        // Try to start a language server — on a background thread so slow
+        // servers (rust-analyzer, jdtls) don't block tab-open.
+        let lsp_pending = buffer
             .file_path()
             .and_then(|p| p.extension())
             .and_then(|ext| ext.to_str())
             .and_then(lsp::detect_server)
             .and_then(|config| {
-                let file_path = buffer.file_path()?;
-                let workspace_root = file_path.parent().unwrap_or(file_path);
+                let file_path = buffer.file_path()?.to_path_buf();
+                let workspace_root = file_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| file_path.clone());
                 let content = buffer.rope().to_string();
-                LspClient::start(&config, workspace_root, file_path, &content).ok()
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let result = LspClient::start(&config, &workspace_root, &file_path, &content);
+                    // Receiver may be gone if the tab was closed before the
+                    // spawn finished — that's fine, drop the result.
+                    let _ = tx.send(result);
+                });
+                Some(rx)
             });
 
         // Generate initial highlights.
@@ -227,7 +244,8 @@ impl EditorTab {
             highlighter,
             highlight_lines,
             highlights_dirty: false,
-            lsp_client,
+            lsp_client: None,
+            lsp_pending,
             diagnostics: Vec::new(),
             hover_info: None,
             lsp_change_pending: false,
@@ -379,6 +397,32 @@ impl EditorTab {
             client.did_change(&text);
         }
         self.lsp_change_pending = false;
+    }
+
+    /// Promote a pending-startup LSP client to the active slot once the
+    /// background spawn has completed. No-op when there's nothing pending or
+    /// the spawn hasn't finished yet. Errors from the spawn are logged and
+    /// the tab continues without an LSP.
+    pub fn poll_lsp_startup(&mut self) {
+        let Some(rx) = self.lsp_pending.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(client)) => {
+                self.lsp_client = Some(client);
+                self.lsp_pending = None;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("LSP startup failed: {e}");
+                self.lsp_pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.lsp_pending = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                // Still starting; check again next tick.
+            }
+        }
     }
 
     /// Poll the LSP client for events, returning them.

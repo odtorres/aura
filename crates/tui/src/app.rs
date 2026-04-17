@@ -3934,6 +3934,14 @@ impl App {
 
     /// Poll the LSP client for events.
     fn poll_lsp_events(&mut self) {
+        // Move any completed background-start LSP clients into their tabs
+        // before polling for events. Do this across all tabs — a server
+        // started for an inactive tab will start delivering events the tick
+        // after it promotes.
+        for tab in self.tabs.tabs_mut() {
+            tab.poll_lsp_startup();
+        }
+
         let events = self.tab_mut().poll_lsp_events();
         if events.is_empty() {
             return;
