@@ -55,6 +55,7 @@ gix.workspace = true
 portable-pty.workspace = true
 vte.workspace = true
 unicode-width.workspace = true
+notify.workspace = true
 arboard.workspace = true
 ureq.workspace = true
 semver.workspace = true

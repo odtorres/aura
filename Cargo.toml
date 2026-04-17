@@ -96,6 +96,9 @@ portable-pty = "0.8"
 vte = "0.13"
 unicode-width = "0.2"
 
+# File watching (replaces filesystem polling)
+notify = "6"
+
 # Testing
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }

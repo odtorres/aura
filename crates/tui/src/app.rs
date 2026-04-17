@@ -542,7 +542,11 @@ pub struct App {
     /// Last known modification time of the config file.
     config_mtime: Option<std::time::SystemTime>,
     /// Last time we checked the config file for changes.
+    /// Only used as a fallback when the OS-level file watcher is unavailable.
     config_check_last: std::time::Instant,
+    /// OS-level filesystem watcher. `None` when the native backend couldn't
+    /// start, in which case the code falls back to mtime polling.
+    file_watcher: Option<crate::file_watcher::FileWatcher>,
     /// Resolved color theme.
     pub theme: Theme,
     /// When true, the intent_input is editing an existing proposal rather than
@@ -1138,6 +1142,7 @@ impl App {
             config_path,
             config_mtime,
             config_check_last: std::time::Instant::now(),
+            file_watcher: crate::file_watcher::FileWatcher::new(),
             theme,
             editing_proposal: false,
             revising_proposal: false,
@@ -1339,7 +1344,90 @@ impl App {
             }
         }
 
+        // Register initial watchable paths with the OS-level watcher.
+        app.register_initial_watched_paths();
+
         app
+    }
+
+    /// Register the initial tab's file path and the config path with the
+    /// filesystem watcher. Called once at the end of construction — subsequent
+    /// tab opens hook in via [`watch_tab_path`].
+    fn register_initial_watched_paths(&mut self) {
+        let Some(watcher) = self.file_watcher.as_mut() else {
+            return;
+        };
+        watcher.watch(&self.config_path);
+        for tab in self.tabs.tabs() {
+            if let Some(path) = tab.buffer.file_path() {
+                watcher.watch(path);
+            }
+        }
+    }
+
+    /// Register a single file path with the watcher. Safe no-op if the
+    /// watcher couldn't start or the path is already watched.
+    pub fn watch_tab_path(&mut self, path: &std::path::Path) {
+        if let Some(watcher) = self.file_watcher.as_mut() {
+            watcher.watch(path);
+        }
+    }
+
+    /// Drain pending filesystem events and dispatch to the appropriate
+    /// handler (buffer reload vs. config reload). Returns true if at least
+    /// one event was processed — callers can use this to skip the
+    /// fallback mtime poll for that tick.
+    fn drain_file_watcher_events(&mut self) -> bool {
+        let Some(watcher) = self.file_watcher.as_mut() else {
+            return false;
+        };
+        let changed = watcher.drain();
+        if changed.is_empty() {
+            return false;
+        }
+
+        let config_path = &self.config_path;
+        let config_canon = config_path.canonicalize().ok();
+        let mut config_changed = false;
+        let mut buffer_changed = false;
+        for path in &changed {
+            let is_config = path == config_path
+                || path.file_name() == config_path.file_name()
+                    && path.canonicalize().ok() == config_canon;
+            if is_config {
+                config_changed = true;
+            } else {
+                buffer_changed = true;
+            }
+        }
+
+        if config_changed {
+            self.reload_config_from_disk();
+        }
+        if buffer_changed {
+            // Delegate to the existing check which handles dirty-buffer
+            // warnings and cursor preservation across reloads.
+            self.check_external_file_changes();
+        }
+        true
+    }
+
+    /// Reload `aura.toml` from disk and apply it immediately. Extracted so
+    /// both the watcher path and the fallback poll can share the logic.
+    fn reload_config_from_disk(&mut self) {
+        let new_mtime = std::fs::metadata(&self.config_path)
+            .and_then(|m| m.modified())
+            .ok();
+        if new_mtime == self.config_mtime {
+            return;
+        }
+        self.config_mtime = new_mtime;
+        let new_config = crate::config::load_config(&self.config_path);
+        let config_table = crate::config::load_config_table(&self.config_path);
+        let new_theme = crate::config::resolve_theme(&new_config.theme, config_table.as_ref());
+        self.config = new_config;
+        self.theme = new_theme;
+        self.set_status("Config reloaded from aura.toml");
     }
 
     /// Convenience: immutable reference to the active tab.
@@ -1554,8 +1642,14 @@ impl App {
             self.maybe_send_awareness();
             self.maybe_broadcast_terminal_snapshot();
 
-            // Check for external file changes (every 2s).
-            if self.last_file_check.elapsed() > std::time::Duration::from_secs(2) {
+            // Handle external file changes via the OS-level watcher. Only
+            // fall back to the 2 s mtime poll if the watcher failed to start
+            // at construction time.
+            let handled = self.drain_file_watcher_events();
+            if !handled
+                && self.file_watcher.is_none()
+                && self.last_file_check.elapsed() > std::time::Duration::from_secs(2)
+            {
                 self.last_file_check = std::time::Instant::now();
                 self.check_external_file_changes();
             }
@@ -1611,22 +1705,13 @@ impl App {
                 }
             }
 
-            // Hot-reload config: check aura.toml every 2 seconds.
-            if self.config_check_last.elapsed() > Duration::from_secs(2) {
+            // Hot-reload config: fallback 2 s poll only when the OS watcher
+            // isn't running. Otherwise handled by drain_file_watcher_events.
+            if self.file_watcher.is_none()
+                && self.config_check_last.elapsed() > Duration::from_secs(2)
+            {
                 self.config_check_last = std::time::Instant::now();
-                let new_mtime = std::fs::metadata(&self.config_path)
-                    .and_then(|m| m.modified())
-                    .ok();
-                if new_mtime != self.config_mtime && new_mtime.is_some() {
-                    self.config_mtime = new_mtime;
-                    let new_config = crate::config::load_config(&self.config_path);
-                    let config_table = crate::config::load_config_table(&self.config_path);
-                    let new_theme =
-                        crate::config::resolve_theme(&new_config.theme, config_table.as_ref());
-                    self.config = new_config;
-                    self.theme = new_theme;
-                    self.set_status("Config reloaded from aura.toml");
-                }
+                self.reload_config_from_disk();
             }
 
             // Auto-refresh source control panel every 2 seconds when visible.
@@ -9404,10 +9489,13 @@ impl App {
         }
         // Track in recent files.
         self.recent_files.retain(|p| p != &path);
-        self.recent_files.push(path);
+        self.recent_files.push(path.clone());
         if self.recent_files.len() > 20 {
             self.recent_files.remove(0);
         }
+        // Register with the filesystem watcher so external changes are picked
+        // up instantly instead of waiting for the fallback 2 s poll.
+        self.watch_tab_path(&path);
         // Detect inline conflict markers.
         self.detect_inline_conflicts();
         Ok(())

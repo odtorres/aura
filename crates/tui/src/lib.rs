@@ -27,6 +27,7 @@ pub mod diff_view;
 pub mod embedded_terminal;
 pub mod file_picker;
 pub mod file_tree;
+pub mod file_watcher;
 pub mod git;
 pub mod git_graph;
 pub mod help;
