@@ -42,6 +42,11 @@ pub enum EditKind {
     },
 }
 
+/// Maximum number of entries kept in the undo history before the oldest are
+/// dropped. Bounds peak memory for long editing sessions: at ~200 bytes/Edit,
+/// 1000 entries caps the history at ~200 KB.
+pub const MAX_UNDO_ENTRIES: usize = 1000;
+
 /// The main text buffer, backed by a rope for efficient editing.
 ///
 /// The buffer is dual-backed: a [`Rope`] for fast local text operations,
@@ -182,6 +187,7 @@ impl Buffer {
             timestamp: now,
         });
         self.history_pos = self.history.len();
+        self.bound_history();
     }
 
     /// Delete a range of characters [start, end), tagged with an author.
@@ -236,6 +242,17 @@ impl Buffer {
             timestamp: now,
         });
         self.history_pos = self.history.len();
+        self.bound_history();
+    }
+
+    /// Drop the oldest history entries so the total stays under `MAX_UNDO_ENTRIES`.
+    /// Keeps `history_pos` aligned so undo still points at the correct entry.
+    fn bound_history(&mut self) {
+        if self.history.len() > MAX_UNDO_ENTRIES {
+            let overflow = self.history.len() - MAX_UNDO_ENTRIES;
+            self.history.drain(..overflow);
+            self.history_pos = self.history_pos.saturating_sub(overflow);
+        }
     }
 
     /// Insert a single character at the cursor position.
@@ -1234,6 +1251,25 @@ mod tests {
 
         buf.undo();
         assert_eq!(buf.text(), "");
+    }
+
+    #[test]
+    fn test_history_is_bounded() {
+        let mut buf = Buffer::new();
+        for i in 0..MAX_UNDO_ENTRIES + 250 {
+            buf.insert(buf.len_chars(), "x", human());
+            assert!(
+                buf.history.len() <= MAX_UNDO_ENTRIES,
+                "history grew past cap after {i} edits"
+            );
+        }
+        assert_eq!(buf.history.len(), MAX_UNDO_ENTRIES);
+        // history_pos tracks the "current" undo position; must stay within bounds.
+        assert!(buf.history_pos <= buf.history.len());
+        // Undo still works on the retained tail.
+        let before = buf.text().len();
+        buf.undo();
+        assert_eq!(buf.text().len(), before - 1);
     }
 
     #[test]

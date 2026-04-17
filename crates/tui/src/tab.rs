@@ -11,7 +11,7 @@ use crate::semantic_index::SemanticIndexer;
 use aura_core::conversation::ConversationStore;
 use aura_core::{Buffer, Cursor};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Detected indentation style for a buffer.
 #[derive(Debug, Clone, Copy)]
@@ -156,6 +156,11 @@ pub struct EditorTab {
     /// `None` means the cache is stale and must be recomputed on next access.
     /// Rebuilt at most once per edit instead of once per frame.
     pub bracket_cache: Option<std::collections::HashMap<usize, Vec<(usize, u8)>>>,
+    /// When the CRDT history was last compacted during idle time. Used to
+    /// rate-limit the idle-compaction check in the main event loop — we never
+    /// compact more often than the idle threshold, even if the user alternates
+    /// between editing and idling rapidly.
+    pub last_idle_compact: Instant,
 }
 
 impl EditorTab {
@@ -245,6 +250,7 @@ impl EditorTab {
             test_lines: Vec::new(),
             diff: None,
             bracket_cache: None,
+            last_idle_compact: Instant::now(),
         };
         tab.refresh_semantic_index();
         tab
@@ -348,6 +354,22 @@ impl EditorTab {
             indexer.index_file(&path, &source, lang);
         }
         self.semantic_dirty = false;
+    }
+
+    /// Compact the CRDT history if the tab has been idle long enough.
+    ///
+    /// Call every event-loop tick. It's cheap if nothing needs to happen: both
+    /// thresholds (idle since last edit, idle since last compact) have to pass
+    /// before any real work runs. CRDT history grows during long editing
+    /// sessions and is otherwise only compacted on save.
+    pub fn maybe_idle_compact_crdt(&mut self) {
+        const IDLE_THRESHOLD: Duration = Duration::from_secs(30);
+        if self.lsp_last_change.elapsed() >= IDLE_THRESHOLD
+            && self.last_idle_compact.elapsed() >= IDLE_THRESHOLD
+        {
+            self.buffer.crdt_mut().compact();
+            self.last_idle_compact = Instant::now();
+        }
     }
 
     /// Send a didChange notification with the current buffer content.

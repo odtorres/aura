@@ -10,9 +10,14 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 - **Bracket-depth cache** — rainbow bracket colouring no longer scans the whole file every frame; depths are cached on `EditorTab` and rebuilt only on buffer edits. Saves an O(total_lines) character scan per render event.
 - **Removed duplicate sticky-scroll and breadcrumb rendering** in `draw_editor`. The per-pane layer already renders both from cached `foldable_ranges` and `app.breadcrumbs`; the inner duplicates were calling `enclosing_scopes()` with a full `rope().to_string()` clone every frame. Also fixes a latent UX bug where sticky scope headers could render twice.
 - **Debounced syntax highlighting** — `refresh_highlights` now waits 40 ms after the last edit before re-parsing, so a continuous keystroke burst no longer triggers a full-file tree-sitter reparse per tick.
+- **Bounded undo history** — `Buffer` caps its undo history at 1000 entries and drops the oldest when the cap is reached, so long editing sessions don't grow memory without bound.
+- **Idle CRDT compaction** — after 30 s of no edits, each tab compacts its CRDT history without waiting for save. Previously long unsaved sessions would accumulate CRDT deltas indefinitely.
 
 ### Added
 - New criterion benches: `render_frame_100k_lines` and `scroll_and_render_100k` guard the per-frame hot path on large files.
+
+### Hardened
+- Replaced fragile "check is_some then unwrap" pattern in diff-scroll and harpoon key handlers with `if let Some(...)` guards. No behavior change; removes six `.unwrap()` calls from the input hot path.
 
 ## [1.2.6] — 2026-04-15
 

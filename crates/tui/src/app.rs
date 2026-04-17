@@ -1564,6 +1564,11 @@ impl App {
             if self.last_swap_save.elapsed() > std::time::Duration::from_secs(30) {
                 self.last_swap_save = std::time::Instant::now();
                 self.save_swap_files();
+                // While we're on the 30s timer, also compact idle tabs' CRDT
+                // history so long sessions don't leak memory.
+                for tab in self.tabs.tabs_mut() {
+                    tab.maybe_idle_compact_crdt();
+                }
             }
 
             // Poll for update check result.
