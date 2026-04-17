@@ -1,5 +1,8 @@
 //! Application state and main event loop.
 
+mod lifecycle;
+mod updates;
+
 use crate::chat_panel::ChatPanel;
 
 /// A pending file tree action requiring text input.
@@ -538,15 +541,15 @@ pub struct App {
     /// Loaded configuration from aura.toml.
     pub config: AuraConfig,
     /// Path to the config file for hot-reload.
-    config_path: std::path::PathBuf,
+    pub(crate) config_path: std::path::PathBuf,
     /// Last known modification time of the config file.
-    config_mtime: Option<std::time::SystemTime>,
+    pub(crate) config_mtime: Option<std::time::SystemTime>,
     /// Last time we checked the config file for changes.
     /// Only used as a fallback when the OS-level file watcher is unavailable.
-    config_check_last: std::time::Instant,
+    pub(crate) config_check_last: std::time::Instant,
     /// OS-level filesystem watcher. `None` when the native backend couldn't
     /// start, in which case the code falls back to mtime polling.
-    file_watcher: Option<crate::file_watcher::FileWatcher>,
+    pub(crate) file_watcher: Option<crate::file_watcher::FileWatcher>,
     /// Resolved color theme.
     pub theme: Theme,
     /// When true, the intent_input is editing an existing proposal rather than
@@ -602,7 +605,7 @@ pub struct App {
     /// Receiver for a RAG index being built on a background thread. `Some`
     /// during startup while the index is being constructed; resolved into
     /// `rag_index` on the first tick that sees a completed build.
-    rag_index_pending: Option<std::sync::mpsc::Receiver<crate::rag_index::RagIndex>>,
+    pub(crate) rag_index_pending: Option<std::sync::mpsc::Receiver<crate::rag_index::RagIndex>>,
     /// AI checkpoints for rollback.
     pub checkpoints: crate::checkpoints::CheckpointManager,
     /// Pinned context for AI prompts.
@@ -838,7 +841,7 @@ pub struct App {
 
     // --- Update checker ---
     /// Receiver for background update check results.
-    update_receiver: Option<mpsc::Receiver<UpdateStatus>>,
+    pub(crate) update_receiver: Option<mpsc::Receiver<UpdateStatus>>,
     /// Latest update status (displayed in status bar).
     pub update_status: Option<UpdateStatus>,
     /// Whether the floating update notification toast is visible.
@@ -1352,114 +1355,6 @@ impl App {
         app.register_initial_watched_paths();
 
         app
-    }
-
-    /// Register the initial tab's file path and the config path with the
-    /// filesystem watcher. Called once at the end of construction — subsequent
-    /// tab opens hook in via [`watch_tab_path`].
-    fn register_initial_watched_paths(&mut self) {
-        let Some(watcher) = self.file_watcher.as_mut() else {
-            return;
-        };
-        watcher.watch(&self.config_path);
-        for tab in self.tabs.tabs() {
-            if let Some(path) = tab.buffer.file_path() {
-                watcher.watch(path);
-            }
-        }
-    }
-
-    /// Register a single file path with the watcher. Safe no-op if the
-    /// watcher couldn't start or the path is already watched.
-    pub fn watch_tab_path(&mut self, path: &std::path::Path) {
-        if let Some(watcher) = self.file_watcher.as_mut() {
-            watcher.watch(path);
-        }
-    }
-
-    /// Drain pending filesystem events and dispatch to the appropriate
-    /// handler (buffer reload vs. config reload). Returns true if at least
-    /// one event was processed — callers can use this to skip the
-    /// fallback mtime poll for that tick.
-    fn drain_file_watcher_events(&mut self) -> bool {
-        let Some(watcher) = self.file_watcher.as_mut() else {
-            return false;
-        };
-        let changed = watcher.drain();
-        if changed.is_empty() {
-            return false;
-        }
-
-        let config_path = &self.config_path;
-        let config_canon = config_path.canonicalize().ok();
-        let mut config_changed = false;
-        let mut buffer_changed = false;
-        for path in &changed {
-            let is_config = path == config_path
-                || path.file_name() == config_path.file_name()
-                    && path.canonicalize().ok() == config_canon;
-            if is_config {
-                config_changed = true;
-            } else {
-                buffer_changed = true;
-            }
-        }
-
-        if config_changed {
-            self.reload_config_from_disk();
-        }
-        if buffer_changed {
-            // Delegate to the existing check which handles dirty-buffer
-            // warnings and cursor preservation across reloads.
-            self.check_external_file_changes();
-        }
-        true
-    }
-
-    /// Promote a background-built RAG index into the active slot once its
-    /// builder thread finishes. Called every tick; the first completed build
-    /// wins and the receiver is dropped afterwards.
-    fn poll_rag_index_ready(&mut self) {
-        let Some(rx) = self.rag_index_pending.as_ref() else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(index) => {
-                if !index.chunks.is_empty() {
-                    tracing::info!(
-                        "RAG index: {} chunks from {} files",
-                        index.chunks.len(),
-                        index.file_count
-                    );
-                    self.rag_index = Some(index);
-                }
-                self.rag_index_pending = None;
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.rag_index_pending = None;
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                // Still indexing.
-            }
-        }
-    }
-
-    /// Reload `aura.toml` from disk and apply it immediately. Extracted so
-    /// both the watcher path and the fallback poll can share the logic.
-    fn reload_config_from_disk(&mut self) {
-        let new_mtime = std::fs::metadata(&self.config_path)
-            .and_then(|m| m.modified())
-            .ok();
-        if new_mtime == self.config_mtime {
-            return;
-        }
-        self.config_mtime = new_mtime;
-        let new_config = crate::config::load_config(&self.config_path);
-        let config_table = crate::config::load_config_table(&self.config_path);
-        let new_theme = crate::config::resolve_theme(&new_config.theme, config_table.as_ref());
-        self.config = new_config;
-        self.theme = new_theme;
-        self.set_status("Config reloaded from aura.toml");
     }
 
     /// Convenience: immutable reference to the active tab.
@@ -5767,67 +5662,6 @@ impl App {
     }
 
     /// Poll the background update checker for results.
-    fn poll_update_check(&mut self) {
-        if let Some(ref rx) = self.update_receiver {
-            if let Ok(status) = rx.try_recv() {
-                match &status {
-                    UpdateStatus::Available { version, .. } => {
-                        self.update_notification_visible = true;
-                        self.set_status(format!(
-                            "Update available: v{} \u{2192} v{version}",
-                            crate::update::CURRENT_VERSION
-                        ));
-                    }
-                    UpdateStatus::UpToDate => {
-                        self.set_status(format!(
-                            "AURA v{} is up to date",
-                            crate::update::CURRENT_VERSION
-                        ));
-                    }
-                    UpdateStatus::Error(e) => {
-                        self.set_status(format!("Update check failed: {e}"));
-                    }
-                }
-                self.update_status = Some(status);
-                self.update_receiver = None;
-            }
-        }
-    }
-
-    /// Trigger a forced update check (bypasses cache). Used by `:update` command.
-    pub fn force_update_check(&mut self) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        crate::update::spawn_forced_update_check(tx);
-        self.update_receiver = Some(rx);
-        self.update_status = None; // Clear old status while checking.
-        self.set_status("Checking for updates...");
-    }
-
-    /// Dismiss the update notification toast.
-    pub fn dismiss_update_notification(&mut self) {
-        self.update_notification_visible = false;
-    }
-
-    /// Show the update confirmation modal.
-    pub fn show_update_modal(&mut self) {
-        self.update_notification_visible = false;
-        self.update_modal_visible = true;
-    }
-
-    /// Run the platform-appropriate update command in the embedded terminal.
-    pub fn run_update(&mut self) {
-        self.update_modal_visible = false;
-        if let Some(UpdateStatus::Available { ref version, .. }) = self.update_status {
-            let cmd = "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/odtorres/aura/releases/latest/download/aura-installer.sh | sh".to_string();
-            self.set_status(format!("Updating to v{}...", version));
-            // Run the update command in the embedded terminal.
-            self.terminal_mut().visible = true;
-            self.terminal_focused = true;
-            self.terminal_mut()
-                .send_bytes(format!("{}\n", cmd).as_bytes());
-        }
-    }
-
     /// Poll the speculative engine for completed analyses.
     fn poll_speculative(&mut self) {
         if let Some(engine) = &mut self.speculative {

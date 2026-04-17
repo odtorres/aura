@@ -24,6 +24,9 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 - **Deferred LSP startup** — language servers (rust-analyzer, jdtls, etc.) now spawn on a background thread. Opening a file no longer blocks the UI for 1–2 s while the server initialises; the editor comes up immediately and LSP features activate as soon as the handshake completes.
 - **Deferred RAG index build** — codebase RAG indexing (walks every file in the project) now runs on a background thread. On large repositories startup no longer blocks on the walk; the index becomes available to AI features on the first tick after the build completes.
 
+### Internal
+- First wedge of the `app.rs` monolith split: the file moves to `app/mod.rs`, with lifecycle helpers (filesystem watcher glue, RAG readiness poll, config hot-reload) extracted to `app/lifecycle.rs` and update-check plumbing extracted to `app/updates.rs`. No behavior change; establishes the sub-module pattern that future splits can follow.
+
 ## [1.2.6] — 2026-04-15
 
 ### Fixed
