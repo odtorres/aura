@@ -571,3 +571,115 @@ fn discover_agents(agents_dir: &Path, scope: &str, out: &mut Vec<AgentEntry>) {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_panel_starts_hidden_on_overview() {
+        let p = AiVisorPanel::new(40);
+        assert!(!p.visible);
+        assert_eq!(p.width, 40);
+        assert_eq!(p.active_tab, VisorTab::Overview);
+        assert_eq!(p.selected, 0);
+        assert_eq!(p.scroll, 0);
+    }
+
+    #[test]
+    fn toggle_flips_visibility() {
+        let mut p = AiVisorPanel::new(40);
+        p.toggle();
+        assert!(p.visible);
+        p.toggle();
+        assert!(!p.visible);
+    }
+
+    #[test]
+    fn next_tab_cycles_through_all_variants() {
+        let mut p = AiVisorPanel::new(40);
+        let expected = [
+            VisorTab::Settings,
+            VisorTab::Skills,
+            VisorTab::Hooks,
+            VisorTab::Plugins,
+            VisorTab::Agents,
+            VisorTab::Overview,
+        ];
+        for tab in expected {
+            p.next_tab();
+            assert_eq!(p.active_tab, tab);
+        }
+    }
+
+    #[test]
+    fn next_tab_resets_selection_and_scroll() {
+        let mut p = AiVisorPanel::new(40);
+        p.selected = 7;
+        p.scroll = 12;
+        p.next_tab();
+        assert_eq!(p.selected, 0);
+        assert_eq!(p.scroll, 0);
+    }
+
+    #[test]
+    fn select_up_saturates_at_zero() {
+        let mut p = AiVisorPanel::new(40);
+        p.select_up();
+        assert_eq!(p.selected, 0);
+    }
+
+    #[test]
+    fn select_down_clamps_to_current_list_len() {
+        let mut p = AiVisorPanel::new(40);
+        p.sections.skills = vec![
+            SkillEntry {
+                name: "a".into(),
+                description: "".into(),
+                path: PathBuf::from("/a"),
+                invocable: false,
+            },
+            SkillEntry {
+                name: "b".into(),
+                description: "".into(),
+                path: PathBuf::from("/b"),
+                invocable: false,
+            },
+        ];
+        p.active_tab = VisorTab::Skills;
+        p.select_down();
+        p.select_down();
+        p.select_down(); // Clamps to max (1).
+        assert_eq!(p.selected, 1);
+    }
+
+    #[test]
+    fn selected_skill_path_only_on_skills_tab() {
+        let mut p = AiVisorPanel::new(40);
+        p.sections.skills = vec![SkillEntry {
+            name: "s".into(),
+            description: "".into(),
+            path: PathBuf::from("/s"),
+            invocable: false,
+        }];
+        p.active_tab = VisorTab::Overview;
+        assert!(p.selected_skill_path().is_none());
+        p.active_tab = VisorTab::Skills;
+        assert_eq!(p.selected_skill_path(), Some(Path::new("/s")));
+    }
+
+    #[test]
+    fn selected_agent_path_only_on_agents_tab() {
+        let mut p = AiVisorPanel::new(40);
+        p.sections.agents = vec![AgentEntry {
+            name: "a".into(),
+            description: "".into(),
+            path: PathBuf::from("/agents/a.md"),
+            scope: "project".into(),
+        }];
+        p.active_tab = VisorTab::Plugins;
+        assert!(p.selected_agent_path().is_none());
+        p.active_tab = VisorTab::Agents;
+        assert_eq!(p.selected_agent_path(), Some(Path::new("/agents/a.md")));
+    }
+}

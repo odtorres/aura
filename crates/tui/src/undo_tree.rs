@@ -161,3 +161,109 @@ pub fn build_entries(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::buffer::Edit;
+    use std::time::{Duration, Instant};
+
+    fn make_entry(idx: usize) -> UndoEntry {
+        UndoEntry {
+            index: idx,
+            kind_label: format!("edit {idx}"),
+            author_label: "human".into(),
+            author_color: Color::Green,
+            timestamp: "0s ago".into(),
+            is_current: false,
+            is_redo: false,
+            preview: "".into(),
+            position: 0,
+        }
+    }
+
+    #[test]
+    fn modal_selects_previous_entry_on_open() {
+        // With history_pos=3, selection starts at index 2 (the most recently
+        // applied edit), so Enter accepts the current state by default.
+        let entries = (0..5).map(make_entry).collect();
+        let modal = UndoTreeModal::new(entries, 3);
+        assert_eq!(modal.selected, 2);
+        assert!(modal.visible);
+        assert!(modal.show_detail);
+    }
+
+    #[test]
+    fn navigation_clamps_to_bounds() {
+        let mut modal = UndoTreeModal::new((0..3).map(make_entry).collect(), 2);
+        assert_eq!(modal.selected, 1);
+
+        modal.select_up();
+        modal.select_up();
+        modal.select_up(); // Can't go below 0.
+        assert_eq!(modal.selected, 0);
+
+        modal.select_down();
+        modal.select_down();
+        modal.select_down(); // Clamps to max (2).
+        assert_eq!(modal.selected, 2);
+
+        modal.page_up();
+        assert_eq!(modal.selected, 0);
+        modal.page_down();
+        assert_eq!(modal.selected, 2);
+    }
+
+    #[test]
+    fn toggle_detail_flips_flag() {
+        let mut modal = UndoTreeModal::new(vec![], 0);
+        let before = modal.show_detail;
+        modal.toggle_detail();
+        assert_ne!(modal.show_detail, before);
+    }
+
+    #[test]
+    fn selected_history_pos_is_one_based() {
+        // history_pos is 1-based (history.len() after a push), so the UI
+        // converts the zero-based entry index accordingly.
+        let entries = (0..3).map(make_entry).collect();
+        let mut modal = UndoTreeModal::new(entries, 2);
+        modal.selected = 0;
+        assert_eq!(modal.selected_history_pos(), Some(1));
+        modal.selected = 2;
+        assert_eq!(modal.selected_history_pos(), Some(3));
+    }
+
+    #[test]
+    fn build_entries_labels_insert_and_delete() {
+        let now = Instant::now();
+        let history = vec![
+            Edit {
+                kind: EditKind::Insert {
+                    pos: 0,
+                    text: "hello".into(),
+                },
+                author: AuthorId::Human,
+                timestamp: now - Duration::from_secs(5),
+            },
+            Edit {
+                kind: EditKind::Delete {
+                    start: 0,
+                    end: 5,
+                    deleted: "hello".into(),
+                },
+                author: AuthorId::Ai("claude".into()),
+                timestamp: now - Duration::from_secs(1),
+            },
+        ];
+        let entries = build_entries(&history, 2, now);
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].kind_label.starts_with("insert 5"));
+        assert_eq!(entries[0].author_label, "human");
+        // is_current flags the entry whose 1-based index equals history_pos.
+        assert!(!entries[0].is_current);
+        assert!(entries[1].is_current);
+        assert_eq!(entries[1].author_label, "ai:claude");
+        assert!(entries[1].kind_label.starts_with("delete 5"));
+    }
+}

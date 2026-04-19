@@ -26,6 +26,7 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ### Internal
 - First wedge of the `app.rs` monolith split: the file moves to `app/mod.rs`, with lifecycle helpers (filesystem watcher glue, RAG readiness poll, config hot-reload) extracted to `app/lifecycle.rs` and update-check plumbing extracted to `app/updates.rs`. No behavior change; establishes the sub-module pattern that future splits can follow.
+- Added 13 unit tests covering the two remaining untested UI modules: `undo_tree` (5 tests for modal navigation, detail toggle, history-position mapping, and entry-building) and `ai_visor` (8 tests for panel visibility, tab cycling, selection clamping, and tab-scoped path lookups).
 
 ## [1.2.6] — 2026-04-15
 
