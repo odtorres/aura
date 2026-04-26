@@ -4,6 +4,25 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.10] — 2026-04-26
+
+### Hardened
+- **Collab no longer panics on poisoned locks** — every `Mutex::lock()` in
+  `collab.rs` (20 sites: shutdown flags, TCP streams, peer-writer maps,
+  client list, file-snapshot lists) now goes through a new `MutexExt::
+  lock_or_recover()` helper that recovers via `PoisonError::into_inner()`
+  and emits `tracing::error!` instead of taking the thread (and the
+  editor) down. If a peer thread panics mid-lock, the rest of the
+  collab session keeps running and the protocol layer detects the
+  broken peer at the next read/write.
+- **Thread spawn failures are now logged**, not silently dropped.
+  Replaced four `.spawn(...).ok()` patterns (`collab-peer`,
+  `update-check`, `update-check-forced`, `openai-request`) with
+  `.spawn(...).map_err(|e| tracing::error!(...)).ok()`. Spawn failures
+  are rare but real (resource limits, ulimit), and previously they
+  produced a missing peer / missing update notification with zero
+  diagnostics.
+
 ## [1.2.9] — 2026-04-26
 
 ### Added

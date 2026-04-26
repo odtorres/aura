@@ -121,6 +121,9 @@ pub fn spawn_update_check(sender: mpsc::Sender<UpdateStatus>, interval_hours: u6
             let status = perform_check(interval_hours);
             let _ = sender.send(status);
         })
+        .map_err(|e| {
+            tracing::error!("update: failed to spawn update-check thread: {e}");
+        })
         .ok();
 }
 
@@ -132,6 +135,9 @@ pub fn spawn_forced_update_check(sender: mpsc::Sender<UpdateStatus>) {
         .spawn(move || {
             let status = perform_forced_check();
             let _ = sender.send(status);
+        })
+        .map_err(|e| {
+            tracing::error!("update: failed to spawn update-check-forced thread: {e}");
         })
         .ok();
 }

@@ -163,6 +163,9 @@ impl OpenAiClient {
                     }
                 }
             })
+            .map_err(|e| {
+                tracing::error!("openai: failed to spawn request thread: {e}");
+            })
             .ok();
 
         rx

@@ -19,9 +19,33 @@ use std::collections::HashMap;
 use std::io::{Read as IoRead, Write as IoWrite};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
+
+/// Lock a [`Mutex`] without taking down the thread on poison.
+///
+/// A poisoned mutex means a previous holder panicked while the lock was
+/// held — but the data inside is still readable, and for collab state
+/// (TCP streams, writers, shutdown flags, snapshot vecs) continuing
+/// after recovery is safer than letting the panic propagate and tear
+/// down a peer thread (or worse, the editor session).
+///
+/// On poison this logs at error level and returns the guard via
+/// [`PoisonError::into_inner`] instead of panicking.
+trait MutexExt<T> {
+    /// Acquire the lock; on poison, log and recover.
+    fn lock_or_recover(&self) -> MutexGuard<'_, T>;
+}
+
+impl<T> MutexExt<T> for Mutex<T> {
+    fn lock_or_recover(&self) -> MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|poisoned| {
+            tracing::error!("collab: mutex poisoned, recovering");
+            poisoned.into_inner()
+        })
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Wire protocol
@@ -156,13 +180,13 @@ fn spawn_tls_relay<S: IoRead + IoWrite + Send + 'static>(
             let mut pending_read: Vec<u8> = Vec::new();
 
             loop {
-                if *shutdown.lock().expect("lock poisoned") {
+                if *shutdown.lock_or_recover() {
                     break;
                 }
 
                 // Try to read some bytes (non-blocking-ish via small buffer reads).
                 let mut buf = [0u8; 8192];
-                let mut guard = stream.lock().expect("lock poisoned");
+                let mut guard = stream.lock_or_recover();
 
                 // Try reading available data.
                 match guard.read(&mut buf) {
@@ -203,7 +227,7 @@ fn spawn_tls_relay<S: IoRead + IoWrite + Send + 'static>(
                     if read_tx.send((msg_type, payload)).is_err() {
                         return;
                     }
-                    guard = stream.lock().expect("lock poisoned");
+                    guard = stream.lock_or_recover();
                 }
 
                 // Drain pending writes.
@@ -651,7 +675,7 @@ impl CollabSession {
             .name("collab-accept".to_string())
             .spawn(move || {
                 for stream_result in listener.incoming() {
-                    if *shutdown_accept.lock().expect("lock poisoned") {
+                    if *shutdown_accept.lock_or_recover() {
                         break;
                     }
                     let stream = match stream_result {
@@ -662,7 +686,7 @@ impl CollabSession {
 
                     let event_tx = event_tx_accept.clone();
                     let clients = clients_for_accept.clone();
-                    let snaps = file_snaps_for_accept.lock().expect("lock poisoned").clone();
+                    let snaps = file_snaps_for_accept.lock_or_recover().clone();
                     let shutdown_peer = shutdown_accept.clone();
                     let auth_token = auth_token_for_accept.clone();
                     let tls_config = tls_config_for_accept.clone();
@@ -704,6 +728,9 @@ impl CollabSession {
                                 auth_token,
                             );
                         })
+                        .map_err(|e| {
+                            tracing::error!("collab: failed to spawn peer thread: {e}");
+                        })
                         .ok();
                 }
             })?;
@@ -714,7 +741,7 @@ impl CollabSession {
             .name("collab-cmd".to_string())
             .spawn(move || {
                 while let Ok(cmd) = command_rx.recv() {
-                    if *shutdown_cmd.lock().expect("lock poisoned") {
+                    if *shutdown_cmd.lock_or_recover() {
                         break;
                     }
                     match cmd {
@@ -733,7 +760,7 @@ impl CollabSession {
                             snapshot,
                         } => {
                             // Add to the snapshots list for future joiners.
-                            file_snaps_for_cmd.lock().expect("lock poisoned").push((
+                            file_snaps_for_cmd.lock_or_recover().push((
                                 file_id,
                                 path.clone(),
                                 snapshot.clone(),
@@ -869,10 +896,10 @@ impl CollabSession {
             .name("collab-writer".to_string())
             .spawn(move || {
                 while let Ok(cmd) = command_rx.recv() {
-                    if *shutdown_cmd.lock().expect("lock poisoned") {
+                    if *shutdown_cmd.lock_or_recover() {
                         break;
                     }
-                    let mut w = writer_for_cmd.lock().expect("lock poisoned");
+                    let mut w = writer_for_cmd.lock_or_recover();
                     match cmd {
                         CollabCommand::BroadcastSync { file_id, data } => {
                             let payload = prepend_file_id(file_id, &data);
@@ -1031,7 +1058,7 @@ impl CollabSession {
 
     /// Shut down the session.
     pub fn shutdown(&self) {
-        *self.shutdown.lock().expect("lock poisoned") = true;
+        *self.shutdown.lock_or_recover() = true;
         let _ = self.command_tx.send(CollabCommand::Shutdown);
         // Poke the listener to unblock the accept loop (host only).
         if let Some(port) = self.port {
@@ -1098,7 +1125,7 @@ fn host_handle_peer(
 
     // Send all document snapshots (one per file).
     {
-        let mut w = writer.lock().expect("lock poisoned");
+        let mut w = writer.lock_or_recover();
         for (file_id, path, snapshot) in &file_snapshots {
             let payload = encode_snapshot_payload(*file_id, path, snapshot);
             if w.write_message(MSG_DOC_SNAPSHOT, &payload).is_err() {
@@ -1115,7 +1142,7 @@ fn host_handle_peer(
 
     // Read loop: receive messages from the peer.
     loop {
-        if *shutdown.lock().expect("lock poisoned") {
+        if *shutdown.lock_or_recover() {
             break;
         }
         match reader.read_message() {
@@ -1150,7 +1177,7 @@ fn host_handle_peer(
 
     // Peer disconnected — clean up.
     let _ = event_tx.send(CollabEvent::PeerLeft { peer_id });
-    let mut cl = clients.lock().expect("lock poisoned");
+    let mut cl = clients.lock_or_recover();
     cl.retain(|(id, _)| *id != peer_id);
 }
 
@@ -1205,7 +1232,7 @@ fn client_reader_loop(
     loop {
         // Read messages until disconnected.
         loop {
-            if *shutdown.lock().expect("lock poisoned") {
+            if *shutdown.lock_or_recover() {
                 return;
             }
             match reader.read_message() {
@@ -1216,7 +1243,7 @@ fn client_reader_loop(
                     }
                 }
                 Err(_) => {
-                    if *shutdown.lock().expect("lock poisoned") {
+                    if *shutdown.lock_or_recover() {
                         return;
                     }
                     break; // Disconnected — enter reconnect loop.
@@ -1227,7 +1254,7 @@ fn client_reader_loop(
         // Reconnection loop with exponential backoff.
         let mut attempt = 0u32;
         loop {
-            if *shutdown.lock().expect("lock poisoned") {
+            if *shutdown.lock_or_recover() {
                 return;
             }
 
@@ -1238,7 +1265,7 @@ fn client_reader_loop(
             let delay = Duration::from_secs((1u64 << attempt.min(5)).min(30));
             thread::sleep(delay);
 
-            if *shutdown.lock().expect("lock poisoned") {
+            if *shutdown.lock_or_recover() {
                 return;
             }
 
@@ -1287,7 +1314,7 @@ fn client_reader_loop(
                     }
 
                     // Swap the writer so command dispatch uses the new connection.
-                    *writer.lock().expect("lock poisoned") = new_writer;
+                    *writer.lock_or_recover() = new_writer;
                     reader = new_reader;
 
                     let _ = event_tx.send(CollabEvent::Reconnected);
@@ -1378,9 +1405,9 @@ fn decode_event(msg_type: u8, payload: Vec<u8>) -> CollabEvent {
 
 /// Broadcast a wire message to all connected clients.
 fn broadcast(clients: &ClientList, msg_type: u8, payload: &[u8]) {
-    let cl = clients.lock().expect("lock poisoned");
+    let cl = clients.lock_or_recover();
     for (_, writer) in cl.iter() {
-        let mut w = writer.lock().expect("lock poisoned");
+        let mut w = writer.lock_or_recover();
         let _ = w.write_message(msg_type, payload);
     }
 }
