@@ -6011,10 +6011,11 @@ fn execute_command(app: &mut App, cmd: &str) {
                         } else {
                             let lines = crate::git::aligned_diff_lines(&saved, &current);
                             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                            app.diff_view = Some(crate::diff_view::DiffView::new(
+                            let diff = crate::diff_view::DiffView::new(
                                 format!("{name} (unsaved changes)"),
                                 lines,
-                            ));
+                            );
+                            app.open_diff_tab(diff);
                         }
                     }
                     Err(_) => {
@@ -7373,13 +7374,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                                     .to_string_lossy()
                             );
                             let diff = crate::diff_view::DiffView::new(label, lines);
-                            let buf = aura_core::Buffer::new();
-                            let theme = app.theme.clone();
-                            let cs = app.conversation_store.as_ref();
-                            let mut tab = crate::tab::EditorTab::new(buf, cs, &theme);
-                            tab.diff = Some(diff);
-                            app.tabs.open(tab);
-                            app.mode = Mode::Diff;
+                            app.open_diff_tab(diff);
                         }
                         (Err(e), _) => app.set_status(format!("Cannot read {file1}: {e}")),
                         (_, Err(e)) => app.set_status(format!("Cannot read {file2}: {e}")),
@@ -7918,67 +7913,50 @@ fn expand_emmet(abbr: &str) -> String {
 pub fn handle_diff(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            // Close diff view — close the tab if it's tab-based.
+            // Close the diff tab if the active tab is one. Mode reverts to
+            // Normal regardless so the user lands back on the underlying tab.
             if app.tab().diff.is_some() {
                 app.tabs.close_active();
             }
-            app.diff_view = None;
             app.mode = Mode::Normal;
             app.source_control_focused = true;
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(diff) = &mut app.tab_mut().diff {
                 diff.scroll_down(1, 20);
-            } else if let Some(dv) = &mut app.diff_view {
-                dv.scroll_down(1, 20);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             if let Some(diff) = &mut app.tab_mut().diff {
                 diff.scroll_up(1);
-            } else if let Some(dv) = &mut app.diff_view {
-                dv.scroll_up(1);
             }
         }
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(diff) = &mut app.tab_mut().diff {
                 diff.scroll_down(10, 20);
-            } else if let Some(dv) = &mut app.diff_view {
-                dv.scroll_down(10, 20);
             }
         }
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(diff) = &mut app.tab_mut().diff {
                 diff.scroll_up(10);
-            } else if let Some(dv) = &mut app.diff_view {
-                dv.scroll_up(10);
             }
         }
         KeyCode::Char('G') => {
             if let Some(diff) = &mut app.tab_mut().diff {
                 diff.scroll_to_bottom(20);
-            } else if let Some(dv) = &mut app.diff_view {
-                dv.scroll_to_bottom(20);
             }
         }
         KeyCode::Char('g') => {
             if let Some(diff) = &mut app.tab_mut().diff {
                 diff.scroll_to_top();
-            } else if let Some(dv) = &mut app.diff_view {
-                dv.scroll_to_top();
             }
         }
         KeyCode::Enter | KeyCode::Char('o') => {
-            // Open the file for editing.
-            let rel_path = if app.tab().diff.is_some() {
-                app.tab().diff.as_ref().map(|dv| dv.file_path.clone())
-            } else {
-                app.diff_view.as_ref().map(|dv| dv.file_path.clone())
-            };
+            // Open the file for editing — close the diff tab, leave Mode::Diff.
+            let rel_path = app.tab().diff.as_ref().map(|dv| dv.file_path.clone());
             if app.tab().diff.is_some() {
                 app.tabs.close_active();
             }
-            app.diff_view = None;
             app.mode = Mode::Normal;
             app.source_control_focused = false;
             if let Some(rel_path) = rel_path {

@@ -664,8 +664,6 @@ pub struct App {
     pub source_control: SourceControlPanel,
     /// Whether the source control panel has keyboard focus.
     pub source_control_focused: bool,
-    /// Side-by-side diff view (None when not active).
-    pub diff_view: Option<DiffView>,
     /// Agent diff: list of (path, old_content, new_content) for multi-file review.
     pub agent_diff_files: Vec<(String, String, String)>,
     /// Current index in agent_diff_files.
@@ -1211,7 +1209,6 @@ impl App {
             sidebar_view: SidebarView::Files,
             source_control: SourceControlPanel::new(30),
             source_control_focused: false,
-            diff_view: None,
             agent_diff_files: Vec::new(),
             agent_diff_idx: 0,
             merge_view: None,
@@ -9524,8 +9521,19 @@ impl App {
 
         let lines = crate::git::aligned_diff_lines(&old_content, &new_content);
         let diff = DiffView::new(rel_path.to_string(), lines);
+        self.open_diff_tab(diff);
+    }
 
-        // Open as a new tab with the diff attached.
+    /// Open a fresh tab dedicated to displaying `diff` and switch into
+    /// [`Mode::Diff`] so all the diff keybinds (`j`/`k`/`G`/`g`/`Esc`/`Enter`)
+    /// apply. This is the single entry point for opening any diff —
+    /// hunk diff in source control, unsaved-changes diff, agent
+    /// review diff, two-file `:diff` command — replacing the old
+    /// dual-codepath where some openers stuffed the diff into the
+    /// per-`App` `diff_view` overlay and others attached it to a
+    /// tab. Closing the diff is `app.tabs.close_active()` plus
+    /// switching the mode back to `Mode::Normal`.
+    pub fn open_diff_tab(&mut self, diff: DiffView) {
         let buf = aura_core::Buffer::new();
         let theme = self.theme.clone();
         let conversation_store = self.conversation_store.as_ref();
@@ -10660,7 +10668,8 @@ impl App {
                         self.set_status("No changes to review");
                     } else {
                         let total = self.agent_diff_files.len();
-                        self.diff_view = Some(DiffView::new(format!("{path} [1/{total}]"), lines));
+                        let label = format!("{path} [1/{total}]");
+                        self.open_diff_tab(DiffView::new(label, lines));
                         self.set_status(format!("Agent diff: {total} file(s) changed"));
                     }
                 }
@@ -10707,13 +10716,17 @@ impl App {
         let (path, old, new) = &self.agent_diff_files[0];
         let lines = crate::git::aligned_diff_lines(old, new);
         let total = self.agent_diff_files.len();
-        self.diff_view = Some(DiffView::new(format!("{path} [1/{total}]"), lines));
+        let label = format!("{path} [1/{total}]");
+        self.open_diff_tab(DiffView::new(label, lines));
         self.set_status(format!(
             "Agent diff: {total} file(s) changed — use :agent diff to cycle"
         ));
     }
 
-    /// Cycle to the next file in the agent diff review.
+    /// Cycle to the next file in the agent diff review. Replaces the
+    /// diff on the active tab (which is expected to be the diff tab
+    /// opened by `agent_review_diffs` — if the user has switched away,
+    /// the cycle falls back to opening a new diff tab).
     pub fn next_agent_diff(&mut self) {
         if self.agent_diff_files.is_empty() {
             return;
@@ -10723,7 +10736,12 @@ impl App {
         let lines = crate::git::aligned_diff_lines(old, new);
         let idx = self.agent_diff_idx + 1;
         let total = self.agent_diff_files.len();
-        self.diff_view = Some(DiffView::new(format!("{path} [{idx}/{total}]"), lines));
+        let diff = DiffView::new(format!("{path} [{idx}/{total}]"), lines);
+        if self.tab().diff.is_some() {
+            self.tab_mut().diff = Some(diff);
+        } else {
+            self.open_diff_tab(diff);
+        }
     }
 
     /// Revert the current file in agent diff review to its snapshot state.
@@ -10738,7 +10756,12 @@ impl App {
             self.set_status(format!("Reverted: {path}"));
             self.agent_diff_files.remove(self.agent_diff_idx);
             if self.agent_diff_files.is_empty() {
-                self.diff_view = None;
+                // Close the diff tab if it's the active tab; otherwise
+                // there's nothing to clean up at the App level.
+                if self.tab().diff.is_some() {
+                    self.tabs.close_active();
+                    self.mode = Mode::Normal;
+                }
                 self.set_status("All agent changes reviewed");
             } else {
                 self.agent_diff_idx = self

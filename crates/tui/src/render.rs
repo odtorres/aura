@@ -187,8 +187,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     }
 
-    // If diff view is active (old-style overlay or tab-based), render it.
-    if app.diff_view.is_some() || app.tab().diff.is_some() {
+    // If the active tab has a diff attached, render it as a full-pane view.
+    if app.tab().diff.is_some() {
         draw_diff_view(frame, app, editor_area);
 
         if has_terminal {
@@ -1137,8 +1137,7 @@ fn draw_merge_panel_lines(
 }
 
 fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Use tab-based diff if available, otherwise fall back to old overlay.
-    let dv = match app.tab().diff.as_ref().or(app.diff_view.as_ref()) {
+    let dv = match app.tab().diff.as_ref() {
         Some(dv) => dv,
         None => return,
     };
@@ -1206,24 +1205,15 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
         left_inner.height
     } as usize;
 
-    // Update the diff view's scroll clamp with actual viewport height.
-    // Check tab-based diff first, then fall back to old overlay.
-    let has_tab_diff = app.tab().diff.is_some();
-    if has_tab_diff {
-        if let Some(dv) = app.tab_mut().diff.as_mut() {
-            let max_scroll = dv.lines.len().saturating_sub(viewport_height);
-            if dv.scroll > max_scroll {
-                dv.scroll = max_scroll;
-            }
-        }
-    } else if let Some(dv) = &mut app.diff_view {
+    // Update the diff view's scroll clamp with the actual viewport height.
+    if let Some(dv) = app.tab_mut().diff.as_mut() {
         let max_scroll = dv.lines.len().saturating_sub(viewport_height);
         if dv.scroll > max_scroll {
             dv.scroll = max_scroll;
         }
     }
 
-    let dv = match app.tab().diff.as_ref().or(app.diff_view.as_ref()) {
+    let dv = match app.tab().diff.as_ref() {
         Some(dv) => dv,
         None => return,
     };

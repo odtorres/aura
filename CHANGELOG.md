@@ -4,6 +4,35 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.15] — 2026-04-26
+
+### Changed
+- **Single codepath for diff viewing** — the long-running migration where
+  `App::diff_view` (a per-app overlay) lived alongside `Tab::diff` (a
+  per-tab field) is complete. The overlay field is gone; every diff
+  opener now routes through a single new `App::open_diff_tab(diff)`
+  helper which constructs a fresh tab, attaches the diff, switches to
+  `Mode::Diff`, and lets `app.tabs.close_active()` close it. The four
+  call sites that previously stuffed an overlay (the `:diff` two-file
+  command, the unsaved-changes diff command, and the agent multi-file
+  review's initial-open + revert-empty paths) all share the helper.
+  Cycling within the agent diff (`next_agent_diff`) replaces the
+  active tab's `diff` field rather than spawning new tabs each step.
+- Side effect: the unsaved-changes diff is now a proper tab — pressing
+  `Esc` returns to the underlying tab via `close_active()` instead of
+  flipping a global flag, and the diff scroll keys (`j`/`k`/`G`/`g`/
+  `Ctrl+d`/`Ctrl+u`) are now routed correctly through `Mode::Diff` for
+  this opener (previously the overlay was drawn while the editor
+  stayed in `Mode::Normal`, so scroll keys did the wrong thing).
+
+### Internal
+- Removed the dual-fallback branches (`app.tab().diff.or(app.diff_view)`)
+  in `render.rs:191`, `1141`, `1226`. Removed the six `else if let
+  Some(dv) = &mut app.diff_view` fallbacks in `handle_diff` (`input.rs`
+  scroll/jump keys + Esc + Enter handlers). Removed `App::diff_view`
+  field at `app/mod.rs:668`. 357 tests still pass workspace-wide,
+  zero clippy warnings.
+
 ## [1.2.14] — 2026-04-26
 
 ### Tests
