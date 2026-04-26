@@ -4,6 +4,20 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.11] — 2026-04-26
+
+### Tests
+- **`diff_view` is no longer untested** — added 13 unit tests covering
+  scroll up saturation, scroll down clamping (with and without viewport
+  larger than content), scroll-to-top, scroll-to-bottom, and the LCS
+  diff alignment for pure addition (new file), pure deletion, unchanged
+  text, modification (line replacement), and empty inputs. The pure-add
+  and pure-delete variants in particular guard the v1.2.8 pane-collapse
+  feature: if the diff alignment ever started emitting `Both` lines for
+  a new file, the collapse heuristic would silently break — now caught
+  in CI.
+- 308 tests pass workspace-wide (was 295), zero clippy warnings.
+
 ## [1.2.10] — 2026-04-26
 
 ### Hardened
