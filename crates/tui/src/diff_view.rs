@@ -3,6 +3,16 @@
 pub use crate::git::DiffLine;
 
 /// State for the side-by-side diff view.
+///
+/// Several derived values (the reconstructed `old_text` / `new_text` strings
+/// fed to the syntax highlighter, and the cumulative line-number prefix sum
+/// used to label each visible row) are computed once in [`Self::new`] and
+/// cached. The renderer used to rebuild them on every frame, which was
+/// O(total_lines) per frame even when only the scroll offset changed.
+///
+/// Mutating [`Self::lines`] after construction invalidates the caches and is
+/// not supported. Construct a fresh `DiffView` whenever the diff content
+/// changes.
 pub struct DiffView {
     /// Relative path of the file being diffed.
     pub file_path: String,
@@ -10,16 +20,84 @@ pub struct DiffView {
     pub lines: Vec<DiffLine>,
     /// Current scroll offset (top visible line).
     pub scroll: usize,
+    /// Reconstructed left-side (old) text fed to the syntax highlighter.
+    /// Cached from `lines` at construction.
+    old_text: String,
+    /// Reconstructed right-side (new) text fed to the syntax highlighter.
+    /// Cached from `lines` at construction.
+    new_text: String,
+    /// Cumulative `(old_count, new_count)` prefix sum.
+    /// `cumulative[i]` is the count of old/new lines emitted by the first
+    /// `i` entries of `lines` (so `cumulative[0] == (0, 0)` and
+    /// `cumulative[lines.len()]` is the total). Used to map a scroll
+    /// offset into the line-number gutter and into highlight-array
+    /// indices in O(1) per render.
+    cumulative: Vec<(usize, usize)>,
 }
 
 impl DiffView {
     /// Create a new diff view.
+    ///
+    /// Precomputes the highlighter-input strings and the line-number prefix
+    /// sum so the per-frame render is O(viewport) rather than O(total).
     pub fn new(file_path: String, lines: Vec<DiffLine>) -> Self {
+        let mut old_text = String::new();
+        let mut new_text = String::new();
+        let mut cumulative = Vec::with_capacity(lines.len() + 1);
+        cumulative.push((0, 0));
+        let (mut old_n, mut new_n) = (0usize, 0usize);
+        for line in &lines {
+            match line {
+                DiffLine::Both(l, _) => {
+                    old_text.push_str(l);
+                    old_text.push('\n');
+                    new_text.push_str(l);
+                    new_text.push('\n');
+                    old_n += 1;
+                    new_n += 1;
+                }
+                DiffLine::LeftOnly(l) => {
+                    old_text.push_str(l);
+                    old_text.push('\n');
+                    old_n += 1;
+                }
+                DiffLine::RightOnly(r) => {
+                    new_text.push_str(r);
+                    new_text.push('\n');
+                    new_n += 1;
+                }
+            }
+            cumulative.push((old_n, new_n));
+        }
         Self {
             file_path,
             lines,
             scroll: 0,
+            old_text,
+            new_text,
+            cumulative,
         }
+    }
+
+    /// Reconstructed left-side (old) text, suitable for syntax highlighting.
+    pub fn old_text(&self) -> &str {
+        &self.old_text
+    }
+
+    /// Reconstructed right-side (new) text, suitable for syntax highlighting.
+    pub fn new_text(&self) -> &str {
+        &self.new_text
+    }
+
+    /// Cumulative `(old_count, new_count)` after processing the first
+    /// `line_idx` entries of [`Self::lines`].
+    ///
+    /// `line_numbers_at(0)` is `(0, 0)`. `line_numbers_at(self.lines.len())`
+    /// is the total `(old, new)` count. Out-of-range indices clamp to the
+    /// last valid value.
+    pub fn line_numbers_at(&self, line_idx: usize) -> (usize, usize) {
+        let i = line_idx.min(self.cumulative.len().saturating_sub(1));
+        self.cumulative[i]
     }
 
     /// Scroll up by `n` lines.
@@ -157,6 +235,79 @@ mod tests {
             lines.iter().all(|l| matches!(l, DiffLine::Both(_, _))),
             "unchanged diff should only contain Both lines, got {lines:?}"
         );
+    }
+
+    #[test]
+    fn cached_old_text_concatenates_left_visible_lines() {
+        let lines = vec![
+            DiffLine::Both("a".to_string(), "a".to_string()),
+            DiffLine::LeftOnly("removed".to_string()),
+            DiffLine::RightOnly("added".to_string()),
+            DiffLine::Both("c".to_string(), "c".to_string()),
+        ];
+        let dv = make(lines);
+        // Old side sees: a, removed, c (RightOnly absent).
+        assert_eq!(dv.old_text(), "a\nremoved\nc\n");
+    }
+
+    #[test]
+    fn cached_new_text_concatenates_right_visible_lines() {
+        let lines = vec![
+            DiffLine::Both("a".to_string(), "a".to_string()),
+            DiffLine::LeftOnly("removed".to_string()),
+            DiffLine::RightOnly("added".to_string()),
+            DiffLine::Both("c".to_string(), "c".to_string()),
+        ];
+        let dv = make(lines);
+        // New side sees: a, added, c (LeftOnly absent).
+        assert_eq!(dv.new_text(), "a\nadded\nc\n");
+    }
+
+    #[test]
+    fn line_numbers_at_zero_is_origin() {
+        let dv = make(line_count(10));
+        assert_eq!(dv.line_numbers_at(0), (0, 0));
+    }
+
+    #[test]
+    fn line_numbers_at_end_is_total() {
+        // 5 Both + 3 LeftOnly + 2 RightOnly → total old=8, new=7.
+        let mut lines = Vec::new();
+        for i in 0..5 {
+            lines.push(DiffLine::Both(format!("b{i}"), format!("b{i}")));
+        }
+        for i in 0..3 {
+            lines.push(DiffLine::LeftOnly(format!("l{i}")));
+        }
+        for i in 0..2 {
+            lines.push(DiffLine::RightOnly(format!("r{i}")));
+        }
+        let total = lines.len();
+        let dv = make(lines);
+        assert_eq!(dv.line_numbers_at(total), (8, 7));
+    }
+
+    #[test]
+    fn line_numbers_at_progresses_correctly_per_variant() {
+        let lines = vec![
+            DiffLine::Both("a".to_string(), "a".to_string()), // (1,1)
+            DiffLine::LeftOnly("b".to_string()),              // (2,1)
+            DiffLine::RightOnly("c".to_string()),             // (2,2)
+            DiffLine::Both("d".to_string(), "d".to_string()), // (3,3)
+        ];
+        let dv = make(lines);
+        assert_eq!(dv.line_numbers_at(0), (0, 0));
+        assert_eq!(dv.line_numbers_at(1), (1, 1));
+        assert_eq!(dv.line_numbers_at(2), (2, 1));
+        assert_eq!(dv.line_numbers_at(3), (2, 2));
+        assert_eq!(dv.line_numbers_at(4), (3, 3));
+    }
+
+    #[test]
+    fn line_numbers_at_clamps_oversized_index() {
+        let dv = make(line_count(5));
+        // 5 Both lines → (5, 5) is the last valid value.
+        assert_eq!(dv.line_numbers_at(999), (5, 5));
     }
 
     #[test]

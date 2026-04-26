@@ -4,6 +4,27 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.12] — 2026-04-26
+
+### Performance
+- **Diff view rendering is now O(viewport) instead of O(total)** — the
+  per-frame rebuild of `old_text` / `new_text` (fed to tree-sitter for
+  syntax highlighting) and the two `take(scroll)` loops that counted
+  cumulative line numbers and highlight-array indices have been replaced
+  by caches computed once in `DiffView::new()`. A 100K-line diff scrolled
+  to the bottom previously did 3 × O(100K) scans and one full-string
+  reallocation per render tick; now the renderer reads the cumulative
+  `(old_count, new_count)` prefix sum in O(1) and reuses the cached
+  highlighter input strings. Total per-frame `draw_diff_view` work
+  outside the visible viewport drops to zero.
+
+### Tests
+- Added 6 unit tests for the new `DiffView::old_text` / `new_text` /
+  `line_numbers_at` accessors covering: visible-line concatenation per
+  side; `(0,0)` at index zero; total counts at end; per-variant
+  progression through Both/LeftOnly/RightOnly; clamping for indices
+  past the end. 314 tests pass workspace-wide (was 308).
+
 ## [1.2.11] — 2026-04-26
 
 ### Tests

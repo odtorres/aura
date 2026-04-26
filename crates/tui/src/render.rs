@@ -1229,85 +1229,30 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let scroll = dv.scroll;
-    let mut old_line_no: usize = 0;
-    let mut new_line_no: usize = 0;
-
-    // Count line numbers up to scroll offset.
-    for line in dv.lines.iter().take(scroll) {
-        match line {
-            DiffLine::Both(_, _) => {
-                old_line_no += 1;
-                new_line_no += 1;
-            }
-            DiffLine::LeftOnly(_) => {
-                old_line_no += 1;
-            }
-            DiffLine::RightOnly(_) => {
-                new_line_no += 1;
-            }
-        }
-    }
+    // Cumulative old/new line counts at the scroll offset come from the
+    // prefix sum cached on `DiffView::new`. The line-number gutter and the
+    // highlight-array indices both advance the same way (Both → +1 to each;
+    // LeftOnly → +1 to old; RightOnly → +1 to new), so a single pair
+    // (old_n, new_n) drives both.
+    let (mut old_line_no, mut new_line_no) = dv.line_numbers_at(scroll);
+    let (mut old_hl_idx, mut new_hl_idx) = (old_line_no, new_line_no);
 
     let gutter_width: u16 = 5;
 
-    // Build syntax-highlighted lines for both sides.
+    // Build syntax-highlighted lines for both sides. The reconstructed
+    // old/new text is cached on the DiffView (computed once in new()).
     let ext = dv.file_path.rsplit('.').next().unwrap_or("");
     let mut highlighter = crate::highlight::Language::from_extension(ext)
         .and_then(crate::highlight::SyntaxHighlighter::new);
 
-    // Reconstruct old and new text from diff lines for highlighting.
-    let (old_text, new_text) = {
-        let mut old = String::new();
-        let mut new = String::new();
-        for line in &dv.lines {
-            match line {
-                DiffLine::Both(l, _) => {
-                    old.push_str(l);
-                    old.push('\n');
-                    new.push_str(l);
-                    new.push('\n');
-                }
-                DiffLine::LeftOnly(l) => {
-                    old.push_str(l);
-                    old.push('\n');
-                }
-                DiffLine::RightOnly(r) => {
-                    new.push_str(r);
-                    new.push('\n');
-                }
-            }
-        }
-        (old, new)
-    };
-
     let old_hl = highlighter
         .as_mut()
-        .map(|h| h.highlight(&old_text, Some(&app.theme)))
+        .map(|h| h.highlight(dv.old_text(), Some(&app.theme)))
         .unwrap_or_default();
     let new_hl = highlighter
         .as_mut()
-        .map(|h| h.highlight(&new_text, Some(&app.theme)))
+        .map(|h| h.highlight(dv.new_text(), Some(&app.theme)))
         .unwrap_or_default();
-
-    // Track line indices into highlighted arrays.
-    let mut old_hl_idx: usize = 0;
-    let mut new_hl_idx: usize = 0;
-
-    // Advance highlight indices up to scroll.
-    for line in dv.lines.iter().take(scroll) {
-        match line {
-            DiffLine::Both(_, _) => {
-                old_hl_idx += 1;
-                new_hl_idx += 1;
-            }
-            DiffLine::LeftOnly(_) => {
-                old_hl_idx += 1;
-            }
-            DiffLine::RightOnly(_) => {
-                new_hl_idx += 1;
-            }
-        }
-    }
 
     for (i, diff_line) in dv
         .lines
