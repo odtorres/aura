@@ -4,6 +4,22 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.8] — 2026-04-25
+
+### Changed
+- **Diff view collapses empty pane** — when viewing a pure addition (new file)
+  or pure deletion, the empty side (red for adds, green for deletes) is no
+  longer rendered. The populated pane expands to fill the full width, so half
+  the screen is no longer wasted on a blank gutter.
+
+### Internal
+- Cleared the last clippy warnings from the workspace: replaced
+  `.get(&x).is_none()` with `!contains_key(&x)` in `git.rs` test helpers,
+  reordered the `mod tests` block to follow trailing helpers in `render.rs`,
+  and replaced `.expect(&format!(...))` with `.unwrap_or_else(|| panic!(...))`
+  in `session.rs`. `cargo clippy --workspace --all-targets -- -W clippy::all`
+  is now warning-free.
+
 ## [1.2.7] — 2026-04-17
 
 ### Performance

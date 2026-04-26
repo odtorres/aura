@@ -348,7 +348,7 @@ mod tests {
         ];
         for event in &events {
             let s = format_key_event(event);
-            let parsed = parse_key_event(&s).expect(&format!("Failed to parse: {s}"));
+            let parsed = parse_key_event(&s).unwrap_or_else(|| panic!("Failed to parse: {s}"));
             assert_eq!(parsed.code, event.code, "Code mismatch for {s}");
             assert_eq!(
                 parsed.modifiers, event.modifiers,

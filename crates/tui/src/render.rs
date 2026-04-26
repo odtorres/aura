@@ -1143,14 +1143,38 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
         None => return,
     };
 
-    // Split horizontally: 50/50 for diff panes + 1 column for minimap.
-    let hsplit = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
+    // Detect pure-addition / pure-deletion so we can collapse the empty pane.
+    let has_left = dv
+        .lines
+        .iter()
+        .any(|l| matches!(l, DiffLine::LeftOnly(_) | DiffLine::Both(_, _)));
+    let has_right = dv
+        .lines
+        .iter()
+        .any(|l| matches!(l, DiffLine::RightOnly(_) | DiffLine::Both(_, _)));
+
+    // Split horizontally: panes + 1 column for minimap. Collapse a pane to 0
+    // width when its side has no content (pure addition or pure deletion).
+    let constraints: [Constraint; 3] = match (has_left, has_right) {
+        (true, false) => [
+            Constraint::Min(1),
+            Constraint::Length(0),
+            Constraint::Length(1),
+        ],
+        (false, true) => [
+            Constraint::Length(0),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ],
+        _ => [
             Constraint::Percentage(50),
             Constraint::Percentage(50),
             Constraint::Length(1),
-        ])
+        ],
+    };
+    let hsplit = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
         .split(area);
     let diff_minimap_area = hsplit[2];
 
@@ -1169,10 +1193,18 @@ fn draw_diff_view(frame: &mut Frame, app: &mut App, area: Rect) {
     let left_inner = left_block.inner(hsplit[0]);
     let right_inner = right_block.inner(hsplit[1]);
 
-    frame.render_widget(left_block, hsplit[0]);
-    frame.render_widget(right_block, hsplit[1]);
+    if has_left || !has_right {
+        frame.render_widget(left_block, hsplit[0]);
+    }
+    if has_right || !has_left {
+        frame.render_widget(right_block, hsplit[1]);
+    }
 
-    let viewport_height = left_inner.height as usize;
+    let viewport_height = if has_right {
+        right_inner.height
+    } else {
+        left_inner.height
+    } as usize;
 
     // Update the diff view's scroll clamp with actual viewport height.
     // Check tab-based diff first, then fall back to old overlay.
@@ -8108,50 +8140,6 @@ fn draw_ghost_text(frame: &mut Frame, app: &App, editor_area: Rect, suggestion: 
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn map_line_to_row_basic() {
-        // 100-line file, 10-row minimap.
-        assert_eq!(map_line_to_row(0, 100, 10), Some(0));
-        assert_eq!(map_line_to_row(50, 100, 10), Some(5));
-        assert_eq!(map_line_to_row(99, 100, 10), Some(9));
-    }
-
-    #[test]
-    fn map_line_to_row_small_file_large_minimap() {
-        // 5-line file, 20-row minimap.
-        assert_eq!(map_line_to_row(0, 5, 20), Some(0));
-        assert_eq!(map_line_to_row(1, 5, 20), Some(4));
-        assert_eq!(map_line_to_row(4, 5, 20), Some(16));
-    }
-
-    #[test]
-    fn map_line_to_row_zero_total_lines() {
-        assert_eq!(map_line_to_row(0, 0, 10), None);
-    }
-
-    #[test]
-    fn map_line_to_row_zero_minimap_height() {
-        assert_eq!(map_line_to_row(0, 100, 0), None);
-    }
-
-    #[test]
-    fn map_line_to_row_line_beyond_total_clamped() {
-        // Line 200 in a 100-line file should clamp to the last row.
-        assert_eq!(map_line_to_row(200, 100, 10), Some(9));
-    }
-
-    #[test]
-    fn map_line_to_row_single_line_file() {
-        // 1-line file: line 0 maps to row 0 regardless of minimap height.
-        assert_eq!(map_line_to_row(0, 1, 10), Some(0));
-        assert_eq!(map_line_to_row(0, 1, 1), Some(0));
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Update notification & modal
 // ---------------------------------------------------------------------------
@@ -8358,5 +8346,49 @@ fn draw_which_key_popup(frame: &mut Frame, app: &App, area: Rect) {
         ]);
         let w = col_width.min(inner.width.saturating_sub(col as u16 * col_width));
         frame.render_widget(Paragraph::new(line), Rect::new(x_off, y_off, w, 1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_line_to_row_basic() {
+        // 100-line file, 10-row minimap.
+        assert_eq!(map_line_to_row(0, 100, 10), Some(0));
+        assert_eq!(map_line_to_row(50, 100, 10), Some(5));
+        assert_eq!(map_line_to_row(99, 100, 10), Some(9));
+    }
+
+    #[test]
+    fn map_line_to_row_small_file_large_minimap() {
+        // 5-line file, 20-row minimap.
+        assert_eq!(map_line_to_row(0, 5, 20), Some(0));
+        assert_eq!(map_line_to_row(1, 5, 20), Some(4));
+        assert_eq!(map_line_to_row(4, 5, 20), Some(16));
+    }
+
+    #[test]
+    fn map_line_to_row_zero_total_lines() {
+        assert_eq!(map_line_to_row(0, 0, 10), None);
+    }
+
+    #[test]
+    fn map_line_to_row_zero_minimap_height() {
+        assert_eq!(map_line_to_row(0, 100, 0), None);
+    }
+
+    #[test]
+    fn map_line_to_row_line_beyond_total_clamped() {
+        // Line 200 in a 100-line file should clamp to the last row.
+        assert_eq!(map_line_to_row(200, 100, 10), Some(9));
+    }
+
+    #[test]
+    fn map_line_to_row_single_line_file() {
+        // 1-line file: line 0 maps to row 0 regardless of minimap height.
+        assert_eq!(map_line_to_row(0, 1, 10), Some(0));
+        assert_eq!(map_line_to_row(0, 1, 1), Some(0));
     }
 }

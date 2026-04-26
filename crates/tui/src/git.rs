@@ -1071,8 +1071,8 @@ mod tests {
         let mut status = HashMap::new();
         diff_lines_simple(&old, &new, &mut status);
         assert_eq!(status.get(&1), Some(&LineStatus::Modified));
-        assert!(status.get(&0).is_none());
-        assert!(status.get(&2).is_none());
+        assert!(!status.contains_key(&0));
+        assert!(!status.contains_key(&2));
     }
 
     #[test]
