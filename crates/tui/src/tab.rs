@@ -627,3 +627,194 @@ impl TabManager {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::theme_dark;
+
+    fn make_tab() -> EditorTab {
+        // Buffer::new() has no file path → LSP startup is skipped, semantic
+        // indexer is None (no language detected), highlighter is None. The
+        // tab is cheap to construct and pure for state-machine testing.
+        EditorTab::new(Buffer::new(), None, &theme_dark())
+    }
+
+    fn make_mgr_with(n: usize) -> TabManager {
+        let mut m = TabManager::new(make_tab());
+        for _ in 1..n {
+            m.open(make_tab());
+        }
+        m
+    }
+
+    #[test]
+    fn new_starts_with_one_active_tab() {
+        let m = TabManager::new(make_tab());
+        assert_eq!(m.count(), 1);
+        assert_eq!(m.active_index(), 0);
+    }
+
+    #[test]
+    fn open_appends_and_activates() {
+        let mut m = TabManager::new(make_tab());
+        m.open(make_tab());
+        assert_eq!(m.count(), 2);
+        assert_eq!(m.active_index(), 1);
+    }
+
+    #[test]
+    fn next_wraps_around() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(0);
+        m.next();
+        assert_eq!(m.active_index(), 1);
+        m.next();
+        assert_eq!(m.active_index(), 2);
+        m.next();
+        assert_eq!(m.active_index(), 0);
+    }
+
+    #[test]
+    fn prev_wraps_around() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(0);
+        m.prev();
+        assert_eq!(m.active_index(), 2);
+        m.prev();
+        assert_eq!(m.active_index(), 1);
+    }
+
+    #[test]
+    fn next_and_prev_are_no_ops_with_single_tab() {
+        let mut m = TabManager::new(make_tab());
+        m.next();
+        assert_eq!(m.active_index(), 0);
+        m.prev();
+        assert_eq!(m.active_index(), 0);
+    }
+
+    #[test]
+    fn switch_to_out_of_bounds_is_ignored() {
+        let mut m = make_mgr_with(2);
+        m.switch_to(99);
+        assert_eq!(m.active_index(), 1);
+    }
+
+    #[test]
+    fn close_returns_none_for_last_tab() {
+        let mut m = TabManager::new(make_tab());
+        assert!(m.close(0).is_none());
+        assert_eq!(m.count(), 1);
+    }
+
+    #[test]
+    fn close_removes_and_keeps_active_in_bounds() {
+        let mut m = make_mgr_with(3);
+        // active = 2 (last). Close index 0 → active should shift to 1.
+        m.close(0);
+        assert_eq!(m.count(), 2);
+        assert_eq!(m.active_index(), 1);
+    }
+
+    #[test]
+    fn close_active_drops_active_and_clamps() {
+        let mut m = make_mgr_with(3);
+        // active = 2. close_active removes it → active should be 1 (the new last).
+        m.close_active();
+        assert_eq!(m.count(), 2);
+        assert_eq!(m.active_index(), 1);
+    }
+
+    #[test]
+    fn close_left_of_active_decrements_active() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(2);
+        m.close(0);
+        assert_eq!(m.active_index(), 1, "active should follow its content");
+    }
+
+    #[test]
+    fn close_right_of_active_keeps_active_index() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(0);
+        m.close(2);
+        assert_eq!(m.active_index(), 0);
+    }
+
+    #[test]
+    fn move_tab_to_beginning() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(2);
+        m.move_tab(0);
+        assert_eq!(m.active_index(), 0, "active follows the moved tab");
+    }
+
+    #[test]
+    fn move_tab_no_op_when_same_index() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(1);
+        m.move_tab(1);
+        assert_eq!(m.active_index(), 1);
+        assert_eq!(m.count(), 3);
+    }
+
+    #[test]
+    fn move_tab_left_at_position_zero_is_no_op() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(0);
+        m.move_tab_left();
+        assert_eq!(m.active_index(), 0);
+    }
+
+    #[test]
+    fn move_tab_right_at_last_position_is_no_op() {
+        let mut m = make_mgr_with(3);
+        m.switch_to(2);
+        m.move_tab_right();
+        assert_eq!(m.active_index(), 2);
+    }
+
+    #[test]
+    fn move_tab_to_drag_active_forward() {
+        // Start: tabs [0, 1, 2], active = 0. Drag 0 → 2. Active should be 2.
+        let mut m = make_mgr_with(3);
+        m.switch_to(0);
+        m.move_tab_to(0, 2);
+        assert_eq!(m.active_index(), 2);
+    }
+
+    #[test]
+    fn move_tab_to_drag_passing_active_shifts_active() {
+        // Start: tabs [0, 1, 2], active = 1.
+        // Drag tab from 0 to 2 (right of active) — active was at 1 with
+        // tab[0] to its left; after removal active item is at 0, then
+        // insert at 2 means active is unchanged at 0.
+        let mut m = make_mgr_with(3);
+        m.switch_to(1);
+        m.move_tab_to(0, 2);
+        // The tab originally at position 1 (active) is now at position 0.
+        assert_eq!(m.active_index(), 0);
+    }
+
+    #[test]
+    fn find_by_path_returns_none_for_unsaved_buffers() {
+        // None of the tabs have a file path, so no canonical path matches.
+        let m = make_mgr_with(3);
+        let p = std::path::Path::new("/nonexistent/file.rs");
+        assert_eq!(m.find_by_path(p), None);
+    }
+
+    #[test]
+    fn editor_tab_new_buffer_is_unmodified() {
+        let tab = make_tab();
+        assert!(!tab.is_modified());
+    }
+
+    #[test]
+    fn editor_tab_title_for_new_buffer_is_untitled() {
+        let tab = make_tab();
+        // Untitled buffer → title is "[No Name]" or similar non-empty placeholder.
+        assert!(!tab.title().is_empty());
+    }
+}

@@ -4,6 +4,27 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.13] — 2026-04-26
+
+### Tests
+- **`tab` module is no longer untested** — 20 unit tests for `TabManager`
+  cover open/close/switch/next/prev navigation (incl. wrap-around with
+  single tab as a no-op), `switch_to` out-of-bounds clamping, close behavior
+  for the last remaining tab (returns None), close index updates when the
+  removed tab is to the left, right, or equal to the active index, and
+  the drag-to-reorder paths (`move_tab`, `move_tab_to`, `move_tab_left`,
+  `move_tab_right`).
+- **`source_control` module is no longer untested** — 16 unit tests for
+  `SourceControlPanel` cover initial state, `select_up`/`down` clamping
+  in each section, full forward and backward `next_section` cycle (with
+  `selected` reset on transition), `selected_path`/`selected_entry`
+  routing per focused section (returns None for CommitMessage and
+  Stashes which have no file selection), `selected_stash` cross-section
+  guarding, empty-section navigation no-op, `pending_discard` state
+  transitions, and the porcelain status-char mapper (incl. unknown-char
+  fallback rationale).
+- 350 tests pass workspace-wide (was 314), zero clippy warnings.
+
 ## [1.2.12] — 2026-04-26
 
 ### Performance

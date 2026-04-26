@@ -399,3 +399,196 @@ fn char_to_status(c: char) -> GitFileStatus {
         _ => GitFileStatus::Modified,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(rel: &str, status: GitFileStatus) -> GitFileEntry {
+        let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
+        GitFileEntry {
+            rel_path: rel.to_string(),
+            name,
+            status,
+        }
+    }
+
+    fn populated() -> SourceControlPanel {
+        let mut p = SourceControlPanel::new(40);
+        p.changed.push(entry("src/a.rs", GitFileStatus::Modified));
+        p.changed.push(entry("src/b.rs", GitFileStatus::Untracked));
+        p.changed.push(entry("README.md", GitFileStatus::Modified));
+        p.staged.push(entry("src/c.rs", GitFileStatus::Added));
+        p.staged.push(entry("src/d.rs", GitFileStatus::Modified));
+        p.merge_changes
+            .push(entry("Cargo.toml", GitFileStatus::Conflict));
+        p.stashes.push(StashEntry {
+            name: "stash@{0}".to_string(),
+            message: "WIP on main".to_string(),
+        });
+        p
+    }
+
+    #[test]
+    fn new_starts_focused_on_changed_files_with_zero_selected() {
+        let p = SourceControlPanel::new(40);
+        assert_eq!(p.focused_section, GitPanelSection::ChangedFiles);
+        assert_eq!(p.selected, 0);
+    }
+
+    #[test]
+    fn select_down_clamps_at_section_max() {
+        let mut p = populated(); // ChangedFiles has 3 items.
+        p.select_down();
+        p.select_down();
+        p.select_down();
+        // Already at last item (index 2); this is a no-op.
+        p.select_down();
+        assert_eq!(p.selected, 2);
+    }
+
+    #[test]
+    fn select_up_saturates_at_zero() {
+        let mut p = populated();
+        p.selected = 1;
+        p.select_up();
+        p.select_up();
+        p.select_up();
+        assert_eq!(p.selected, 0);
+    }
+
+    #[test]
+    fn next_section_cycles_through_all_five_and_resets_selected() {
+        let mut p = populated();
+        // Start: ChangedFiles, selected = 2.
+        p.selected = 2;
+        // ChangedFiles → Stashes
+        p.next_section();
+        assert_eq!(p.focused_section, GitPanelSection::Stashes);
+        assert_eq!(p.selected, 0);
+        // Stashes → CommitMessage
+        p.next_section();
+        assert_eq!(p.focused_section, GitPanelSection::CommitMessage);
+        // CommitMessage → MergeChanges
+        p.next_section();
+        assert_eq!(p.focused_section, GitPanelSection::MergeChanges);
+        // MergeChanges → StagedFiles
+        p.next_section();
+        assert_eq!(p.focused_section, GitPanelSection::StagedFiles);
+        // StagedFiles → ChangedFiles (full cycle)
+        p.next_section();
+        assert_eq!(p.focused_section, GitPanelSection::ChangedFiles);
+    }
+
+    #[test]
+    fn prev_section_is_inverse_of_next_section() {
+        let mut p = SourceControlPanel::new(40);
+        let order = [
+            GitPanelSection::ChangedFiles,
+            GitPanelSection::Stashes,
+            GitPanelSection::CommitMessage,
+            GitPanelSection::MergeChanges,
+            GitPanelSection::StagedFiles,
+        ];
+        for &expected in &order {
+            assert_eq!(p.focused_section, expected);
+            p.next_section();
+        }
+        // Back to ChangedFiles.
+        assert_eq!(p.focused_section, GitPanelSection::ChangedFiles);
+
+        // Now reverse: prev_section should walk the order backward.
+        for &expected in order.iter().rev() {
+            p.prev_section();
+            assert_eq!(p.focused_section, expected);
+        }
+    }
+
+    #[test]
+    fn selected_path_returns_path_for_changed_files() {
+        let p = populated();
+        assert_eq!(p.selected_path(), Some("src/a.rs"));
+    }
+
+    #[test]
+    fn selected_path_returns_path_for_staged_files() {
+        let mut p = populated();
+        p.focused_section = GitPanelSection::StagedFiles;
+        assert_eq!(p.selected_path(), Some("src/c.rs"));
+    }
+
+    #[test]
+    fn selected_path_returns_path_for_merge_changes() {
+        let mut p = populated();
+        p.focused_section = GitPanelSection::MergeChanges;
+        assert_eq!(p.selected_path(), Some("Cargo.toml"));
+    }
+
+    #[test]
+    fn selected_path_returns_none_for_commit_message_section() {
+        let mut p = populated();
+        p.focused_section = GitPanelSection::CommitMessage;
+        assert_eq!(p.selected_path(), None);
+    }
+
+    #[test]
+    fn selected_path_returns_none_for_stashes_section() {
+        let mut p = populated();
+        p.focused_section = GitPanelSection::Stashes;
+        assert_eq!(p.selected_path(), None);
+    }
+
+    #[test]
+    fn selected_entry_matches_selected_path() {
+        let p = populated();
+        let e = p.selected_entry().expect("entry expected");
+        assert_eq!(e.rel_path, "src/a.rs");
+        assert_eq!(e.status, GitFileStatus::Modified);
+    }
+
+    #[test]
+    fn selected_stash_returns_only_in_stashes_section() {
+        let mut p = populated();
+        // Wrong section first.
+        assert!(p.selected_stash().is_none());
+        p.focused_section = GitPanelSection::Stashes;
+        assert_eq!(
+            p.selected_stash().map(|s| s.name.as_str()),
+            Some("stash@{0}")
+        );
+    }
+
+    #[test]
+    fn select_down_in_empty_section_is_no_op() {
+        let mut p = SourceControlPanel::new(40);
+        p.focused_section = GitPanelSection::Stashes; // empty
+        p.select_down();
+        assert_eq!(p.selected, 0);
+    }
+
+    #[test]
+    fn pending_discard_state_is_settable_and_takeable() {
+        let mut p = SourceControlPanel::new(40);
+        assert!(p.pending_discard.is_none());
+        p.pending_discard = Some("src/a.rs".to_string());
+        assert_eq!(p.pending_discard.take(), Some("src/a.rs".to_string()));
+        assert!(p.pending_discard.is_none());
+    }
+
+    #[test]
+    fn char_to_status_maps_known_chars() {
+        assert_eq!(char_to_status('M'), GitFileStatus::Modified);
+        assert_eq!(char_to_status('A'), GitFileStatus::Added);
+        assert_eq!(char_to_status('D'), GitFileStatus::Deleted);
+        assert_eq!(char_to_status('R'), GitFileStatus::Renamed);
+        assert_eq!(char_to_status('?'), GitFileStatus::Untracked);
+    }
+
+    #[test]
+    fn char_to_status_falls_back_to_modified_for_unknown() {
+        // The unknown-char fallback exists so unrecognised statuses don't drop
+        // entries entirely; we surface them as Modified rather than panic.
+        assert_eq!(char_to_status('X'), GitFileStatus::Modified);
+        assert_eq!(char_to_status(' '), GitFileStatus::Modified);
+    }
+}
