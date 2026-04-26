@@ -4944,23 +4944,47 @@ fn execute_command(app: &mut App, cmd: &str) {
                 path.to_string()
             };
             let mut md = String::from("# AURA Chat Export\n\n");
-            for msg in &app.chat_panel.messages {
-                let role = match msg.role {
-                    crate::chat_panel::ChatRole::User => "**You**",
-                    crate::chat_panel::ChatRole::Assistant => "**AURA AI**",
-                    crate::chat_panel::ChatRole::System => "**System**",
+            let items = &app.chat_panel.items;
+            for item in items {
+                let (role_label, content, timestamp) = match item {
+                    crate::chat_panel::ChatItem::Text {
+                        role,
+                        content,
+                        timestamp,
+                    } => {
+                        let label = match role {
+                            crate::chat_panel::ChatRole::User => "**You**",
+                            crate::chat_panel::ChatRole::Assistant => "**AURA AI**",
+                            crate::chat_panel::ChatRole::System => "**System**",
+                        };
+                        (label, content.clone(), timestamp.clone())
+                    }
+                    crate::chat_panel::ChatItem::ToolCall {
+                        name,
+                        result,
+                        timestamp,
+                        ..
+                    } => {
+                        let summary = match result {
+                            Some(r) if r.len() > 200 => format!("{}…", &r[..200]),
+                            Some(r) => r.clone(),
+                            None => "(pending)".to_string(),
+                        };
+                        (
+                            "**Tool**",
+                            format!("[{name}] → {summary}"),
+                            timestamp.clone(),
+                        )
+                    }
                 };
                 md.push_str(&format!(
-                    "### {} ({})\n\n{}\n\n---\n\n",
-                    role, msg.timestamp, msg.content
+                    "### {role_label} ({timestamp})\n\n{content}\n\n---\n\n"
                 ));
             }
             match std::fs::write(&output_path, &md) {
-                Ok(()) => app.set_status(format!(
-                    "Exported {} messages to {}",
-                    app.chat_panel.messages.len(),
-                    output_path
-                )),
+                Ok(()) => {
+                    app.set_status(format!("Exported {} items to {}", items.len(), output_path))
+                }
                 Err(e) => app.set_status(format!("Export failed: {e}")),
             }
         }

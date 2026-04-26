@@ -72,17 +72,6 @@ impl ChatItem {
     }
 }
 
-/// A single message in the chat panel (legacy, kept for compatibility).
-#[derive(Debug, Clone)]
-pub struct ChatMessage {
-    /// Who sent this message.
-    pub role: ChatRole,
-    /// The message text.
-    pub content: String,
-    /// Display timestamp.
-    pub timestamp: String,
-}
-
 /// An @-mention autocomplete item.
 #[derive(Debug, Clone)]
 pub enum MentionItem {
@@ -144,8 +133,6 @@ pub struct ChatPanel {
     pub width: u16,
     /// Display items (rendered in the panel).
     pub items: Vec<ChatItem>,
-    /// Legacy display messages (for rendering compatibility).
-    pub messages: Vec<ChatMessage>,
     /// Scroll offset for the message area.
     pub scroll: usize,
     /// Current user input text.
@@ -191,7 +178,6 @@ impl ChatPanel {
             visible: false,
             width,
             items: Vec::new(),
-            messages: Vec::new(),
             scroll: 0,
             input: String::new(),
             input_cursor: 0,
@@ -262,16 +248,10 @@ impl ChatPanel {
 
     /// Push a user message to the display and context history.
     pub fn push_user_message(&mut self, text: &str) {
-        let timestamp = simple_timestamp();
         self.items.push(ChatItem::Text {
             role: ChatRole::User,
             content: text.to_string(),
-            timestamp: timestamp.clone(),
-        });
-        self.messages.push(ChatMessage {
-            role: ChatRole::User,
-            content: text.to_string(),
-            timestamp,
+            timestamp: simple_timestamp(),
         });
         self.context_messages.push(Message::text("user", text));
         self.trim_context();
@@ -290,21 +270,15 @@ impl ChatPanel {
         self.scroll_to_bottom();
     }
 
-    /// Finalize the streaming response and add it to messages.
+    /// Finalize the streaming response and add it to the items list.
     pub fn finish_streaming(&mut self) {
         self.streaming = false;
         let text = std::mem::take(&mut self.streaming_text);
         if !text.is_empty() {
-            let timestamp = simple_timestamp();
             self.items.push(ChatItem::Text {
                 role: ChatRole::Assistant,
                 content: text.clone(),
-                timestamp: timestamp.clone(),
-            });
-            self.messages.push(ChatMessage {
-                role: ChatRole::Assistant,
-                content: text.clone(),
-                timestamp,
+                timestamp: simple_timestamp(),
             });
             self.context_messages
                 .push(Message::text("assistant", &text));
@@ -321,16 +295,10 @@ impl ChatPanel {
         self.streaming = false;
         let text = std::mem::take(&mut self.streaming_text);
         if !text.is_empty() {
-            let timestamp = simple_timestamp();
             self.items.push(ChatItem::Text {
                 role: ChatRole::Assistant,
-                content: text.clone(),
-                timestamp: timestamp.clone(),
-            });
-            self.messages.push(ChatMessage {
-                role: ChatRole::Assistant,
                 content: text,
-                timestamp,
+                timestamp: simple_timestamp(),
             });
         }
         self.scroll_to_bottom();
@@ -344,7 +312,6 @@ impl ChatPanel {
         input: serde_json::Value,
         status: ToolCallStatus,
     ) -> usize {
-        let timestamp = simple_timestamp();
         let idx = self.items.len();
         self.items.push(ChatItem::ToolCall {
             id: id.to_string(),
@@ -352,12 +319,6 @@ impl ChatPanel {
             input,
             status,
             result: None,
-            timestamp,
-        });
-        // Also add to legacy messages for rendering.
-        self.messages.push(ChatMessage {
-            role: ChatRole::System,
-            content: format!("[Tool: {}]", name),
             timestamp: simple_timestamp(),
         });
         self.scroll_to_bottom();
@@ -379,7 +340,6 @@ impl ChatPanel {
         if let Some(ChatItem::ToolCall {
             status: ref mut s,
             result: ref mut r,
-            name,
             ..
         }) = self.items.get_mut(idx)
         {
@@ -387,16 +347,7 @@ impl ChatPanel {
             if success {
                 *s = ToolCallStatus::Completed;
             } else {
-                *s = ToolCallStatus::Failed(result.clone());
-            }
-            // Update the legacy message to show result summary.
-            let summary = if result.len() > 100 {
-                format!("{}...", &result[..100])
-            } else {
-                result
-            };
-            if let Some(msg) = self.messages.last_mut() {
-                msg.content = format!("[Tool: {} → {}]", name, summary);
+                *s = ToolCallStatus::Failed(result);
             }
         }
     }
@@ -422,11 +373,6 @@ impl ChatPanel {
     /// Add a system/error message.
     pub fn push_system_message(&mut self, text: &str) {
         self.items.push(ChatItem::Text {
-            role: ChatRole::System,
-            content: text.to_string(),
-            timestamp: simple_timestamp(),
-        });
-        self.messages.push(ChatMessage {
             role: ChatRole::System,
             content: text.to_string(),
             timestamp: simple_timestamp(),
@@ -566,7 +512,6 @@ impl ChatPanel {
     /// Clear all messages and reset conversation.
     pub fn clear(&mut self) {
         self.items.clear();
-        self.messages.clear();
         self.context_messages.clear();
         self.conversation_id = None;
         self.scroll = 0;
@@ -748,7 +693,7 @@ impl ChatPanel {
     pub fn load_conversation(&mut self, store: &ConversationStore, conv_id: &str) {
         match store.messages_for_conversation(conv_id) {
             Ok(msgs) => {
-                self.messages.clear();
+                self.items.clear();
                 self.context_messages.clear();
 
                 // If there's a summary, prepend it as system context so the AI
@@ -777,7 +722,7 @@ impl ChatPanel {
                         MessageRole::AiResponse => (ChatRole::Assistant, "assistant"),
                         MessageRole::System => (ChatRole::System, "system"),
                     };
-                    self.messages.push(ChatMessage {
+                    self.items.push(ChatItem::Text {
                         role,
                         content: msg.content.clone(),
                         timestamp: msg.created_at.clone(),
@@ -847,7 +792,7 @@ mod tests {
         let panel = ChatPanel::new(40);
         assert!(!panel.visible);
         assert_eq!(panel.width, 40);
-        assert!(panel.messages.is_empty());
+        assert!(panel.items.is_empty());
         assert!(panel.input.is_empty());
     }
 
@@ -865,9 +810,14 @@ mod tests {
     fn test_push_user_message() {
         let mut panel = ChatPanel::new(40);
         panel.push_user_message("hello");
-        assert_eq!(panel.messages.len(), 1);
-        assert_eq!(panel.messages[0].role, ChatRole::User);
-        assert_eq!(panel.messages[0].content, "hello");
+        assert_eq!(panel.items.len(), 1);
+        match &panel.items[0] {
+            ChatItem::Text { role, content, .. } => {
+                assert_eq!(*role, ChatRole::User);
+                assert_eq!(content, "hello");
+            }
+            _ => panic!("expected Text item"),
+        }
         assert_eq!(panel.context_messages.len(), 1);
         assert_eq!(panel.context_messages[0].role, "user");
     }
@@ -883,9 +833,14 @@ mod tests {
         panel.finish_streaming();
         assert!(!panel.streaming);
         assert!(panel.streaming_text.is_empty());
-        assert_eq!(panel.messages.len(), 1);
-        assert_eq!(panel.messages[0].role, ChatRole::Assistant);
-        assert_eq!(panel.messages[0].content, "Hello world");
+        assert_eq!(panel.items.len(), 1);
+        match &panel.items[0] {
+            ChatItem::Text { role, content, .. } => {
+                assert_eq!(*role, ChatRole::Assistant);
+                assert_eq!(content, "Hello world");
+            }
+            _ => panic!("expected Text item"),
+        }
         assert_eq!(panel.context_messages.len(), 1);
         assert_eq!(panel.context_messages[0].role, "assistant");
     }
@@ -934,7 +889,7 @@ mod tests {
         panel.push_user_message("hello");
         panel.conversation_id = Some("test-id".to_string());
         panel.clear();
-        assert!(panel.messages.is_empty());
+        assert!(panel.items.is_empty());
         assert!(panel.context_messages.is_empty());
         assert!(panel.conversation_id.is_none());
     }
@@ -980,8 +935,11 @@ mod tests {
     fn test_system_message() {
         let mut panel = ChatPanel::new(40);
         panel.push_system_message("Error occurred");
-        assert_eq!(panel.messages.len(), 1);
-        assert_eq!(panel.messages[0].role, ChatRole::System);
+        assert_eq!(panel.items.len(), 1);
+        match &panel.items[0] {
+            ChatItem::Text { role, .. } => assert_eq!(*role, ChatRole::System),
+            _ => panic!("expected Text item"),
+        }
     }
 
     #[test]
@@ -999,7 +957,7 @@ mod tests {
 
         let mut panel = ChatPanel::new(40);
         panel.load_conversation(&store, &conv.id);
-        assert_eq!(panel.messages.len(), 2);
+        assert_eq!(panel.items.len(), 2);
         assert_eq!(panel.context_messages.len(), 2);
         assert_eq!(panel.conversation_id.as_deref(), Some(conv.id.as_str()));
     }

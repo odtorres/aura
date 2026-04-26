@@ -4,6 +4,24 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.17] — 2026-04-26
+
+### Changed
+- **Chat panel: single source of truth for messages** — the legacy
+  `Vec<ChatMessage>` array that mirrored the richer `Vec<ChatItem>`
+  list ("legacy, kept for compatibility") is gone. Every chat
+  consumer (the panel renderer, the `:export` markdown writer, the
+  conversation-store loader, the streaming finalisation, the system
+  message pusher, the tool-call adder/resulter) now reads from and
+  writes to `items` only. The `:export` writer pattern-matches on
+  `ChatItem::Text` vs `ChatItem::ToolCall` to emit a richer markdown
+  with tool-call summaries that the legacy path threw away.
+
+### Internal
+- Removed the `ChatMessage` struct and the `ChatPanel.messages`
+  field; updated 5 chat-panel unit tests to match against
+  `ChatItem::Text { role, content, .. }` patterns.
+
 ## [1.2.16] — 2026-04-26
 
 ### Internal
