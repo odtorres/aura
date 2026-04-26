@@ -349,3 +349,122 @@ mod tests {
         assert_eq!(doc.text().unwrap(), "original modified");
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::author::AuthorId;
+    use proptest::prelude::*;
+
+    /// Drive `a` and `b` to convergence by exchanging sync messages until
+    /// both ends report nothing more to send. Returns once the protocol
+    /// is quiescent or after a generous step bound to keep the test fast
+    /// even on a degenerate input.
+    fn sync_until_quiescent(a: &mut CrdtDoc, b: &mut CrdtDoc) {
+        let mut state_a = crate::sync::SyncState::new();
+        let mut state_b = crate::sync::SyncState::new();
+        for _ in 0..256 {
+            let msg_a = a.generate_sync_message(&mut state_a);
+            let msg_b = b.generate_sync_message(&mut state_b);
+            let mut moved = false;
+            if let Some(m) = msg_a {
+                b.receive_sync_message(&mut state_b, m).unwrap();
+                moved = true;
+            }
+            if let Some(m) = msg_b {
+                a.receive_sync_message(&mut state_a, m).unwrap();
+                moved = true;
+            }
+            if !moved {
+                break;
+            }
+        }
+    }
+
+    proptest! {
+        /// Random splice sequences against a single CrdtDoc must never
+        /// produce an Err from `text()` and must produce a valid UTF-8
+        /// String. This guards against any internal state corruption
+        /// in the rope/automerge interaction layer.
+        #[test]
+        fn random_splices_keep_text_readable(
+            ops in proptest::collection::vec(
+                (0..100usize, 0..20usize, "[a-zA-Z0-9 \n]{0,8}"),
+                1..40
+            )
+        ) {
+            let mut doc = CrdtDoc::new().unwrap();
+            for (pos, del, insert) in &ops {
+                // text-position-clamp here mirrors what the buffer layer does
+                // before calling into the CRDT — automerge's splice_text
+                // requires pos + del <= len.
+                let len = doc.text().unwrap().chars().count();
+                let pos = (*pos).min(len);
+                let del = (*del).min(len.saturating_sub(pos));
+                doc.splice(pos, del, insert, &AuthorId::human()).unwrap();
+            }
+            // Read must succeed and round-trip through `Text` cleanly.
+            let text = doc.text().unwrap();
+            prop_assert!(text.chars().count() <= 100_000);
+        }
+
+        /// Two CrdtDoc instances editing independently and then syncing
+        /// must converge to the same text. The exact text is determined
+        /// by the CRDT's conflict-resolution rules, but both sides
+        /// must agree once the protocol is quiescent.
+        #[test]
+        fn two_peers_converge_after_sync(
+            ops_a in proptest::collection::vec(
+                (0..30usize, "[a-zA-Z]{1,5}"),
+                1..10
+            ),
+            ops_b in proptest::collection::vec(
+                (0..30usize, "[a-zA-Z]{1,5}"),
+                1..10
+            )
+        ) {
+            // Both peers fork from the same shared base so they share history.
+            let mut shared = CrdtDoc::with_text("base").unwrap();
+            let mut a = shared.fork();
+            let mut b = shared.fork();
+            // First, sync the empty fork so both sides know the base.
+            sync_until_quiescent(&mut a, &mut b);
+
+            // Each peer makes independent edits.
+            for (pos, ins) in &ops_a {
+                let len = a.text().unwrap().chars().count();
+                let pos = (*pos).min(len);
+                a.splice(pos, 0, ins, &AuthorId::peer("alice", 1)).unwrap();
+            }
+            for (pos, ins) in &ops_b {
+                let len = b.text().unwrap().chars().count();
+                let pos = (*pos).min(len);
+                b.splice(pos, 0, ins, &AuthorId::peer("bob", 2)).unwrap();
+            }
+
+            // Sync to convergence.
+            sync_until_quiescent(&mut a, &mut b);
+
+            prop_assert_eq!(a.text().unwrap(), b.text().unwrap());
+        }
+
+        /// `save_bytes` then `load_bytes` must preserve the text exactly.
+        #[test]
+        fn save_load_roundtrip_preserves_text(
+            ops in proptest::collection::vec(
+                (0..30usize, "[a-zA-Z0-9 ]{1,10}"),
+                1..20
+            )
+        ) {
+            let mut doc = CrdtDoc::new().unwrap();
+            for (pos, ins) in &ops {
+                let len = doc.text().unwrap().chars().count();
+                let pos = (*pos).min(len);
+                doc.splice(pos, 0, ins, &AuthorId::human()).unwrap();
+            }
+            let bytes = doc.save_bytes();
+            let loaded = CrdtDoc::load_bytes(&bytes).unwrap();
+            prop_assert_eq!(doc.text().unwrap(), loaded.text().unwrap());
+        }
+    }
+}

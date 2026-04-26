@@ -4,6 +4,29 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.14] — 2026-04-26
+
+### Tests
+- **CRDT property tests** — `core/src/crdt.rs` now has a `proptest`
+  block with three properties: random splice sequences against a
+  single `CrdtDoc` keep `text()` readable; two peers editing
+  independently and exchanging sync messages converge to the same
+  text (the heart of the multi-author guarantee); `save_bytes` /
+  `load_bytes` round-trip preserves text exactly. The convergence
+  test forks two peers from a shared base, runs ~10 random edits on
+  each, then drives the sync loop until quiescent and asserts both
+  sides agree.
+- **Integration test scaffold** — new `crates/tui/tests/integration.rs`
+  with four end-to-end tests covering: a tab starts unmodified with a
+  non-empty title; buffer insert + text round-trips through the
+  rope and marks the tab modified; undo returns the buffer to the
+  original empty state; `App::new` constructs successfully on a
+  fresh in-memory buffer (smoke test for the full config load /
+  conversation store / MCP / AI client wiring path that runs once
+  at editor startup).
+- 357 tests pass workspace-wide (was 350, +3 proptests in core,
+  +4 integration in tui), zero clippy warnings.
+
 ## [1.2.13] — 2026-04-26
 
 ### Tests
