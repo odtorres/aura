@@ -1712,6 +1712,22 @@ impl App {
                             ) {
                                 self.tab_mut().visual_anchor = None;
                             }
+                            // Auto-copy a non-empty terminal selection to the
+                            // clipboard on mouse-up. The selection itself is
+                            // kept visible so the user can see what was copied.
+                            // A bare click (anchor == end) leaves the selection
+                            // zero-width and is a no-op here.
+                            if self.terminal().visible
+                                && self.terminal().selection_anchor.is_some()
+                                && self.terminal().selection_anchor != self.terminal().selection_end
+                            {
+                                if let Some(text) = self.terminal().selected_text() {
+                                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                                        let _ = cb.set_text(&text);
+                                        self.set_status("Copied from terminal");
+                                    }
+                                }
+                            }
                         }
                         MouseEventKind::ScrollUp => {
                             self.handle_mouse_scroll(mouse.column, mouse.row, true);
@@ -7105,6 +7121,12 @@ impl App {
             if self.click_terminal_link(term_row, term_col) {
                 return;
             }
+            // Click anywhere in the terminal clears any prior selection and
+            // starts a new one at the click position. Subsequent Drag events
+            // extend it; Mouse Up auto-copies if the selection has any width.
+            let term = self.terminal_mut();
+            term.clear_selection();
+            term.start_selection(term_row, term_col);
             self.terminal_focused = true;
             self.file_tree_focused = false;
             self.source_control_focused = false;
@@ -7580,6 +7602,25 @@ impl App {
                 }
             }
             return;
+        }
+
+        // Drag inside the terminal pane extends the terminal selection.
+        if self.terminal().visible {
+            let tr = self.terminal_rect;
+            let in_terminal = tr.width > 0
+                && tr.height > 0
+                && col >= tr.x
+                && col < tr.x + tr.width
+                && row >= tr.y
+                && row < tr.y + tr.height;
+            if in_terminal {
+                let inner_x = tr.x + 1;
+                let inner_y = tr.y + 1;
+                let term_row = (row.saturating_sub(inner_y)) as usize;
+                let term_col = (col.saturating_sub(inner_x)) as usize;
+                self.terminal_mut().extend_selection(term_row, term_col);
+                return;
+            }
         }
 
         // Only start/extend selection if the drag is within the editor area.

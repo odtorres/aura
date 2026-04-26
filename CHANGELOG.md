@@ -4,6 +4,20 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.9] — 2026-04-26
+
+### Added
+- **Mouse select-and-copy in the embedded terminal** — clicking inside the
+  terminal pane and dragging now selects text cell-by-cell. Releasing the
+  mouse with a real (non-empty) selection auto-copies the text to the system
+  clipboard and shows "Copied from terminal" in the status bar; the
+  selection stays visible so you can see what was copied. A bare click
+  without a drag is still just focus + link-detection — no clipboard
+  side effect. Useful when running inside terminals (Warp, iTerm2) that
+  intercept Cmd+C for their own clipboard and never forward it to Aura.
+  Existing keyboard paths (`Ctrl+Shift+C`, `Ctrl+Shift+V`, Shift+Arrows)
+  are unchanged.
+
 ## [1.2.8] — 2026-04-25
 
 ### Changed
