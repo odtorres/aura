@@ -1,3 +1,9 @@
+// `unwatch` is exposed for shutdown / dynamic tear-down but the editor
+// currently relies on dropping the FileWatcher to detach all paths at
+// once — we keep the per-path API for tests and future "stop watching
+// this dir" code paths.
+#![allow(dead_code)]
+
 //! Filesystem watcher that replaces the editor's 2 s mtime polling loop.
 //!
 //! The watcher runs in its own OS thread (via `notify`) and delivers change

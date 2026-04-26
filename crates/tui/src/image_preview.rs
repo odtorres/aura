@@ -1,3 +1,8 @@
+// `ImageInfo.path` is populated for diagnostics and future "preview a
+// different image" lookup but not currently read after construction.
+// Keep at module scope so the field stays adjacent to its derive(Debug).
+#![allow(dead_code)]
+
 //! Image preview in the terminal using the Kitty graphics protocol.
 //!
 //! When an image file (PNG, JPG, GIF, SVG, WebP) is opened, AURA renders

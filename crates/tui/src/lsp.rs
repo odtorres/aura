@@ -1,3 +1,9 @@
+// LSP protocol surface includes constants and types defined by the spec
+// that we declare for completeness even if we don't yet pass them all
+// through to consumers (e.g. `SEMANTIC_TOKEN_TYPES` is the reference
+// list from the LSP spec; the editor announces a subset).
+#![allow(dead_code)]
+
 //! Lightweight LSP client over JSON-RPC / stdio.
 //!
 //! Spawns a language server as a child process and communicates via

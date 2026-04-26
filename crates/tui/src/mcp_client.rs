@@ -1,3 +1,10 @@
+// The full MCP client API (`call_tool`, `send_initialized`,
+// `available_tools`, `next_id` request counter) is defined to mirror
+// the protocol; the editor currently consumes a subset via the
+// connection wrapper. Allow at module scope so the protocol surface
+// stays expressive without per-method noise.
+#![allow(dead_code)]
+
 //! MCP client for connecting to external MCP servers.
 //!
 //! AURA can connect to external MCP servers (filesystem, git, custom tools)

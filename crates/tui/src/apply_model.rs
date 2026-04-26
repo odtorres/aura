@@ -1,3 +1,10 @@
+// The SEARCH/REPLACE block parser is built and fully tested but not yet
+// wired into the AI proposal flow — that integration is gated behind the
+// "apply model" feature work and uses the existing diff-based flow in
+// the meantime. Allow dead code at module scope so the parser stays in
+// the tree without warnings until it ships.
+#![allow(dead_code)]
+
 //! Apply model — parse and apply structured AI edits to source files.
 //!
 //! The apply model takes AI-proposed changes as search/replace blocks

@@ -1,3 +1,8 @@
+// CodeCell tracks `start_line` / `end_line` for future "jump to cell"
+// navigation that hasn't shipped yet. The fields ride along on every
+// parsed cell so we don't have to recompute them later.
+#![allow(dead_code)]
+
 //! Notebook/REPL mode — Jupyter-like code cells with inline execution.
 //!
 //! Supports `# %%` cell markers (Python/VS Code style) and fenced

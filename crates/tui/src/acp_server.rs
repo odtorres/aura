@@ -1,3 +1,9 @@
+// Some ACP response fields are populated for protocol round-tripping but
+// not yet consumed by callers (e.g. `success` on async ACK responses).
+// Allowed at module level to reflect that this is a protocol surface, not
+// dead code waiting to be deleted.
+#![allow(dead_code)]
+
 //! ACP (Agent Client Protocol) server for AURA.
 //!
 //! Implements the Agent Client Protocol, enabling external AI agents

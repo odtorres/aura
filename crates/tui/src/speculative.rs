@@ -1,3 +1,11 @@
+// FileChange / Changeset / SpecEvent payloads expose richer
+// per-suggestion state (proposed_text, line range, accepted flag,
+// summary, accept_all/reject_all bulk operations, pending_count) than
+// the current ghost-suggestion UI consumes. Speculative engine evolves
+// faster than its consumer; the extra fields/methods stay so the next
+// UI iteration can pick them up without a struct shape change.
+#![allow(dead_code)]
+
 //! Speculative execution engine for background AI analysis.
 //!
 //! The AI thinks ahead: when the cursor is idle, it analyzes nearby code

@@ -1,3 +1,8 @@
+// SSH ls + path detection helpers are present for future "browse remote
+// directory" and "open scp://..." command flows; the editor today only
+// uses `ssh_read` / `ssh_write` for individual files. Allow at module.
+#![allow(dead_code)]
+
 //! Remote SSH file editing support.
 //!
 //! Provides functions to read and write files on remote machines via SSH.

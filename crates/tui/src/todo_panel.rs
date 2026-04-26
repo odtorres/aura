@@ -1,3 +1,8 @@
+// `TodoItem.text` is captured during the workspace scan and shown in
+// detail tooltips; the panel currently only renders title + tag, so the
+// raw text field reads as unused at the type-system level.
+#![allow(dead_code)]
+
 //! TODO/FIXME aggregation panel.
 //!
 //! Scans the workspace for TODO, FIXME, HACK, XXX tags and displays

@@ -1,3 +1,9 @@
+// `McpAction::ReportActivity` and `GetEditorState` are wired in the
+// protocol but the dispatch handlers haven't been hooked up yet — the
+// variants exist so we can deserialize incoming MCP requests without
+// crashing. Allow at module scope.
+#![allow(dead_code)]
+
 //! MCP (Model Context Protocol) server for AURA.
 //!
 //! Exposes editor state as MCP tools and resources over a localhost TCP server.

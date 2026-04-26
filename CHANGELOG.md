@@ -4,6 +4,25 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.16] — 2026-04-26
+
+### Internal
+- **Tightened the tui crate's public surface** — only `app`, `render`,
+  `tab`, and `config` are still `pub mod` (the surfaces consumed by the
+  `aura` editor binary, the render benches, and the integration test
+  scaffold). The remaining 60 modules dropped to `pub(crate) mod`. This
+  surfaces 19 forward-looking-API items that were invisible to the
+  dead-code lint when they were `pub` and crate-external (the lint
+  conservatively assumed an unknown caller existed). Each affected
+  module (`acp_server`, `apply_model`, `file_watcher`, `image_preview`,
+  `lsp`, `mcp_client`, `mcp_server`, `notebook`, `remote`,
+  `speculative`, `todo_panel`) now has a module-level
+  `#![allow(dead_code)]` plus a one-line comment explaining what the
+  unused items are reserved for (protocol surface, future bulk-action
+  UI, future "browse remote dir" command, etc). Net result: dead-code
+  lint stays useful for accidentally-unused code in the rest of the
+  crate, while genuine forward-looking API items don't generate noise.
+
 ## [1.2.15] — 2026-04-26
 
 ### Changed
