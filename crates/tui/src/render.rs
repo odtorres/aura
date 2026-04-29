@@ -6554,8 +6554,14 @@ fn draw_word_highlights(frame: &mut Frame, app: &App, area: Rect) {
     let text_x = area.x + gutter_width;
     let text_w = area.width.saturating_sub(gutter_width) as usize;
     let bg = Color::Rgb(60, 60, 70);
+    let rope_len = tab.buffer.rope().len_chars();
 
     for &(start, end) in &app.cursor_word_matches {
+        // Matches may be stale after a tab switch — skip any whose indices
+        // fall outside the active buffer to avoid a ropey panic.
+        if start >= rope_len || end > rope_len {
+            continue;
+        }
         let start_row = tab.buffer.rope().char_to_line(start);
         if start_row < scroll_row || start_row >= scroll_row + visible_rows {
             continue;
@@ -6608,8 +6614,14 @@ fn draw_search_highlights(frame: &mut Frame, app: &App, area: Rect) {
     let match_bg = Color::Rgb(120, 100, 30); // dim yellow for all matches
     let current_bg = Color::Rgb(200, 160, 30); // bright yellow for current match
     let match_fg = Color::Black;
+    let rope_len = tab.buffer.rope().len_chars();
 
     for (idx, &(start, end)) in app.search_matches.iter().enumerate() {
+        // Matches may be stale after a tab switch — skip any whose indices
+        // fall outside the active buffer to avoid a ropey panic.
+        if start >= rope_len || end > rope_len {
+            continue;
+        }
         let is_current = idx == app.search_current;
         let bg = if is_current { current_bg } else { match_bg };
 

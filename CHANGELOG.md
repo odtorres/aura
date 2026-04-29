@@ -4,6 +4,20 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.18] — 2026-04-29
+
+### Fixed
+- **Click-to-open file no longer panics** — opening a file by clicking
+  it in the file tree could panic ropey with "Char index out of bounds"
+  when the new buffer was smaller than the previous one. The
+  app-level `cursor_word_matches` and `search_matches` caches index
+  into the previously-active buffer's rope and were not cleared on tab
+  switch, so `draw_word_highlights` / `draw_search_highlights` would
+  call `Rope::char_to_line` with stale indices. Fixed by (a) clearing
+  the caches when `open_file` actually switches the active tab and
+  (b) defensively skipping any cached match whose indices fall outside
+  the active rope at render time.
+
 ## [1.2.17] — 2026-04-26
 
 ### Changed

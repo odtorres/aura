@@ -9385,10 +9385,19 @@ impl App {
 
         let conversation_store = self.conversation_store.as_ref();
         let theme = self.theme.clone();
+        let prev_tab_idx = self.tabs.active_index();
         let was_new = self.tabs.open_or_switch(&path, || {
             let buf = Buffer::from_file(&path).map_err(|e| format!("Error opening file: {}", e))?;
             Ok(EditorTab::new(buf, conversation_store, &theme))
         })?;
+        // App-level caches index into the previously-active buffer's rope.
+        // Clear them on tab switch so stale indices don't panic ropey.
+        if self.tabs.active_index() != prev_tab_idx {
+            self.cursor_word.clear();
+            self.cursor_word_matches.clear();
+            self.search_matches.clear();
+            self.search_current = 0;
+        }
         if was_new {
             // Apply .editorconfig settings for this file.
             let ec = crate::config::lookup_editorconfig(&path);
