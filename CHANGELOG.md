@@ -4,6 +4,26 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.22] — 2026-04-30
+
+### Fixed
+- **Right-click → Paste now lands at the click position** — when the
+  right-click context menu shipped in v1.2.19, the right-click never
+  moved the editor cursor. So clicking on line 50 and choosing Paste
+  inserted the clipboard wherever the cursor happened to be (often a
+  completely different line). `open_context_menu` now matches the
+  behaviour of VS Code / Sublime / most native editors:
+  - Right-click *inside* an existing visual selection → keep the
+    selection (so Copy / Cut still operate on the highlighted region).
+  - Right-click *anywhere else* → drop the selection, move the cursor
+    to the click position, then open the menu. Paste lands where you
+    clicked.
+
+### Internal
+- New `screen_to_char_idx` helper that maps a screen point to a buffer
+  char index without mutating cursor state — used to hit-test "is the
+  click inside the current selection?".
+
 ## [1.2.21] — 2026-04-30
 
 ### Performance — hot path

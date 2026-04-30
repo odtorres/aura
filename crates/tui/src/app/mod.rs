@@ -11239,8 +11239,57 @@ impl App {
     /// Items that need a selection (Cut/Copy/Delete) are auto-disabled when
     /// `visual_selection_range` returns `None`.
     pub fn open_context_menu(&mut self, col: u16, row: u16) {
+        // Match the behaviour of VS Code / Sublime / most native editors:
+        // a right-click moves the cursor to the click position (so a
+        // subsequent Paste lands where the user actually clicked, not
+        // wherever the cursor happened to be before). We only preserve
+        // the existing selection if the click lands *inside* it — that
+        // keeps right-click → Copy/Cut working on a highlighted region.
+        let click_inside_selection = self
+            .visual_selection_range()
+            .and_then(|(s, e)| {
+                self.screen_to_char_idx(col, row)
+                    .map(|idx| s <= idx && idx < e)
+            })
+            .unwrap_or(false);
+
+        if !click_inside_selection {
+            // Drop any prior selection and place the cursor at the click.
+            self.tab_mut().visual_anchor = None;
+            self.mode = Mode::Normal;
+            let _ = self.screen_to_cursor(col, row);
+        }
+
         let has_selection = self.visual_selection_range().is_some();
         self.context_menu.open(col, row, has_selection);
+    }
+
+    /// Map a screen column/row to a buffer character index without
+    /// mutating cursor state. Returns `None` if the point is outside
+    /// the editor's text area (in the gutter, border, etc.).
+    fn screen_to_char_idx(&self, col: u16, row: u16) -> Option<usize> {
+        let content_x = self.editor_rect.x + 1;
+        let content_y = self.editor_rect.y + 1;
+        let gutter_width: u16 = 6;
+        let text_start_x = content_x + gutter_width;
+        if col < text_start_x || row < content_y {
+            return None;
+        }
+        let tab = self.tab();
+        let clicked_row = (row - content_y) as usize;
+        let clicked_col = (col - text_start_x) as usize;
+        let target_row =
+            (tab.scroll_row + clicked_row).min(tab.buffer.line_count().saturating_sub(1));
+        let line_len = tab
+            .buffer
+            .line_text(target_row)
+            .map(|l| l.trim_end_matches('\n').trim_end_matches('\r').len())
+            .unwrap_or(0);
+        let target_col = (tab.scroll_col + clicked_col).min(line_len);
+        Some(
+            tab.buffer
+                .cursor_to_char_idx(&Cursor::new(target_row, target_col)),
+        )
     }
 
     /// Dispatch a context-menu action against the current buffer/selection
