@@ -428,6 +428,7 @@ impl GitRepo {
             .args(["add", "--"])
             .arg(rel_path)
             .current_dir(&self.workdir)
+            .stdin(std::process::Stdio::null())
             .output()?;
 
         if !add_output.status.success() {
@@ -437,10 +438,13 @@ impl GitRepo {
             );
         }
 
-        // Create the commit.
+        // Create the commit. `Stdio::null()` keeps `pre-commit` hooks and
+        // GPG signing prompts from hanging the main thread waiting on a
+        // TTY that the editor can't provide.
         let commit_output = std::process::Command::new("git")
             .args(["commit", "-m", message])
             .current_dir(&self.workdir)
+            .stdin(std::process::Stdio::null())
             .output()?;
 
         if !commit_output.status.success() {

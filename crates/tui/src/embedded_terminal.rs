@@ -565,6 +565,13 @@ impl vte::Perform for Performer {
                     if let Some(prompt_row) = scr.prompt_start_row {
                         let cmd = Self::extract_line_text(&scr.cells, prompt_row, scr.cols);
                         if !cmd.trim().is_empty() {
+                            // Cap command history at 1000 to bound memory in
+                            // long-running terminal sessions.
+                            const MAX_COMMANDS: usize = 1000;
+                            if scr.commands.len() >= MAX_COMMANDS {
+                                let drop_n = scr.commands.len() + 1 - MAX_COMMANDS;
+                                scr.commands.drain(0..drop_n);
+                            }
                             scr.commands.push(CommandRecord {
                                 command: cmd.trim().to_string(),
                                 exit_code: None,

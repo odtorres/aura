@@ -41,6 +41,7 @@ pub(crate) mod file_tree;
 pub(crate) mod file_watcher;
 pub(crate) mod git;
 pub(crate) mod git_graph;
+pub(crate) mod git_worker;
 pub(crate) mod help;
 pub(crate) mod highlight;
 pub(crate) mod http_client;

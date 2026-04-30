@@ -68,6 +68,12 @@ pub struct Buffer {
     line_authors: Vec<AuthorId>,
     /// The most recent edit's author and timestamp.
     last_edit: Option<(AuthorId, std::time::Instant)>,
+    /// Monotonic revision counter — increments on every successful
+    /// insert / delete / undo / redo. Render-side caches use this as the
+    /// invalidation key so per-frame work that depends on buffer
+    /// contents (minimap, bracket depths, line-style cache, cursor-word
+    /// matches) only recomputes when the buffer actually changes.
+    revision: u64,
 }
 
 impl Buffer {
@@ -82,6 +88,7 @@ impl Buffer {
             history_pos: 0,
             line_authors: vec![AuthorId::human()],
             last_edit: None,
+            revision: 0,
         }
     }
 
@@ -106,6 +113,7 @@ impl Buffer {
             history_pos: 0,
             line_authors: vec![AuthorId::human(); line_count],
             last_edit: None,
+            revision: 0,
         })
     }
 
@@ -144,7 +152,14 @@ impl Buffer {
             history_pos: 0,
             line_authors: vec![AuthorId::human(); line_count],
             last_edit: None,
+            revision: 0,
         })
+    }
+
+    /// Monotonic revision counter. Bumps on every mutation. Render-side
+    /// caches use this as the invalidation key.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Insert text at a character position, tagged with an author.
@@ -158,6 +173,7 @@ impl Buffer {
         }
 
         self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
         let now = std::time::Instant::now();
         self.last_edit = Some((author.clone(), now));
 
@@ -216,6 +232,7 @@ impl Buffer {
         }
 
         self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
         let now = std::time::Instant::now();
         self.last_edit = Some((author.clone(), now));
 
@@ -293,6 +310,7 @@ impl Buffer {
             }
         }
         self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
         self.rebuild_line_authors();
         Some(edit.author.clone())
     }
@@ -317,6 +335,7 @@ impl Buffer {
                 self.history.remove(i);
                 self.history_pos = self.history.len();
                 self.modified = true;
+                self.revision = self.revision.wrapping_add(1);
                 self.rebuild_line_authors();
                 return true;
             }
@@ -1031,6 +1050,7 @@ impl Buffer {
             self.history_pos += 1;
         }
         self.modified = true;
+        self.revision = self.revision.wrapping_add(1);
         self.rebuild_line_authors();
     }
 

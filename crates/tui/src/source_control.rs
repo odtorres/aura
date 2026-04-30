@@ -1,6 +1,31 @@
 //! Source control panel — a sidebar view for staging, unstaging, and committing.
 
 use crate::git::GitRepo;
+use crate::git_worker::{GitCommand, GitEvent, GitRefreshKind, GitWorker};
+use std::time::Instant;
+
+/// Per-section refresh state. Tracks whether a request is in flight so
+/// the panel can render a "refreshing…" indicator and coalesce overlapping
+/// 2 s tick requests onto a single worker invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshState {
+    /// No request outstanding.
+    Idle,
+    /// A request is in flight; `since` is when it was sent.
+    InFlight {
+        /// When the request was sent — used to render an elapsed time.
+        since: Instant,
+    },
+    /// A new request arrived while one was in flight; re-issue when the
+    /// in-flight one returns so the panel reflects the latest state.
+    Stale,
+}
+
+impl Default for RefreshState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
 
 /// Which sidebar view is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +132,17 @@ pub struct SourceControlPanel {
     pub ahead: usize,
     /// Number of commits behind upstream.
     pub behind: usize,
+    /// Status (`git status --porcelain`) refresh state.
+    pub status_state: RefreshState,
+    /// Branch ahead/behind refresh state.
+    pub branch_state: RefreshState,
+    /// Stash list refresh state.
+    pub stash_state: RefreshState,
+    /// Commit-in-flight state (separate from refreshes).
+    pub commit_state: RefreshState,
+    /// Last error message surfaced from the worker, if any. Cleared
+    /// when the next refresh succeeds.
+    pub last_error: Option<String>,
 }
 
 impl SourceControlPanel {
@@ -127,81 +163,206 @@ impl SourceControlPanel {
             branch: None,
             ahead: 0,
             behind: 0,
+            status_state: RefreshState::Idle,
+            branch_state: RefreshState::Idle,
+            stash_state: RefreshState::Idle,
+            commit_state: RefreshState::Idle,
+            last_error: None,
         }
     }
 
-    /// Refresh the panel's file lists, branch name, and sync status from git.
-    pub fn refresh(&mut self, git_repo: &GitRepo) {
+    /// Send refresh requests to the git worker. Returns immediately —
+    /// results arrive later via [`Self::apply_event`].
+    ///
+    /// If a section is already in flight, mark it `Stale` so the next
+    /// completion will re-issue. This collapses overlapping 2 s ticks
+    /// onto at most two worker invocations per section (one running, one
+    /// pending), instead of stacking up into a thundering herd on slow
+    /// repos.
+    pub fn request_refresh(&mut self, git_repo: &GitRepo, worker: &GitWorker) {
+        // Branch name is gix-native (fast); update synchronously.
         self.branch = git_repo.current_branch();
-        let (ahead, behind) = git_repo.ahead_behind();
-        self.ahead = ahead;
-        self.behind = behind;
 
-        self.stashes.clear();
-        self.merge_changes.clear();
-        self.changed.clear();
-        self.staged.clear();
-
-        // Load stashes.
-        if let Ok(stash_list) = git_repo.stash_list() {
-            for (name, message) in stash_list {
-                self.stashes.push(StashEntry { name, message });
+        for (state, cmd) in [
+            (&mut self.status_state, GitCommand::RefreshStatus),
+            (&mut self.branch_state, GitCommand::RefreshBranchInfo),
+            (&mut self.stash_state, GitCommand::RefreshStashes),
+        ] {
+            match *state {
+                RefreshState::Idle => {
+                    *state = RefreshState::InFlight {
+                        since: Instant::now(),
+                    };
+                    worker.send(cmd);
+                }
+                RefreshState::InFlight { .. } => {
+                    *state = RefreshState::Stale;
+                }
+                RefreshState::Stale => {
+                    // already coalesced
+                }
             }
         }
+    }
 
-        let entries = match git_repo.file_status() {
-            Ok(entries) => entries,
-            Err(e) => {
-                tracing::debug!("Failed to get git status: {}", e);
-                return;
-            }
+    /// Send a commit request to the worker. The panel switches to a
+    /// committing state; the result arrives later via `apply_event`.
+    pub fn request_commit(&mut self, worker: &GitWorker, message: String) {
+        self.commit_state = RefreshState::InFlight {
+            since: Instant::now(),
         };
+        worker.send(GitCommand::Commit { message });
+    }
 
-        for entry in entries {
-            let name = entry
-                .rel_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&entry.rel_path)
-                .to_string();
+    /// Drain a worker event into the panel's state.
+    ///
+    /// Returns `true` if the panel should be re-rendered immediately
+    /// (the caller may use this to short-circuit a frame skip).
+    pub fn apply_event(&mut self, ev: GitEvent, worker: &GitWorker) -> bool {
+        match ev {
+            GitEvent::StatusReady(entries) => {
+                self.merge_changes.clear();
+                self.changed.clear();
+                self.staged.clear();
+                self.last_error = None;
+                for entry in entries {
+                    let name = entry
+                        .rel_path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&entry.rel_path)
+                        .to_string();
 
-            // Check for merge conflicts first — separate section.
-            if crate::git::is_conflict_entry(&entry) {
-                self.merge_changes.push(GitFileEntry {
-                    rel_path: entry.rel_path.clone(),
-                    name,
-                    status: GitFileStatus::Conflict,
-                });
-                continue;
+                    if crate::git::is_conflict_entry(&entry) {
+                        self.merge_changes.push(GitFileEntry {
+                            rel_path: entry.rel_path.clone(),
+                            name,
+                            status: GitFileStatus::Conflict,
+                        });
+                        continue;
+                    }
+
+                    if entry.index_status != ' ' && entry.index_status != '?' {
+                        let status = char_to_status(entry.index_status);
+                        self.staged.push(GitFileEntry {
+                            rel_path: entry.rel_path.clone(),
+                            name: name.clone(),
+                            status,
+                        });
+                    }
+
+                    if entry.worktree_status != ' ' {
+                        let status = if entry.worktree_status == '?' {
+                            GitFileStatus::Untracked
+                        } else {
+                            char_to_status(entry.worktree_status)
+                        };
+                        self.changed.push(GitFileEntry {
+                            rel_path: entry.rel_path.clone(),
+                            name,
+                            status,
+                        });
+                    }
+                }
+                self.clamp_selected();
+                self.complete_refresh(GitRefreshKind::Status, worker);
+                true
             }
-
-            // Index status (X) — staged changes.
-            if entry.index_status != ' ' && entry.index_status != '?' {
-                let status = char_to_status(entry.index_status);
-                self.staged.push(GitFileEntry {
-                    rel_path: entry.rel_path.clone(),
-                    name: name.clone(),
-                    status,
-                });
+            GitEvent::BranchInfoReady { ahead, behind } => {
+                self.ahead = ahead;
+                self.behind = behind;
+                self.complete_refresh(GitRefreshKind::BranchInfo, worker);
+                true
             }
-
-            // Worktree status (Y) — unstaged changes.
-            if entry.worktree_status != ' ' {
-                let status = if entry.worktree_status == '?' {
-                    GitFileStatus::Untracked
-                } else {
-                    char_to_status(entry.worktree_status)
-                };
-                self.changed.push(GitFileEntry {
-                    rel_path: entry.rel_path.clone(),
-                    name,
-                    status,
-                });
+            GitEvent::StashesReady(list) => {
+                self.stashes.clear();
+                for (name, message) in list {
+                    self.stashes.push(StashEntry { name, message });
+                }
+                self.complete_refresh(GitRefreshKind::Stashes, worker);
+                true
+            }
+            GitEvent::CommitDone(result) => {
+                match result {
+                    Ok(_) => {
+                        self.commit_message.clear();
+                        self.last_error = None;
+                    }
+                    Err(msg) => {
+                        self.last_error = Some(msg);
+                    }
+                }
+                self.commit_state = RefreshState::Idle;
+                // Trigger a status refresh so the panel reflects the new
+                // tree immediately.
+                if matches!(self.status_state, RefreshState::Idle) {
+                    self.status_state = RefreshState::InFlight {
+                        since: Instant::now(),
+                    };
+                    worker.send(GitCommand::RefreshStatus);
+                }
+                true
+            }
+            GitEvent::Timeout(kind) => {
+                self.last_error = Some(format!("git {kind:?} timed out"));
+                self.complete_refresh(kind, worker);
+                if matches!(kind, GitRefreshKind::Commit) {
+                    self.commit_state = RefreshState::Idle;
+                }
+                true
+            }
+            GitEvent::Failed { kind, message } => {
+                self.last_error = Some(message);
+                self.complete_refresh(kind, worker);
+                if matches!(kind, GitRefreshKind::Commit) {
+                    self.commit_state = RefreshState::Idle;
+                }
+                true
+            }
+            GitEvent::GpgSignWarning => {
+                // Handled at App level (banner). Panel just records it
+                // so a follow-up refresh isn't surprised by a slow commit.
+                false
             }
         }
+    }
 
-        // Clamp selection to valid range.
-        self.clamp_selected();
+    /// Mark a refresh-kind slot as completed and re-issue if it went
+    /// stale during the in-flight window.
+    fn complete_refresh(&mut self, kind: GitRefreshKind, worker: &GitWorker) {
+        let (state, cmd) = match kind {
+            GitRefreshKind::Status => (&mut self.status_state, GitCommand::RefreshStatus),
+            GitRefreshKind::BranchInfo => (&mut self.branch_state, GitCommand::RefreshBranchInfo),
+            GitRefreshKind::Stashes => (&mut self.stash_state, GitCommand::RefreshStashes),
+            GitRefreshKind::Commit => return,
+        };
+        let was_stale = matches!(*state, RefreshState::Stale);
+        *state = RefreshState::Idle;
+        if was_stale {
+            *state = RefreshState::InFlight {
+                since: Instant::now(),
+            };
+            worker.send(cmd);
+        }
+    }
+
+    /// True if any section is currently waiting on the worker.
+    pub fn any_in_flight(&self) -> bool {
+        matches!(
+            self.status_state,
+            RefreshState::InFlight { .. } | RefreshState::Stale
+        ) || matches!(
+            self.branch_state,
+            RefreshState::InFlight { .. } | RefreshState::Stale
+        ) || matches!(
+            self.stash_state,
+            RefreshState::InFlight { .. } | RefreshState::Stale
+        )
+    }
+
+    /// True if a commit is currently being executed by the worker.
+    pub fn commit_in_flight(&self) -> bool {
+        matches!(self.commit_state, RefreshState::InFlight { .. })
     }
 
     /// Move selection up within the current section.
@@ -241,8 +402,10 @@ impl SourceControlPanel {
         self.selected = 0;
     }
 
-    /// Stage the currently selected changed file.
-    pub fn stage_selected(&mut self, git_repo: &GitRepo) {
+    /// Stage the currently selected changed file. Triggers an async
+    /// status refresh through the worker so the panel updates without
+    /// blocking the UI on a `git status` traversal.
+    pub fn stage_selected(&mut self, git_repo: &GitRepo, worker: &GitWorker) {
         if self.focused_section != GitPanelSection::ChangedFiles {
             return;
         }
@@ -252,12 +415,12 @@ impl SourceControlPanel {
                 tracing::warn!("Failed to stage {}: {}", path, e);
                 return;
             }
-            self.refresh(git_repo);
+            self.request_refresh(git_repo, worker);
         }
     }
 
     /// Stage all changed files at once.
-    pub fn stage_all(&mut self, git_repo: &GitRepo) {
+    pub fn stage_all(&mut self, git_repo: &GitRepo, worker: &GitWorker) {
         let paths: Vec<String> = self.changed.iter().map(|e| e.rel_path.clone()).collect();
         for path in &paths {
             if let Err(e) = git_repo.stage_file(path) {
@@ -265,12 +428,12 @@ impl SourceControlPanel {
             }
         }
         if !paths.is_empty() {
-            self.refresh(git_repo);
+            self.request_refresh(git_repo, worker);
         }
     }
 
     /// Unstage the currently selected staged file.
-    pub fn unstage_selected(&mut self, git_repo: &GitRepo) {
+    pub fn unstage_selected(&mut self, git_repo: &GitRepo, worker: &GitWorker) {
         if self.focused_section != GitPanelSection::StagedFiles {
             return;
         }
@@ -280,13 +443,15 @@ impl SourceControlPanel {
                 tracing::warn!("Failed to unstage {}: {}", path, e);
                 return;
             }
-            self.refresh(git_repo);
+            self.request_refresh(git_repo, worker);
         }
     }
 
-    /// Commit staged changes with the current commit message.
-    /// Returns the commit hash on success, or an error message.
-    pub fn commit(&mut self, git_repo: &GitRepo) -> Result<String, String> {
+    /// Begin a commit through the worker. The commit message must already
+    /// be set; on success the worker emits `CommitDone` which the panel's
+    /// `apply_event` handler clears the message and triggers a refresh.
+    /// Returns immediately — no UI block.
+    pub fn commit(&mut self, worker: &GitWorker) -> Result<(), String> {
         let msg = self.commit_message.trim().to_string();
         if msg.is_empty() {
             return Err("Commit message is empty".to_string());
@@ -294,30 +459,26 @@ impl SourceControlPanel {
         if self.staged.is_empty() {
             return Err("Nothing staged to commit".to_string());
         }
-
-        match git_repo.commit_staged(&msg) {
-            Ok(hash) => {
-                self.commit_message.clear();
-                self.refresh(git_repo);
-                Ok(hash)
-            }
-            Err(e) => Err(format!("Commit failed: {}", e)),
+        if self.commit_in_flight() {
+            return Err("Commit already in progress".to_string());
         }
+        self.request_commit(worker, msg);
+        Ok(())
     }
 
     /// Discard changes for the currently selected unstaged file.
-    pub fn discard_selected(&mut self, git_repo: &GitRepo) {
+    pub fn discard_selected(&mut self, git_repo: &GitRepo, worker: &GitWorker) {
         if let Some(path) = self.pending_discard.take() {
             if let Err(e) = git_repo.discard_file(&path) {
                 tracing::warn!("Failed to discard {}: {}", path, e);
                 return;
             }
-            self.refresh(git_repo);
+            self.request_refresh(git_repo, worker);
         }
     }
 
     /// Unstage and discard changes for the currently selected staged file.
-    pub fn discard_staged_selected(&mut self, git_repo: &GitRepo) {
+    pub fn discard_staged_selected(&mut self, git_repo: &GitRepo, worker: &GitWorker) {
         if let Some(path) = self.pending_discard_staged.take() {
             // First unstage the file.
             if let Err(e) = git_repo.unstage_file(&path) {
@@ -328,7 +489,7 @@ impl SourceControlPanel {
             if let Err(e) = git_repo.discard_file(&path) {
                 tracing::warn!("Failed to discard {}: {}", path, e);
             }
-            self.refresh(git_repo);
+            self.request_refresh(git_repo, worker);
         }
     }
 

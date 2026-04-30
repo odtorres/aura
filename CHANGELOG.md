@@ -4,6 +4,86 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.20] — 2026-04-30
+
+### Performance & responsiveness — major
+
+- **Async git worker** — every slow `git` shellout now runs on a
+  dedicated worker thread instead of the UI loop. `git status`,
+  `git rev-list --left-right --count` (ahead/behind), `git stash list`,
+  and `git commit` all gain hard wall-clock timeouts (8 s for refresh,
+  30 s for commit) and pipe `Stdio::null()` for stdin so pre-commit
+  hooks and GPG prompts can no longer hang the editor waiting for a
+  TTY it can't provide. The 2 s sidebar refresh tick and panel click
+  handler now just send commands to the worker and return immediately;
+  results arrive via a per-frame event drain alongside LSP/MCP. New
+  `crates/tui/src/git_worker.rs` (340 LOC, 4 unit tests covering
+  porcelain parsing and the kill-on-timeout path).
+- **Source-control panel state machine** — `SourceControlPanel.refresh`
+  is gone; the panel now tracks per-section `RefreshState`
+  (`Idle`/`InFlight`/`Stale`) and coalesces overlapping requests so
+  the 2 s tick can't stack up into a thundering herd on slow repos.
+  A small spinner glyph in the panel header confirms the UI is alive
+  during long status scans, and a red error row surfaces timeouts /
+  commit failures in-place. A yellow status banner appears once at
+  startup if the repo has `commit.gpgsign=true`, so the user knows
+  signing must be non-interactive.
+- **`git commit -m` (legacy path) gets `Stdio::null()`** — even the
+  `commit_with_conversation` path that doesn't go through the worker
+  no longer leaves stdin open to a non-existent TTY.
+
+### Performance — bounded growth
+
+- `ChatPanel.items` capped at 500 with a FIFO drop and an elision
+  banner row; long conversations no longer leak memory or pay
+  per-frame iteration cost over hours.
+- `EmbeddedTerminal.commands` capped at 1000 with ring-buffer
+  semantics — terminal-heavy sessions plateau in RSS.
+- `App.file_mtimes` is now evicted on tab close; the `HashMap`
+  used to grow monotonically across an editing session.
+- (`App.jump_list` already had a 100-entry cap; verified during
+  audit.)
+
+### Performance — hot path
+
+- New `Buffer.revision` monotonic counter (bumps on every insert /
+  delete / undo / redo / `restore_to`). Used as a cache invalidation
+  key for downstream caches in this and follow-up releases.
+- `notify_cursor_moved` debounces full-buffer `find_all` scans:
+  caches `(word, revision, matches)` and skips when both are
+  unchanged; otherwise gates rescans to a 120 ms debounce window.
+  A 10k-line file's "rapid cursor sweep" no longer regenerates the
+  cursor-word match list on every keystroke.
+- `update_edit_predictions` skips the per-frame history walk +
+  diagnostics clone when neither the buffer revision nor the cursor
+  row changed since the previous frame.
+
+### Internal
+
+- New module `crates/tui/src/git_worker.rs`.
+- `crates/tui/src/source_control.rs` rewritten around `request_refresh`
+  + `apply_event`. Public method signatures gain a `&GitWorker`
+  parameter (`stage_selected`, `stage_all`, `unstage_selected`,
+  `discard_selected`, `discard_staged_selected`, `commit`).
+- `crates/core/src/buffer.rs` gains the `revision` field + accessor;
+  every mutation path bumps it.
+- 4 new unit tests in `git_worker` (porcelain parser, child kill on
+  timeout, fast-child happy path).
+
+### Deferred to follow-up release
+
+- `mpsc::channel()` → `sync_channel(1024)` for LSP/MCP/DAP/watcher
+  event channels. Requires rippling `Sender<T>` → `SyncSender<T>`
+  through many call sites; lower priority now that the worst stall
+  trigger (sync git on main) is gone.
+- Tree-sitter incremental parsing (`refresh_highlights` still does
+  `rope.to_string()` + full re-parse on a 40 ms debounce; works fine
+  in practice but room to improve).
+- Per-line render style cache, minimap line-vector cache, bracket-
+  depth lazy rebuild — deferred to land alongside tree-sitter
+  incremental so the cache key story stays consistent.
+- Move 2 s mtime `fs::metadata` poll onto `file_watcher` thread.
+
 ## [1.2.19] — 2026-04-29
 
 ### Added

@@ -536,6 +536,14 @@ pub struct App {
     speculative: Option<SpeculativeEngine>,
     /// Git repository handle (None if not in a git repo).
     pub(crate) git_repo: Option<GitRepo>,
+    /// Async worker for slow `git` CLI operations (status, commit, etc.).
+    /// Spawned alongside `git_repo` so refresh and commit never block the
+    /// main event loop. None when not in a git repo.
+    pub(crate) git_worker: Option<crate::git_worker::GitWorker>,
+    /// Banner shown when the repo has `commit.gpgsign=true`. Surfaced by
+    /// the worker once at startup so commits don't appear to hang waiting
+    /// for an interactive pinentry that the editor can't display.
+    pub(crate) gpg_sign_banner_shown: bool,
     /// Whether to show inline blame annotations.
     pub show_blame: bool,
     /// Loaded configuration from aura.toml.
@@ -794,6 +802,22 @@ pub struct App {
     pub cursor_word: String,
     /// Positions of all occurrences of the cursor word: (start_char, end_char).
     pub cursor_word_matches: Vec<(usize, usize)>,
+    /// Buffer revision the cached `cursor_word_matches` were computed
+    /// against. If the revision changes, the cache is invalidated even
+    /// when the word string itself didn't change.
+    pub(crate) cursor_word_rev: u64,
+    /// Last time `notify_cursor_moved` ran a `find_all` scan. Used to
+    /// debounce the per-cursor-move full-buffer scan (it's O(n) over
+    /// every visible buffer cell — costly on large files when the
+    /// cursor sweeps quickly).
+    pub(crate) cursor_word_last_scan: std::time::Instant,
+    /// Buffer revision that `update_edit_predictions` last saw — used
+    /// to skip the predictor's history walk + diagnostics clone when
+    /// nothing relevant has changed since the previous frame.
+    pub(crate) predictions_last_rev: u64,
+    /// Cursor row that `update_edit_predictions` last saw, paired with
+    /// `predictions_last_rev`.
+    pub(crate) predictions_last_row: usize,
 
     // --- Find & Replace ---
     /// Confirmed search query (after pressing Enter).
@@ -966,6 +990,11 @@ impl App {
                 repo.current_branch().unwrap_or_else(|| "detached".into())
             );
         }
+
+        // Spawn the async git worker so status/commit never block the UI.
+        let git_worker = git_repo
+            .as_ref()
+            .map(|r| crate::git_worker::GitWorker::spawn(r.workdir().to_path_buf()));
 
         // Open conversation database.
         // Priority: git workdir .aura/ → cwd .aura/ → ~/.aura/ (global fallback).
@@ -1144,6 +1173,8 @@ impl App {
             agent_registry: AgentRegistry::default(),
             speculative,
             git_repo,
+            git_worker,
+            gpg_sign_banner_shown: false,
             show_blame: false,
             config: config.clone(),
             config_path,
@@ -1276,6 +1307,11 @@ impl App {
             clipboard_ring_idx: None,
             cursor_word: String::new(),
             cursor_word_matches: Vec::new(),
+            cursor_word_rev: 0,
+            cursor_word_last_scan: std::time::Instant::now() - std::time::Duration::from_secs(1),
+            // Sentinel so the very first prediction call always runs.
+            predictions_last_rev: u64::MAX,
+            predictions_last_row: usize::MAX,
             search_query: None,
             search_input: String::new(),
             search_active: false,
@@ -1531,6 +1567,9 @@ impl App {
             // Poll for MCP server requests and external MCP client events.
             self.poll_mcp_requests();
             self.poll_mcp_client_events();
+
+            // Drain async git worker results (status / branch / stash / commit).
+            self.drain_git_events();
 
             // Poll for ACP server requests.
             self.poll_acp_requests();
@@ -5782,13 +5821,31 @@ impl App {
 
         // Update word-under-cursor highlight.
         let word = self.tab().buffer.word_at_cursor(cursor.row, cursor.col);
-        if word.len() >= 2 && word != self.cursor_word {
-            self.cursor_word = word.clone();
-            self.cursor_word_matches = self.tab().buffer.find_all(&word);
-        } else if word.len() < 2 {
+        if word.len() < 2 {
             self.cursor_word.clear();
             self.cursor_word_matches.clear();
+            return;
         }
+
+        let revision = self.tab().buffer.revision();
+        // If word and revision are unchanged, we already have the right
+        // matches cached — skip the full-buffer scan entirely.
+        if word == self.cursor_word && revision == self.cursor_word_rev {
+            return;
+        }
+
+        // Debounce: avoid running `find_all` on every keystroke during a
+        // rapid cursor sweep. Only the most recent state matters; older
+        // scans would be discarded a few ms later anyway.
+        const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(120);
+        if word == self.cursor_word && self.cursor_word_last_scan.elapsed() < DEBOUNCE {
+            return;
+        }
+
+        self.cursor_word = word.clone();
+        self.cursor_word_matches = self.tab().buffer.find_all(&word);
+        self.cursor_word_rev = revision;
+        self.cursor_word_last_scan = std::time::Instant::now();
     }
 
     /// Get the current ghost suggestion for rendering.
@@ -5908,6 +5965,19 @@ impl App {
         if !has_engine {
             return;
         }
+
+        // Skip when nothing the predictor depends on has changed.
+        // Buffer revision covers edits; cursor row covers movement
+        // between lines. Same row + same revision means the previous
+        // result is still authoritative — saves a history scan +
+        // diagnostics clone per frame in the steady state.
+        let revision = self.tabs.active().buffer.revision();
+        let cursor_row = self.tabs.active().cursor.row;
+        if revision == self.predictions_last_rev && cursor_row == self.predictions_last_row {
+            return;
+        }
+        self.predictions_last_rev = revision;
+        self.predictions_last_row = cursor_row;
 
         // Extract recent edit line numbers from buffer history.
         let buffer = &self.tabs.active().buffer;
@@ -7014,53 +7084,84 @@ impl App {
     }
 
     /// Refresh the source control panel from git status.
+    ///
+    /// Sends async requests to the git worker; results arrive via
+    /// [`Self::drain_git_events`] and are applied by the panel's
+    /// `apply_event` handler. Returns immediately — never blocks.
     pub fn refresh_source_control(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            self.source_control.refresh(repo);
+        if let (Some(repo), Some(worker)) = (&self.git_repo, &self.git_worker) {
+            self.source_control.request_refresh(repo, worker);
         }
         self.last_sc_refresh = std::time::Instant::now();
     }
 
+    /// Drain any events from the git worker into the panel state. Called
+    /// once per frame from the main loop alongside the LSP/MCP drains.
+    pub fn drain_git_events(&mut self) {
+        // Take the events first so we can release the worker borrow
+        // before any `set_status` mutation; re-acquire just to apply.
+        let events = match self.git_worker.as_ref() {
+            Some(w) => w.drain_events(),
+            None => return,
+        };
+        for ev in events {
+            if matches!(ev, crate::git_worker::GitEvent::GpgSignWarning)
+                && !self.gpg_sign_banner_shown
+            {
+                self.gpg_sign_banner_shown = true;
+                self.set_status(
+                    "commit.gpgsign=true; signing must be non-interactive (gpg-agent or pinentry-loopback)",
+                );
+            }
+            if let Some(worker) = self.git_worker.as_ref() {
+                self.source_control.apply_event(ev, worker);
+            }
+        }
+    }
+
     /// Stage the selected file in the source control panel.
     pub fn sc_stage_selected(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            self.source_control.stage_selected(repo);
+        if let (Some(repo), Some(worker)) = (&self.git_repo, &self.git_worker) {
+            self.source_control.stage_selected(repo, worker);
         }
     }
 
     /// Stage all changed files in the source control panel.
     pub fn sc_stage_all(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            self.source_control.stage_all(repo);
+        if let (Some(repo), Some(worker)) = (&self.git_repo, &self.git_worker) {
+            self.source_control.stage_all(repo, worker);
         }
     }
 
     /// Unstage the selected file in the source control panel.
     pub fn sc_unstage_selected(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            self.source_control.unstage_selected(repo);
+        if let (Some(repo), Some(worker)) = (&self.git_repo, &self.git_worker) {
+            self.source_control.unstage_selected(repo, worker);
         }
     }
 
     /// Discard changes for the selected file in the source control panel.
     pub fn sc_discard_selected(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            self.source_control.discard_selected(repo);
+        if let (Some(repo), Some(worker)) = (&self.git_repo, &self.git_worker) {
+            self.source_control.discard_selected(repo, worker);
         }
     }
 
     /// Unstage and discard the selected staged file.
     pub fn sc_discard_staged_selected(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            self.source_control.discard_staged_selected(repo);
+        if let (Some(repo), Some(worker)) = (&self.git_repo, &self.git_worker) {
+            self.source_control.discard_staged_selected(repo, worker);
         }
     }
 
-    /// Commit staged changes from the source control panel.
+    /// Commit staged changes from the source control panel. Async — the
+    /// commit runs on the worker with `Stdio::null()` for stdin and a
+    /// 30 s timeout. The user sees a "committing…" indicator during the
+    /// commit and the panel updates when the worker emits `CommitDone`.
     pub fn sc_commit(&mut self) {
-        if let Some(repo) = &self.git_repo {
-            match self.source_control.commit(repo) {
-                Ok(hash) => self.set_status(format!("Committed: {hash}")),
+        if let Some(worker) = &self.git_worker {
+            match self.source_control.commit(worker) {
+                Ok(()) => self.set_status("Committing…"),
                 Err(msg) => self.set_status(msg),
             }
         } else {
@@ -10680,9 +10781,15 @@ impl App {
     pub fn close_current_tab_force(&mut self) -> bool {
         // Shutdown LSP for this tab.
         self.tab_mut().shutdown_lsp();
+        let closed_path = self.tab().buffer.file_path().map(|p| p.to_path_buf());
         if self.tabs.close_active().is_none() {
             // Last tab — signal quit.
             return true;
+        }
+        // Drop the file's mtime cache entry so file_mtimes doesn't grow
+        // unboundedly across an editing session.
+        if let Some(p) = closed_path {
+            self.file_mtimes.remove(&p);
         }
         false
     }
@@ -10694,9 +10801,16 @@ impl App {
         }
         // Shutdown LSP for the target tab.
         self.tabs.tabs_mut()[idx].shutdown_lsp();
+        let closed_path = self.tabs.tabs()[idx]
+            .buffer
+            .file_path()
+            .map(|p| p.to_path_buf());
         if self.tabs.close(idx).is_none() {
             // Last tab — signal quit.
             return true;
+        }
+        if let Some(p) = closed_path {
+            self.file_mtimes.remove(&p);
         }
         false
     }

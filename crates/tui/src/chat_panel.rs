@@ -206,6 +206,40 @@ impl ChatPanel {
     /// Keeps the first message (system context), inserts a summary note about
     /// dropped messages, then retains the most recent messages. This gives the
     /// AI awareness that earlier context was removed.
+    /// Cap the rendered `items` list. Long sessions used to grow this
+    /// vector without bound; on a multi-hour conversation that's a
+    /// noticeable memory leak and a per-frame iteration cost. The cap
+    /// is a FIFO with an elision banner so the user knows lines were
+    /// dropped.
+    fn trim_items(&mut self) {
+        const MAX_ITEMS: usize = 500;
+        if self.items.len() <= MAX_ITEMS {
+            return;
+        }
+        let drop_n = self.items.len() - MAX_ITEMS + 1; // make room for banner
+        self.items.drain(0..drop_n);
+        // Replace whatever's at index 0 with an elision banner so the user
+        // knows older content was dropped. Avoid stacking banners across
+        // successive trims by keeping just a single one at the head.
+        let banner = ChatItem::Text {
+            role: ChatRole::System,
+            content: format!("… {drop_n} earlier message(s) elided to keep the panel responsive."),
+            timestamp: simple_timestamp(),
+        };
+        match self.items.first() {
+            Some(ChatItem::Text {
+                role: ChatRole::System,
+                content,
+                ..
+            }) if content.starts_with("…") => {
+                self.items[0] = banner;
+            }
+            _ => {
+                self.items.insert(0, banner);
+            }
+        }
+    }
+
     fn trim_context(&mut self) {
         if self.max_context_messages == 0
             || self.context_messages.len() <= self.max_context_messages
@@ -253,6 +287,7 @@ impl ChatPanel {
             content: text.to_string(),
             timestamp: simple_timestamp(),
         });
+        self.trim_items();
         self.context_messages.push(Message::text("user", text));
         self.trim_context();
         self.scroll_to_bottom();
@@ -280,6 +315,7 @@ impl ChatPanel {
                 content: text.clone(),
                 timestamp: simple_timestamp(),
             });
+            self.trim_items();
             self.context_messages
                 .push(Message::text("assistant", &text));
         }
@@ -300,6 +336,7 @@ impl ChatPanel {
                 content: text,
                 timestamp: simple_timestamp(),
             });
+            self.trim_items();
         }
         self.scroll_to_bottom();
     }
@@ -321,6 +358,10 @@ impl ChatPanel {
             result: None,
             timestamp: simple_timestamp(),
         });
+        // Note: we do NOT trim_items here. Tool-call indices are referenced
+        // by `update_tool_status`/`set_tool_result` later, and trimming
+        // would invalidate them. Tool calls are paired with text and
+        // overall message volume is what we cap at the text push sites.
         self.scroll_to_bottom();
         idx
     }
@@ -377,6 +418,7 @@ impl ChatPanel {
             content: text.to_string(),
             timestamp: simple_timestamp(),
         });
+        self.trim_items();
         self.scroll_to_bottom();
     }
 

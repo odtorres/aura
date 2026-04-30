@@ -150,7 +150,6 @@ impl ContextMenu {
             None
         }
     }
-
 }
 
 #[cfg(test)]

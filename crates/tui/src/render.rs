@@ -3171,11 +3171,32 @@ fn format_tool_input(name: &str, input: &serde_json::Value) -> String {
 
 fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.source_control_focused;
-    let (title, border_color) = if focused {
-        (" Git [focused] ", Color::Yellow)
+    // A subtle rotating glyph in the title shows when the git worker is
+    // doing something. Appearing instantly on click confirms the UI is
+    // responsive even on slow repos.
+    let spinner = if app.source_control.commit_in_flight() {
+        " ⏳ committing"
+    } else if app.source_control.any_in_flight() {
+        match (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() / 120)
+            .unwrap_or(0)
+            % 4) as u8
+        {
+            0 => " ⠋",
+            1 => " ⠙",
+            2 => " ⠹",
+            _ => " ⠸",
+        }
     } else {
-        (" Git ", Color::Cyan)
+        ""
     };
+    let title = if focused {
+        format!(" Git [focused]{spinner} ")
+    } else {
+        format!(" Git{spinner} ")
+    };
+    let border_color = if focused { Color::Yellow } else { Color::Cyan };
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -3244,6 +3265,21 @@ fn draw_source_control(frame: &mut Frame, app: &mut App, area: Rect) {
     // Blank separator.
     if y < max_y {
         y += 1;
+    }
+
+    // --- Last worker error (timeout, commit failure, etc.) ---
+    if let Some(err) = sc.last_error.as_ref() {
+        if y < max_y {
+            let truncated: String = err.chars().take(inner.width as usize).collect();
+            frame.render_widget(
+                Paragraph::new(Span::styled(truncated, Style::default().fg(Color::Red))),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+        if y < max_y {
+            y += 1;
+        }
     }
 
     // --- Commit message box ---
