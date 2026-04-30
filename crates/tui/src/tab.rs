@@ -162,6 +162,16 @@ pub struct EditorTab {
     /// `None` means the cache is stale and must be recomputed on next access.
     /// Rebuilt at most once per edit instead of once per frame.
     pub bracket_cache: Option<std::collections::HashMap<usize, Vec<(usize, u8)>>>,
+    /// Cache of per-line minimap text, sized to `buffer.line_count()`.
+    /// Each entry is the line trimmed of trailing newlines. Refreshed
+    /// lazily when `bracket_cache_rev` no longer matches the buffer's
+    /// current `revision`. Avoids allocating a fresh `Vec<String>` of
+    /// every line on every frame the minimap is visible — that work
+    /// scales with file length and used to dominate render time on
+    /// 10k-line files.
+    pub minimap_lines_cache: Vec<String>,
+    /// Buffer revision the `minimap_lines_cache` was built against.
+    pub minimap_cache_rev: u64,
     /// When the CRDT history was last compacted during idle time. Used to
     /// rate-limit the idle-compaction check in the main event loop — we never
     /// compact more often than the idle threshold, even if the user alternates
@@ -268,6 +278,11 @@ impl EditorTab {
             test_lines: Vec::new(),
             diff: None,
             bracket_cache: None,
+            minimap_lines_cache: Vec::new(),
+            // Sentinel so the very first read forces a rebuild — the
+            // buffer starts at revision 0, but we want the cache to
+            // populate on first frame even if the buffer is unedited.
+            minimap_cache_rev: u64::MAX,
             last_idle_compact: Instant::now(),
         };
         tab.refresh_semantic_index();
@@ -308,6 +323,31 @@ impl EditorTab {
         self.lsp_change_pending = true;
         self.lsp_last_change = Instant::now();
         self.bracket_cache = None;
+    }
+
+    /// Return the per-line minimap text cache, rebuilding only when the
+    /// buffer revision has changed. The minimap renderer used to walk the
+    /// rope and allocate a fresh `Vec<String>` of every line on every
+    /// frame — this caches that work behind `Buffer::revision`.
+    pub fn minimap_lines(&mut self) -> &[String] {
+        let rev = self.buffer.revision();
+        if self.minimap_cache_rev != rev {
+            let total = self.buffer.line_count();
+            // Reuse capacity across rebuilds to avoid Vec churn on edits.
+            self.minimap_lines_cache.clear();
+            self.minimap_lines_cache.reserve(total);
+            for i in 0..total {
+                let s = self
+                    .buffer
+                    .rope()
+                    .get_line(i)
+                    .map(|l| l.to_string().trim_end_matches('\n').to_string())
+                    .unwrap_or_default();
+                self.minimap_lines_cache.push(s);
+            }
+            self.minimap_cache_rev = rev;
+        }
+        &self.minimap_lines_cache
     }
 
     /// Return the bracket-depth cache, rebuilding it from the buffer if stale.

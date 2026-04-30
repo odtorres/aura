@@ -6287,42 +6287,39 @@ fn draw_editor_pane(
 
     // Minimap.
     if let Some(minimap_rect) = minimap_area {
-        let tab = &app.tabs.tabs()[tab_idx];
-        let theme = &app.theme;
-        let total_lines = tab.buffer.line_count();
-        let scroll_row = tab.scroll_row;
+        // Build markers under an immutable borrow of the tab and theme.
+        let (total_lines, scroll_row, markers) = {
+            let tab = &app.tabs.tabs()[tab_idx];
+            let theme = &app.theme;
+            let total_lines = tab.buffer.line_count();
+            let scroll_row = tab.scroll_row;
+            let mut markers: Vec<(usize, Color)> = Vec::new();
+            for d in &tab.diagnostics {
+                let color = if d.is_error() {
+                    theme.error
+                } else if d.is_warning() {
+                    theme.warning
+                } else {
+                    theme.info
+                };
+                markers.push((d.range.start.line as usize, color));
+            }
+            markers.sort_by_key(|&(line, color)| {
+                let prio = match color {
+                    c if c == theme.error => 2u8,
+                    c if c == theme.warning => 1,
+                    _ => 0,
+                };
+                (prio, line)
+            });
+            (total_lines, scroll_row, markers)
+        };
         let viewport_h = content_area.height as usize;
 
-        let mut markers: Vec<(usize, Color)> = Vec::new();
-        for d in &tab.diagnostics {
-            let color = if d.is_error() {
-                theme.error
-            } else if d.is_warning() {
-                theme.warning
-            } else {
-                theme.info
-            };
-            markers.push((d.range.start.line as usize, color));
-        }
-        markers.sort_by_key(|&(line, color)| {
-            let prio = match color {
-                c if c == theme.error => 2u8,
-                c if c == theme.warning => 1,
-                _ => 0,
-            };
-            (prio, line)
-        });
-
-        // Collect buffer lines for minimap code preview.
-        let buffer_lines: Vec<String> = (0..total_lines)
-            .map(|i| {
-                tab.buffer
-                    .rope()
-                    .get_line(i)
-                    .map(|l| l.to_string().trim_end_matches('\n').to_string())
-                    .unwrap_or_default()
-            })
-            .collect();
+        // Reuse a per-tab cache of stringified lines, keyed on the
+        // buffer revision. Skips ~`total_lines` allocations per frame
+        // when the buffer hasn't changed since the previous frame.
+        let buffer_lines = app.tabs.tabs_mut()[tab_idx].minimap_lines();
 
         draw_minimap(
             frame,
@@ -6331,7 +6328,7 @@ fn draw_editor_pane(
             total_lines,
             scroll_row,
             viewport_h,
-            &buffer_lines,
+            buffer_lines,
         );
     }
 }

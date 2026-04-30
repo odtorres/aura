@@ -4,6 +4,24 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.21] — 2026-04-30
+
+### Performance — hot path
+
+- **Minimap line cache** — `draw_editor_pane` used to allocate a fresh
+  `Vec<String>` of every line in the buffer on every frame the minimap
+  was visible. On a 10k-line file that's 10k strings per frame, often
+  60+ times a second while idle. The cache now lives on `EditorTab`
+  (`minimap_lines_cache`, `minimap_cache_rev`) and is keyed on
+  `Buffer::revision()` from v1.2.20 — so it rebuilds at most once per
+  edit, not once per frame. Vec capacity is reused across rebuilds.
+  Visible as lower CPU during idle on big files with the minimap on.
+
+### Internal
+
+- New `EditorTab::minimap_lines()` accessor with lazy revision-keyed
+  rebuild.
+
 ## [1.2.20] — 2026-04-30
 
 ### Performance & responsiveness — major
