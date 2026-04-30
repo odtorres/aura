@@ -29,6 +29,7 @@ pub(crate) mod checkpoints;
 pub(crate) mod claude_watcher;
 pub(crate) mod collab;
 pub(crate) mod command_palette;
+pub(crate) mod context_menu;
 pub(crate) mod context_pin;
 pub(crate) mod conversation_history;
 pub(crate) mod dap;

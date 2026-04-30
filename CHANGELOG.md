@@ -4,6 +4,25 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.19] — 2026-04-29
+
+### Added
+- **Right-click context menu in the editor** — right-clicking inside
+  the editor area now opens a small popup with Cut, Copy, Paste,
+  Delete, and Select All. Items that need a selection (Cut / Copy /
+  Delete) are dimmed and disabled when none is active. The menu is
+  navigable with Up/Down + Enter, dismissed with Esc, click outside,
+  or any other key. Wired into the existing `set_yank` / clipboard
+  ring / `Buffer::insert` plumbing so it interoperates with vim-style
+  registers. New `context_menu` module with 6 unit tests.
+- **Mouse-wheel scroll now works in every editor view** — the diff
+  view (single-buffer git diff) and the 3-panel merge conflict editor
+  already had `scroll_up`/`scroll_down` methods but the wheel only
+  scrolled the underlying text buffer. `handle_mouse_scroll` now
+  dispatches based on what's actually in front of the user: merge view
+  scrolls all three panels in sync, diff view scrolls its own
+  cumulative-line index, plain text buffers behave as before.
+
 ## [1.2.18] — 2026-04-29
 
 ### Fixed

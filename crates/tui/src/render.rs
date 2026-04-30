@@ -523,6 +523,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_which_key_popup(frame, app, area);
         }
 
+        // Right-click context menu always renders on top of every other
+        // overlay, since it is the most recently user-summoned popup.
+        if app.context_menu.visible {
+            draw_context_menu(frame, app, area);
+        }
+
         // Position the terminal cursor.
         if app.file_picker.visible {
             // No editor cursor while the file picker is open.
@@ -8293,6 +8299,61 @@ fn draw_which_key_popup(frame: &mut Frame, app: &App, area: Rect) {
         ]);
         let w = col_width.min(inner.width.saturating_sub(col as u16 * col_width));
         frame.render_widget(Paragraph::new(line), Rect::new(x_off, y_off, w, 1));
+    }
+}
+
+/// Draw the right-click context menu overlay.
+///
+/// Anchored at the click position, clamped so the popup never escapes the
+/// screen. Disabled items are dimmed; the highlighted item gets a reverse-
+/// video bar. The rendered rect is cached on the menu so left-click hit-
+/// testing in the event loop knows where the items are.
+fn draw_context_menu(frame: &mut Frame, app: &mut App, area: Rect) {
+    let items = app.context_menu.items.clone();
+    if items.is_empty() {
+        return;
+    }
+    let label_width = items.iter().map(|i| i.label.len()).max().unwrap_or(8) as u16;
+    // 2 cells of padding on each side inside the borders.
+    let width = (label_width + 4).max(12);
+    let height = items.len() as u16 + 2;
+
+    let (anchor_x, anchor_y) = app.context_menu.anchor;
+    let x = anchor_x.min(area.x + area.width.saturating_sub(width));
+    let y = anchor_y.min(area.y + area.height.saturating_sub(height));
+    let popup = Rect::new(x, y, width, height);
+    app.context_menu.rect = popup;
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().bg(Color::Rgb(40, 40, 50)));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    for (i, item) in items.iter().enumerate() {
+        let row_y = inner.y + i as u16;
+        if row_y >= inner.y + inner.height {
+            break;
+        }
+        let is_selected = i == app.context_menu.selected && item.enabled;
+        let label_style = if !item.enabled {
+            Style::default()
+                .fg(Color::DarkGray)
+                .bg(Color::Rgb(40, 40, 50))
+        } else if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(180, 180, 220))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White).bg(Color::Rgb(40, 40, 50))
+        };
+        let line = format!(" {:<width$} ", item.label, width = label_width as usize);
+        let row_rect = Rect::new(inner.x, row_y, inner.width, 1);
+        frame.render_widget(Paragraph::new(Span::styled(line, label_style)), row_rect);
     }
 }
 

@@ -588,6 +588,8 @@ pub struct App {
     pub settings_modal: crate::settings_modal::SettingsModal,
     /// Command palette overlay.
     pub command_palette: crate::command_palette::CommandPalette,
+    /// Right-click context menu overlay (Cut / Copy / Paste / Delete / Select All).
+    pub context_menu: crate::context_menu::ContextMenu,
     /// Branch picker modal.
     pub branch_picker: crate::branch_picker::BranchPicker,
     /// Git graph modal.
@@ -1174,6 +1176,7 @@ impl App {
             help: HelpOverlay::new(),
             settings_modal: crate::settings_modal::SettingsModal::new(),
             command_palette: crate::command_palette::CommandPalette::new(),
+            context_menu: crate::context_menu::ContextMenu::default(),
             branch_picker: crate::branch_picker::BranchPicker::new(),
             git_graph: crate::git_graph::GitGraphModal::new(),
             rebase_modal: crate::rebase_modal::InteractiveRebaseModal::new(),
@@ -1684,12 +1687,39 @@ impl App {
                     Event::Key(key) => self.handle_key(key.code, key.modifiers),
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left) => {
+                            // If the right-click context menu is showing,
+                            // route this click to it: an item click executes
+                            // its action, anything else dismisses the menu.
+                            if self.context_menu.visible {
+                                if let Some(action) =
+                                    self.context_menu.action_at(mouse.column, mouse.row)
+                                {
+                                    self.run_context_menu_action(action);
+                                } else {
+                                    self.context_menu.close();
+                                }
+                                continue;
+                            }
                             // Check if click is on a panel border for resizing.
                             if let Some(drag) = self.detect_panel_border(mouse.column, mouse.row) {
                                 self.panel_resize_drag = Some(drag);
                             } else {
                                 self.panel_resize_drag = None;
                                 self.handle_mouse_click(mouse.column, mouse.row);
+                            }
+                        }
+                        MouseEventKind::Down(MouseButton::Right) => {
+                            // Right-click over the editor area opens the
+                            // context menu. Anywhere else, ignore.
+                            let r = self.editor_rect;
+                            let in_editor = r.width > 0
+                                && r.height > 0
+                                && mouse.column >= r.x
+                                && mouse.column < r.x + r.width
+                                && mouse.row >= r.y
+                                && mouse.row < r.y + r.height;
+                            if in_editor {
+                                self.open_context_menu(mouse.column, mouse.row);
                             }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
@@ -2048,6 +2078,36 @@ impl App {
 
     /// Route key events based on the current mode.
     fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        // The right-click context menu, when visible, captures keys before any
+        // mode-specific input handler so it can be navigated/dismissed without
+        // editing the buffer underneath.
+        if self.context_menu.visible {
+            match code {
+                KeyCode::Esc => {
+                    self.context_menu.close();
+                }
+                KeyCode::Up => {
+                    self.context_menu.select_prev();
+                }
+                KeyCode::Down => {
+                    self.context_menu.select_next();
+                }
+                KeyCode::Enter => {
+                    if let Some(action) = self.context_menu.current_action() {
+                        self.run_context_menu_action(action);
+                    } else {
+                        self.context_menu.close();
+                    }
+                }
+                _ => {
+                    // Any other key dismisses without acting, so the user can
+                    // get back to typing without a stray no-op.
+                    self.context_menu.close();
+                }
+            }
+            return;
+        }
+
         let key_event = crossterm::event::KeyEvent::new(code, modifiers);
         let prev_mode = self.mode;
 
@@ -7710,9 +7770,30 @@ impl App {
         let scroll_lines: usize = 3;
 
         if point_in(self.editor_rect) {
-            // Scroll the editor viewport and keep cursor within the visible area
-            // so that scroll_to_cursor (called every frame) does not reset the scroll.
             let viewport_h = self.editor_rect.height.saturating_sub(2) as usize; // borders
+
+            // Merge view takes over the editor area — scroll all 3 panels.
+            if let Some(view) = self.merge_view.as_mut() {
+                if up {
+                    view.scroll_up(scroll_lines);
+                } else {
+                    view.scroll_down(scroll_lines, viewport_h);
+                }
+                return;
+            }
+            // Diff view takes over the editor area when the active tab has a diff.
+            if let Some(diff) = self.tab_mut().diff.as_mut() {
+                if up {
+                    diff.scroll_up(scroll_lines);
+                } else {
+                    diff.scroll_down(scroll_lines, viewport_h);
+                }
+                return;
+            }
+
+            // Plain text editor: scroll the buffer viewport and keep cursor
+            // within the visible area so that scroll_to_cursor (called every
+            // frame) does not reset the scroll.
             let margin = self.config.editor.scroll_margin;
             {
                 let tab = self.tab_mut();
@@ -11037,6 +11118,88 @@ impl App {
             .insert(insert_pos, &line_text, aura_core::AuthorId::Human);
         self.tab_mut().cursor.row = row - 1;
         self.mark_highlights_dirty();
+    }
+
+    /// Open the right-click context menu at the click location.
+    ///
+    /// Items that need a selection (Cut/Copy/Delete) are auto-disabled when
+    /// `visual_selection_range` returns `None`.
+    pub fn open_context_menu(&mut self, col: u16, row: u16) {
+        let has_selection = self.visual_selection_range().is_some();
+        self.context_menu.open(col, row, has_selection);
+    }
+
+    /// Dispatch a context-menu action against the current buffer/selection
+    /// and close the menu.
+    pub fn run_context_menu_action(&mut self, action: crate::context_menu::ContextMenuAction) {
+        use crate::context_menu::ContextMenuAction;
+        match action {
+            ContextMenuAction::Copy => {
+                if let Some((s, e)) = self.visual_selection_range() {
+                    let text = self.tab().buffer.rope().slice(s..e).to_string();
+                    self.set_yank(text);
+                    self.tab_mut().visual_anchor = None;
+                    self.mode = Mode::Normal;
+                    self.set_status("Copied");
+                }
+            }
+            ContextMenuAction::Cut => {
+                if let Some((s, e)) = self.visual_selection_range() {
+                    let text = self.tab().buffer.rope().slice(s..e).to_string();
+                    self.set_yank(text);
+                    self.tab_mut()
+                        .buffer
+                        .delete(s, e, aura_core::AuthorId::Human);
+                    self.tab_mut().cursor = self.tab().buffer.char_idx_to_cursor(s);
+                    self.tab_mut().visual_anchor = None;
+                    self.mode = Mode::Normal;
+                    self.clamp_cursor();
+                    self.mark_highlights_dirty();
+                    self.set_status("Cut");
+                }
+            }
+            ContextMenuAction::Delete => {
+                if let Some((s, e)) = self.visual_selection_range() {
+                    self.tab_mut()
+                        .buffer
+                        .delete(s, e, aura_core::AuthorId::Human);
+                    self.tab_mut().cursor = self.tab().buffer.char_idx_to_cursor(s);
+                    self.tab_mut().visual_anchor = None;
+                    self.mode = Mode::Normal;
+                    self.clamp_cursor();
+                    self.mark_highlights_dirty();
+                }
+            }
+            ContextMenuAction::Paste => {
+                let text = arboard::Clipboard::new()
+                    .ok()
+                    .and_then(|mut c| c.get_text().ok())
+                    .or_else(|| self.register.clone());
+                if let Some(text) = text {
+                    if !text.is_empty() {
+                        let pos = self.tab().buffer.cursor_to_char_idx(&self.tab().cursor);
+                        self.tab_mut()
+                            .buffer
+                            .insert(pos, &text, aura_core::AuthorId::Human);
+                        let new_pos = pos + text.chars().count();
+                        self.tab_mut().cursor = self.tab().buffer.char_idx_to_cursor(new_pos);
+                        self.clamp_cursor();
+                        self.mark_highlights_dirty();
+                        self.set_status("Pasted");
+                    }
+                } else {
+                    self.set_status("Nothing to paste");
+                }
+            }
+            ContextMenuAction::SelectAll => {
+                let last_idx = self.tab().buffer.len_chars().saturating_sub(1);
+                let end_cursor = self.tab().buffer.char_idx_to_cursor(last_idx);
+                self.tab_mut().visual_anchor = Some(Cursor::new(0, 0));
+                self.tab_mut().cursor = end_cursor;
+                self.mode = Mode::Visual;
+            }
+        }
+        self.context_menu.close();
     }
 
     /// Set the yank register and optionally sync to system clipboard.
