@@ -16,20 +16,50 @@
 //! codebase uses for I/O-bound work.
 
 use std::io::Read;
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::git::GitStatusEntry;
 
 /// Default timeout for read-only refresh operations.
-pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(8);
+///
+/// Bumped from 8 s to 30 s after we observed `git status` exceeding 8 s
+/// on slow filesystems (network mounts, large worktrees, cold caches),
+/// causing the worker to SIGKILL git mid-write and orphan
+/// `.git/index.lock`.
+pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Hard timeout for `git commit` — picked so a normal signing setup
 /// (gpg-agent, pinentry-loopback) can still complete, but a hung
 /// interactive prompt is killed before the user gives up.
 pub const COMMIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Grace period given to `git` after SIGTERM before we escalate to SIGKILL.
+/// 500 ms is enough for git to remove its `index.lock` on a normal exit
+/// without making the user wait noticeably longer on a hung process.
+const SIGTERM_GRACE: Duration = Duration::from_millis(500);
+
+/// Process-wide mutex serializing every `git` subprocess invocation that
+/// originates from Aura. Both the worker thread and the synchronous
+/// `GitRepo` write paths take this lock, so we never have two Aura-owned
+/// `git` processes racing on `.git/index.lock` at the same time.
+///
+/// External `git` invocations (e.g., the user typing `git add` in their
+/// shell) are obviously not covered — those are handled by the
+/// `index.lock`-aware deferral in `app::tick_source_control`.
+pub fn git_cli_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Run a `git` subprocess command, serialized with every other Aura git
+/// invocation via [`git_cli_lock`]. Mirrors `Command::output()`.
+pub fn run_git_serialized(cmd: &mut Command) -> std::io::Result<Output> {
+    let _guard = git_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
+    cmd.output()
+}
 
 /// Which kind of git refresh produced an event — used by the panel to
 /// match an in-flight request to a result, and for status-line indicators.
@@ -169,11 +199,12 @@ fn worker_loop(workdir: PathBuf, cmd_rx: Receiver<GitCommand>, event_tx: Sender<
 
 /// Returns true if `git config --get commit.gpgsign` resolves to a truthy value.
 fn probe_gpgsign(workdir: &PathBuf) -> bool {
-    let out = Command::new("git")
-        .args(["config", "--get", "commit.gpgsign"])
-        .current_dir(workdir)
-        .stdin(Stdio::null())
-        .output();
+    let out = run_git_serialized(
+        Command::new("git")
+            .args(["config", "--get", "commit.gpgsign"])
+            .current_dir(workdir)
+            .stdin(Stdio::null()),
+    );
     matches!(
         out,
         Ok(o) if o.status.success()
@@ -193,6 +224,7 @@ fn run_status(workdir: &PathBuf, event_tx: &Sender<GitEvent>) {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
         REFRESH_TIMEOUT,
+        Some(workdir),
     ) {
         TimedOutput::Ok { stdout, .. } => {
             let entries = parse_porcelain_v1(&stdout);
@@ -219,6 +251,7 @@ fn run_branch_info(workdir: &PathBuf, event_tx: &Sender<GitEvent>) {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
         REFRESH_TIMEOUT,
+        Some(workdir),
     ) {
         TimedOutput::Ok { stdout, .. } => {
             let text = String::from_utf8_lossy(&stdout);
@@ -253,6 +286,7 @@ fn run_stashes(workdir: &PathBuf, event_tx: &Sender<GitEvent>) {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
         REFRESH_TIMEOUT,
+        Some(workdir),
     ) {
         TimedOutput::Ok { stdout, .. } => {
             let text = String::from_utf8_lossy(&stdout);
@@ -288,6 +322,7 @@ fn run_commit(workdir: &PathBuf, message: &str, event_tx: &Sender<GitEvent>) {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
         COMMIT_TIMEOUT,
+        Some(workdir),
     ) {
         TimedOutput::Ok {
             status_success,
@@ -325,12 +360,13 @@ fn run_commit(workdir: &PathBuf, message: &str, event_tx: &Sender<GitEvent>) {
 
 /// Read the new HEAD short hash after a successful commit.
 fn read_head_short(workdir: &PathBuf) -> Option<String> {
-    let out = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(workdir)
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
+    let out = run_git_serialized(
+        Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .current_dir(workdir)
+            .stdin(Stdio::null()),
+    )
+    .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -351,10 +387,31 @@ enum TimedOutput {
 /// Spawn the configured `Command`, poll `try_wait` every 50 ms, and kill
 /// the child if `timeout` elapses without the process exiting.
 ///
+/// On timeout we send SIGTERM first and give git a brief grace window
+/// ([`SIGTERM_GRACE`]) to release `.git/index.lock` cleanly before we
+/// escalate to SIGKILL. After SIGKILL, we sweep any `index.lock` that
+/// appeared during this run — a SIGKILL between lock acquisition and
+/// the rename-into-place leaves a stale lock that blocks every later
+/// `git add` until removed.
+///
+/// The whole run holds [`git_cli_lock`] so other Aura-owned git
+/// subprocesses can't collide with it.
+///
+/// `workdir` is needed for the post-timeout lock sweep. If it is `None`,
+/// the sweep is skipped (used by the timeout self-test).
+///
 /// Caller must already have configured `stdin`/`stdout`/`stderr` on the
 /// `Command` (we don't re-pipe here because the caller may want to vary
 /// it per command).
-fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> TimedOutput {
+fn run_with_timeout(cmd: &mut Command, timeout: Duration, workdir: Option<&Path>) -> TimedOutput {
+    let _guard = git_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
+
+    // Snapshot the lock state before spawning. `None` = no pre-existing
+    // lock; if we time out and a lock is present afterward, it's one we
+    // (or git on our behalf) created and orphaned.
+    let lock_path = workdir.map(|w| w.join(".git").join("index.lock"));
+    let pre_existed = lock_path.as_deref().map(|p| p.exists()).unwrap_or(false);
+
     let mut child: Child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return TimedOutput::Failed(format!("spawn failed: {e}")),
@@ -379,13 +436,76 @@ fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> TimedOutput {
             }
             Ok(None) => {
                 if started.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    terminate_child(&mut child);
+                    if !pre_existed {
+                        if let Some(ref p) = lock_path {
+                            sweep_orphan_lock(p, started);
+                        }
+                    }
                     return TimedOutput::Timeout;
                 }
                 thread::sleep(Duration::from_millis(50));
             }
             Err(e) => return TimedOutput::Failed(format!("wait failed: {e}")),
+        }
+    }
+}
+
+/// Send SIGTERM, give git a [`SIGTERM_GRACE`] window to clean up its
+/// `index.lock`, then escalate to SIGKILL. On non-Unix platforms we have
+/// no SIGTERM equivalent that `Command` exposes, so we fall through to
+/// the immediate kill.
+fn terminate_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: `child.id()` returns a valid process id while the
+        // child handle has not been waited on. `libc::kill` is async-
+        // signal-safe and just delivers a signal.
+        let pid = child.id() as libc::pid_t;
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        let deadline = Instant::now() + SIGTERM_GRACE;
+        while Instant::now() < deadline {
+            match child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => thread::sleep(Duration::from_millis(25)),
+                Err(_) => break,
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Remove `.git/index.lock` if it appeared during this run and is
+/// therefore an orphan we created. Mtime check is a cheap heuristic:
+/// we only delete locks whose mtime is at-or-after `run_started`, which
+/// rules out a fresh lock created by another process the instant we
+/// returned.
+fn sweep_orphan_lock(lock_path: &Path, run_started: Instant) {
+    let Ok(meta) = std::fs::metadata(lock_path) else {
+        return; // gone already — nothing to clean up
+    };
+    let Ok(mtime) = meta.modified() else {
+        // No mtime support — be conservative and don't touch it.
+        return;
+    };
+    // Convert `run_started` (Instant) to a SystemTime threshold. We can't
+    // compare Instant↔SystemTime directly, so derive the threshold by
+    // walking back from "now": threshold = now - elapsed_since_started.
+    let elapsed = run_started.elapsed();
+    let threshold = SystemTime::now()
+        .checked_sub(elapsed)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    if mtime >= threshold {
+        match std::fs::remove_file(lock_path) {
+            Ok(()) => {
+                tracing::warn!("swept orphan {} after git timeout", lock_path.display());
+            }
+            Err(e) => {
+                tracing::debug!("failed to sweep orphan {}: {}", lock_path.display(), e);
+            }
         }
     }
 }
@@ -449,10 +569,10 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let started = Instant::now();
-        let res = run_with_timeout(&mut cmd, Duration::from_millis(200));
+        let res = run_with_timeout(&mut cmd, Duration::from_millis(200), None);
         let elapsed = started.elapsed();
         assert!(matches!(res, TimedOutput::Timeout));
-        // Should kill within ~one poll period of the timeout.
+        // SIGTERM grace + poll period; comfortably under a second normally.
         assert!(
             elapsed < Duration::from_secs(2),
             "kill took too long: {elapsed:?}"
@@ -465,10 +585,62 @@ mod tests {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let res = run_with_timeout(&mut cmd, Duration::from_secs(5));
+        let res = run_with_timeout(&mut cmd, Duration::from_secs(5), None);
         match res {
             TimedOutput::Ok { status_success, .. } => assert!(status_success),
             _ => panic!("expected Ok"),
         }
+    }
+
+    /// Simulates a hung `git` mid-write: spawn a `sh` process that
+    /// creates `.git/index.lock` and then sleeps. After timeout, the
+    /// orphaned lock should be swept.
+    #[cfg(unix)]
+    #[test]
+    fn timeout_sweeps_orphan_index_lock() {
+        let dir = std::env::temp_dir().join(format!("aura-git-sweep-{}", std::process::id()));
+        let git_dir = dir.join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let lock = git_dir.join("index.lock");
+        // Start with no lock present so the run flags it as orphan-eligible.
+        let _ = std::fs::remove_file(&lock);
+
+        let script = format!("touch {}; sleep 30", lock.display());
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(script)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let res = run_with_timeout(&mut cmd, Duration::from_millis(300), Some(&dir));
+        assert!(matches!(res, TimedOutput::Timeout));
+        assert!(!lock.exists(), "orphan index.lock should have been swept");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// If a lock already exists when the run starts, the sweep must
+    /// leave it alone — it isn't ours to remove.
+    #[cfg(unix)]
+    #[test]
+    fn timeout_preserves_pre_existing_index_lock() {
+        let dir = std::env::temp_dir().join(format!("aura-git-preserve-{}", std::process::id()));
+        let git_dir = dir.join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let lock = git_dir.join("index.lock");
+        std::fs::write(&lock, b"").unwrap();
+
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let res = run_with_timeout(&mut cmd, Duration::from_millis(200), Some(&dir));
+        assert!(matches!(res, TimedOutput::Timeout));
+        assert!(lock.exists(), "pre-existing index.lock must not be swept");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

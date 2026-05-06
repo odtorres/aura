@@ -1684,10 +1684,25 @@ impl App {
             }
 
             // Auto-refresh source control panel every 2 seconds when visible.
+            //
+            // Skip the tick if `.git/index.lock` is present — that means the
+            // user (or another tool) is in the middle of an index-modifying
+            // git command, and our `git status` would either fail outright
+            // or race with their write. We bump the timer either way so the
+            // check runs at most once per 2 s window.
             if self.sidebar_view == SidebarView::Git
                 && self.last_sc_refresh.elapsed() > Duration::from_secs(2)
             {
-                self.refresh_source_control();
+                let externally_locked = self
+                    .git_repo
+                    .as_ref()
+                    .map(|r| r.is_locked())
+                    .unwrap_or(false);
+                if externally_locked {
+                    self.last_sc_refresh = std::time::Instant::now();
+                } else {
+                    self.refresh_source_control();
+                }
             }
 
             // Auto-refresh file tree every 2 seconds when visible.

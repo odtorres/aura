@@ -4,6 +4,41 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.23] — 2026-05-06
+
+### Fixed
+- **No more stale `.git/index.lock` from Aura's source-control poll** —
+  the 2 s `git status` poll could exceed the worker's 8 s wall-clock
+  timeout on slow filesystems, at which point the worker `SIGKILL`ed
+  `git` mid-write and orphaned `.git/index.lock`. The next `git add`
+  in any terminal would then fail with `Unable to create
+  '.git/index.lock': File exists` until the user removed it manually.
+  Multiple changes harden this end-to-end:
+  - `REFRESH_TIMEOUT` raised 8 s → 30 s so a slow `git status` no
+    longer trips the kill path on a normal workload.
+  - On timeout, the worker now sends `SIGTERM` and waits up to 500 ms
+    for git to release its lock cleanly before escalating to
+    `SIGKILL` (Unix only — `Command::kill` is the fallback elsewhere).
+  - After a forced kill, the worker sweeps `.git/index.lock` if it
+    appeared during the killed run, so an orphan can't survive past
+    the operation that created it. Pre-existing locks (from another
+    process) are left alone.
+  - The 2 s auto-refresh tick now skips firing while
+    `.git/index.lock` is present, so an external `git add` running
+    in a terminal can't race Aura's poll.
+
+### Internal
+- New process-wide `git_cli_lock()` mutex serializes every `git`
+  subprocess that originates from Aura — both the async worker and
+  the synchronous `GitRepo` write paths (`stage_file`, `unstage_file`,
+  `commit`, `checkout_branch`, all stash ops, …) take the same lock,
+  so internal git ops can't race each other either.
+- New `GitRepo::is_locked()` uses gix's authoritative `git_dir()`,
+  so the lock check works in worktrees and submodules where `.git`
+  is a file rather than a directory.
+- New `libc` dep (`cfg(unix)`-gated on the tui crate) for raw
+  `SIGTERM` delivery.
+
 ## [1.2.22] — 2026-04-30
 
 ### Fixed

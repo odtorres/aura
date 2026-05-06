@@ -6,6 +6,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::git_worker::run_git_serialized;
+
 /// Line-level git diff status for gutter rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineStatus {
@@ -207,6 +209,19 @@ impl GitRepo {
         &self.workdir
     }
 
+    /// Returns true if `.git/index.lock` exists in this repository.
+    ///
+    /// Used by the source-control auto-refresh tick to skip a `git status`
+    /// poll while the user (or any other process) is in the middle of an
+    /// index-modifying operation. Otherwise our 2 s poll could race the
+    /// user's `git add`, with both processes seeing a lock that the other
+    /// one created.
+    pub fn is_locked(&self) -> bool {
+        // Use gix's authoritative git-dir path so submodules and worktrees
+        // (where `.git` is a file, not a directory) work correctly.
+        self.repo.git_dir().join("index.lock").exists()
+    }
+
     /// Compute line-level diff status for a file (comparing working tree to HEAD).
     pub fn line_status(&mut self, file_path: &Path) -> &HashMap<usize, LineStatus> {
         // Return cached if same file.
@@ -310,11 +325,12 @@ impl GitRepo {
 
     /// Internal: run `git blame --porcelain` and parse the output.
     fn compute_blame(&mut self, file_path: &Path) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["blame", "--porcelain"])
-            .arg(file_path)
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["blame", "--porcelain"])
+                .arg(file_path)
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!("git blame failed");
@@ -424,12 +440,13 @@ impl GitRepo {
         let rel_path = file_path.strip_prefix(&self.workdir).unwrap_or(file_path);
 
         // Stage the file.
-        let add_output = std::process::Command::new("git")
-            .args(["add", "--"])
-            .arg(rel_path)
-            .current_dir(&self.workdir)
-            .stdin(std::process::Stdio::null())
-            .output()?;
+        let add_output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["add", "--"])
+                .arg(rel_path)
+                .current_dir(&self.workdir)
+                .stdin(std::process::Stdio::null()),
+        )?;
 
         if !add_output.status.success() {
             anyhow::bail!(
@@ -441,11 +458,12 @@ impl GitRepo {
         // Create the commit. `Stdio::null()` keeps `pre-commit` hooks and
         // GPG signing prompts from hanging the main thread waiting on a
         // TTY that the editor can't provide.
-        let commit_output = std::process::Command::new("git")
-            .args(["commit", "-m", message])
-            .current_dir(&self.workdir)
-            .stdin(std::process::Stdio::null())
-            .output()?;
+        let commit_output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["commit", "-m", message])
+                .current_dir(&self.workdir)
+                .stdin(std::process::Stdio::null()),
+        )?;
 
         if !commit_output.status.success() {
             anyhow::bail!(
@@ -476,10 +494,11 @@ impl GitRepo {
 
     /// Switch to a branch (checkout).
     pub fn checkout_branch(&mut self, branch_name: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["checkout", branch_name])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["checkout", branch_name])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -496,10 +515,11 @@ impl GitRepo {
 
     /// Create and checkout a new branch.
     pub fn create_branch(&mut self, branch_name: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["checkout", "-b", branch_name])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["checkout", "-b", branch_name])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -523,10 +543,11 @@ impl GitRepo {
 
         // Use a NUL-delimited format: hash, author, full body separated by \x1f (unit separator).
         // Format: <hash>\x1f<author>\x1f<subject>\x1f<body>\0
-        let output = std::process::Command::new("git")
-            .args(["log", &count_arg, "--format=%h\x1f%an\x1f%s\x1f%b\x00"])
-            .current_dir(&self.workdir)
-            .output();
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["log", &count_arg, "--format=%h\x1f%an\x1f%s\x1f%b\x00"])
+                .current_dir(&self.workdir),
+        );
 
         let output = match output {
             Ok(o) if o.status.success() => o,
@@ -579,21 +600,23 @@ impl GitRepo {
 
     /// Generate an AI-friendly diff summary for commit message generation.
     pub fn diff_summary(&self, file_path: &Path) -> anyhow::Result<String> {
-        let output = std::process::Command::new("git")
-            .args(["diff", "--cached", "--stat", "--"])
-            .arg(file_path)
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["diff", "--cached", "--stat", "--"])
+                .arg(file_path)
+                .current_dir(&self.workdir),
+        )?;
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// Parse `git status --porcelain=v1` into structured entries.
     pub fn file_status(&self) -> anyhow::Result<Vec<GitStatusEntry>> {
-        let output = std::process::Command::new("git")
-            .args(["status", "--porcelain=v1"])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["status", "--porcelain=v1"])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -627,10 +650,11 @@ impl GitRepo {
 
     /// Stage a file by relative path.
     pub fn stage_file(&self, rel_path: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["add", "--", rel_path])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["add", "--", rel_path])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -643,10 +667,11 @@ impl GitRepo {
 
     /// Unstage a file by relative path.
     pub fn unstage_file(&self, rel_path: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["restore", "--staged", "--", rel_path])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["restore", "--staged", "--", rel_path])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -659,10 +684,11 @@ impl GitRepo {
 
     /// Discard unstaged changes for a file by relative path (git restore).
     pub fn discard_file(&self, rel_path: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["restore", "--", rel_path])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["restore", "--", rel_path])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -675,10 +701,11 @@ impl GitRepo {
 
     /// List all stashes. Returns (name, message) pairs.
     pub fn stash_list(&self) -> anyhow::Result<Vec<(String, String)>> {
-        let output = std::process::Command::new("git")
-            .args(["stash", "list", "--format=%gd|%s"])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["stash", "list", "--format=%gd|%s"])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             return Ok(Vec::new());
@@ -700,10 +727,11 @@ impl GitRepo {
 
     /// Push a new stash with the given message.
     pub fn stash_push(&self, message: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["stash", "push", "-m", message])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["stash", "push", "-m", message])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -716,10 +744,11 @@ impl GitRepo {
 
     /// Pop a stash by name (e.g. "stash@{0}").
     pub fn stash_pop(&self, name: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["stash", "pop", name])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["stash", "pop", name])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -732,10 +761,11 @@ impl GitRepo {
 
     /// Drop a stash by name.
     pub fn stash_drop(&self, name: &str) -> anyhow::Result<()> {
-        let output = std::process::Command::new("git")
-            .args(["stash", "drop", name])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["stash", "drop", name])
+                .current_dir(&self.workdir),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -748,10 +778,12 @@ impl GitRepo {
 
     /// Commit staged changes with the given message. Returns the new commit short hash.
     pub fn commit_staged(&self, message: &str) -> anyhow::Result<String> {
-        let output = std::process::Command::new("git")
-            .args(["commit", "-m", message])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["commit", "-m", message])
+                .current_dir(&self.workdir)
+                .stdin(std::process::Stdio::null()),
+        )?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -769,10 +801,11 @@ impl GitRepo {
     /// Returns `(ahead, behind)`. Returns `(0, 0)` if there is no upstream
     /// tracking branch configured.
     pub fn ahead_behind(&self) -> (usize, usize) {
-        let output = std::process::Command::new("git")
-            .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
-            .current_dir(&self.workdir)
-            .output();
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+                .current_dir(&self.workdir),
+        );
 
         match output {
             Ok(o) if o.status.success() => {
@@ -792,20 +825,22 @@ impl GitRepo {
 
     /// Get a stat summary of the staged diff.
     pub fn staged_diff_summary(&self) -> anyhow::Result<String> {
-        let output = std::process::Command::new("git")
-            .args(["diff", "--cached", "--stat"])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["diff", "--cached", "--stat"])
+                .current_dir(&self.workdir),
+        )?;
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// Get the full staged diff patch, truncated to a reasonable size for AI context.
     pub fn staged_diff_patch(&self, max_bytes: usize) -> anyhow::Result<String> {
-        let output = std::process::Command::new("git")
-            .args(["diff", "--cached"])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["diff", "--cached"])
+                .current_dir(&self.workdir),
+        )?;
 
         let full = String::from_utf8_lossy(&output.stdout).to_string();
         if full.len() <= max_bytes {
@@ -819,15 +854,16 @@ impl GitRepo {
 
     /// Get extended commit log with parent hashes and decorations for graph view.
     pub fn graph_log(&self, limit: usize) -> anyhow::Result<Vec<GraphCommit>> {
-        let output = std::process::Command::new("git")
-            .args([
-                "log",
-                "--all",
-                &format!("-n{limit}"),
-                "--format=%H%x00%h%x00%an%x00%s%x00%P%x00%ct%x00%D",
-            ])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args([
+                    "log",
+                    "--all",
+                    &format!("-n{limit}"),
+                    "--format=%H%x00%h%x00%an%x00%s%x00%P%x00%ct%x00%D",
+                ])
+                .current_dir(&self.workdir),
+        )?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut commits = Vec::new();
@@ -855,10 +891,11 @@ impl GitRepo {
 
     /// Get the list of files changed in a specific commit.
     pub fn commit_files(&self, hash: &str) -> anyhow::Result<Vec<(char, String)>> {
-        let output = std::process::Command::new("git")
-            .args(["diff-tree", "--name-status", "-r", "--no-commit-id", hash])
-            .current_dir(&self.workdir)
-            .output()?;
+        let output = run_git_serialized(
+            std::process::Command::new("git")
+                .args(["diff-tree", "--name-status", "-r", "--no-commit-id", hash])
+                .current_dir(&self.workdir),
+        )?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut files = Vec::new();
