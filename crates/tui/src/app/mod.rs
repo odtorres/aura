@@ -1816,6 +1816,11 @@ impl App {
                         MouseEventKind::ScrollDown => {
                             self.handle_mouse_scroll(mouse.column, mouse.row, false);
                         }
+                        MouseEventKind::Moved => {
+                            if self.context_menu.visible {
+                                self.context_menu.hover_at(mouse.column, mouse.row);
+                            }
+                        }
                         _ => {}
                     },
                     Event::Resize(_, _) => {}

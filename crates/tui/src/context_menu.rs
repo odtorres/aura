@@ -131,6 +131,27 @@ impl ContextMenu {
         }
     }
 
+    /// Update `selected` to the enabled item under `(col, row)`, if any.
+    /// Hovering the border or a disabled item leaves the highlight unchanged.
+    pub fn hover_at(&mut self, col: u16, row: u16) {
+        let r = self.rect;
+        if r.width == 0 || r.height == 0 {
+            return;
+        }
+        if col < r.x || col >= r.x + r.width || row < r.y || row >= r.y + r.height {
+            return;
+        }
+        let Some(inside_y) = row.checked_sub(r.y + 1) else {
+            return;
+        };
+        let idx = inside_y as usize;
+        if let Some(item) = self.items.get(idx) {
+            if item.enabled {
+                self.selected = idx;
+            }
+        }
+    }
+
     /// If `(col, row)` lands on an enabled item inside `self.rect`, return that
     /// action. The 1-cell border around the menu is treated as inert.
     pub fn action_at(&self, col: u16, row: u16) -> Option<ContextMenuAction> {
@@ -220,6 +241,38 @@ mod tests {
         assert_eq!(menu.action_at(15, 15), Some(ContextMenuAction::SelectAll));
         // Outside rect → none.
         assert!(menu.action_at(50, 50).is_none());
+    }
+
+    #[test]
+    fn hover_at_updates_selected_for_enabled_item() {
+        let mut menu = ContextMenu::default();
+        menu.open(10, 10, true);
+        menu.rect = Rect::new(10, 10, 14, 7);
+        menu.hover_at(15, 14); // 4th content row (y=14, inside_y=3) → Delete.
+        assert_eq!(menu.items[menu.selected].action, ContextMenuAction::Delete);
+    }
+
+    #[test]
+    fn hover_at_ignores_border_and_outside() {
+        let mut menu = ContextMenu::default();
+        menu.open(10, 10, true);
+        menu.rect = Rect::new(10, 10, 14, 7);
+        menu.hover_at(15, 12); // start at Copy
+        let before = menu.selected;
+        menu.hover_at(15, 10); // top border — no change
+        assert_eq!(menu.selected, before);
+        menu.hover_at(50, 50); // outside rect — no change
+        assert_eq!(menu.selected, before);
+    }
+
+    #[test]
+    fn hover_at_skips_disabled_item() {
+        let mut menu = ContextMenu::default();
+        menu.open(0, 0, false); // Cut/Copy/Delete disabled
+        menu.rect = Rect::new(0, 0, 14, 7);
+        let before = menu.selected; // Paste (default)
+        menu.hover_at(5, 1); // Cut row, disabled
+        assert_eq!(menu.selected, before);
     }
 
     #[test]

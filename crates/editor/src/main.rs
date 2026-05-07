@@ -70,6 +70,10 @@ fn main() -> anyhow::Result<()> {
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture
     )?;
+    // Enable any-event mouse motion tracking (CSI ?1003h) so MouseEventKind::Moved
+    // events fire even when no button is held — needed for popup hover highlighting.
+    // EnableMouseCapture alone only emits press/release/drag, not bare motion.
+    crossterm::execute!(std::io::stdout(), crossterm::style::Print("\x1b[?1003h"))?;
 
     // Run the editor.
     let mut app = App::new(buffer);
@@ -94,6 +98,7 @@ fn main() -> anyhow::Result<()> {
     let result = app.run(&mut terminal);
 
     // Restore the terminal.
+    crossterm::execute!(std::io::stdout(), crossterm::style::Print("\x1b[?1003l"))?;
     crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture)?;
     ratatui::restore();
 

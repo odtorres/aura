@@ -4,6 +4,25 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.24] — 2026-05-07
+
+### Fixed
+- **Context menu items highlight on mouse hover** — the right-click
+  popup (Cut / Copy / Paste / Delete / Select All) was stuck showing
+  the first enabled item as selected no matter where the mouse moved
+  inside the menu. Two issues:
+  - `EnableMouseCapture` only enables button + drag tracking
+    (`CSI ?1002h`), so bare-motion `MouseEventKind::Moved` events
+    never reached the app. Startup now also emits `CSI ?1003h`
+    (any-event tracking) and shutdown emits `CSI ?1003l`.
+  - The mouse loop's catch-all `_ => {}` arm dropped `Moved` even
+    if it had arrived. The handler now updates the highlight via a
+    new `ContextMenu::hover_at(col, row)` while the menu is visible.
+  Click-to-activate (`action_at`) and keyboard navigation are
+  unchanged.
+
+---
+
 ## [1.2.23] — 2026-05-06
 
 ### Fixed
