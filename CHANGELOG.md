@@ -4,6 +4,22 @@ All notable changes to AURA are documented here. Format based on [Keep a Changel
 
 ---
 
+## [1.2.25] — 2026-05-09
+
+### Internal
+- **Phase E second wedge: Task Runner extracted into `app/tasks.rs`** —
+  continues the ongoing decomposition of the monolithic
+  `crates/tui/src/app/mod.rs`. `run_task`, `get_tasks`, and
+  `auto_detect_tasks` (~348 lines covering Cargo / npm / Make / Go /
+  Mix / Dart / Zig / sbt / Stack-Cabal / Python detection) now live
+  in their own file. `mod.rs` shrinks 11,624 → 11,276 lines. No
+  behavior change: `App::run_task` and `App::get_tasks` are inherent
+  methods, so callers in `input.rs` resolve them identically. Mirrors
+  the `app/lifecycle.rs` + `app/updates.rs` seam established in the
+  first wedge (`9a67c2e`).
+
+---
+
 ## [1.2.24] — 2026-05-07
 
 ### Fixed
